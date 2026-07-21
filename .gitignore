@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# OrqPEG runtime data (operational, machine-local, may contain project paths/logs)
+data/projects/
+data/state/
+data/locks/
+data/logs/
+data/reviews/
+data/reports/
+data/artifacts/
+data/worktrees/
+
+# Local configuration (may contain absolute paths of the user's machine)
+config/global.json
+
+# Panel runtime
+.orqpeg-server.pid
+.orqpeg-server.port
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp
+tmp/
