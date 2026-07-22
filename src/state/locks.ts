@@ -31,6 +31,12 @@ import { validateIdentifier } from '../security/path-guard';
 /** Idade máxima do heartbeat antes de o lock ser considerado abandonado. */
 export const DEFAULT_LOCK_STALE_MS = 15 * 60 * 1000;
 
+/**
+ * Intervalo de renovação do heartbeat, com folga larga em relação ao tempo de
+ * expiração: mesmo que várias renovações falhem seguidas, o lock continua vivo.
+ */
+export const HEARTBEAT_INTERVAL_MS = 60 * 1000;
+
 /** Piso de segurança para `staleAfterMs`, evita roubo de lock recém-criado. */
 const MIN_LOCK_STALE_MS = 1000;
 
@@ -304,6 +310,22 @@ export async function withLock<T>(
   if (!acquired.ok) return acquired;
 
   const handle = acquired.value;
+
+  /*
+   * Heartbeat automático.
+   *
+   * `acquireLock` considera abandonado todo lock cujo heartbeat esteja parado há
+   * mais de `DEFAULT_LOCK_STALE_MS` (15 minutos). Uma execução real do OrqPEG
+   * dura muito mais que isso — só o timeout padrão do Claude é de 3600s — então,
+   * sem esta renovação periódica, um segundo processo consideraria o lock morto
+   * e passaria a operar no mesmo repositório em paralelo. O intervalo usa
+   * `unref` para nunca segurar o processo vivo por conta própria.
+   */
+  const beat = setInterval(() => {
+    heartbeat(handle);
+  }, HEARTBEAT_INTERVAL_MS);
+  beat.unref?.();
+
   try {
     const value = await fn();
     return ok(value);
@@ -315,6 +337,7 @@ export async function withLock<T>(
       error,
     );
   } finally {
+    clearInterval(beat);
     await handle.release();
   }
 }

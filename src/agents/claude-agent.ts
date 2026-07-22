@@ -14,6 +14,7 @@ import { ensureDir } from '../utils/paths';
 import { BLOCKING_API_ENV_VARS, assertChildEnvIsClean } from '../security/api-guard';
 import { buildSanitizedEnv } from '../security/env-sanitizer';
 import { runProcess } from './process-runner';
+import { buildFailureScanText } from './failure-scan';
 
 /**
  * Adaptador do Claude Code.
@@ -204,9 +205,15 @@ export async function runClaude(options: ClaudeRunOptions): Promise<Result<Agent
   // apenas quando houve falha. Isso evita falso positivo quando o próprio
   // trabalho do agente menciona termos como "authentication" ou "rate limit".
   const failed = processResult.status !== 'COMPLETED' || processResult.exitCode !== 0;
-  const scanText = [processResult.stderr, failed || payload.isError ? output : '']
-    .join('\n')
-    .toLowerCase();
+  // O eco da instrução é removido antes da varredura: o pacote de auditoria
+  // contém o próprio código-fonte do OrqPEG, que traz estes marcadores como
+  // literais e contaminaria a classificação.
+  const scanText = buildFailureScanText({
+    stderr: processResult.stderr,
+    output,
+    instruction: options.instruction,
+    includeOutput: failed || payload.isError,
+  });
 
   const { usageLimitReached, authRequired } = classifyClaudeFailure(scanText);
 

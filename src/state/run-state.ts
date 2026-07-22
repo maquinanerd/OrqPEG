@@ -52,12 +52,35 @@ const BASE_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
   // e encerra logo após a preparação, sem nunca chamar uma IA.
   PREPARING_WORKTREE: ['RUNNING_CLAUDE', 'COMPLETED'],
   RUNNING_CLAUDE: ['RUNNING_TESTS', 'BUILDING_REVIEW_PACKAGE'],
-  RUNNING_TESTS: ['BUILDING_REVIEW_PACKAGE', 'CHANGES_REQUESTED'],
+  /*
+   * `RUNNING_TESTS` é usado em DOIS momentos distintos do fluxo:
+   *   1. após cada tentativa de prompt  -> segue para BUILDING_REVIEW_PACKAGE;
+   *   2. na suíte COMPLETA antes do push -> segue para PUSHING / CREATING_PR,
+   *      ou para COMPLETED quando o projeto não publica.
+   * Só o primeiro caso estava mapeado, o que prendia a execução aqui. Falha em
+   * teste leva a BLOCKED, que é alcançável de qualquer estado ativo.
+   */
+  RUNNING_TESTS: [
+    'BUILDING_REVIEW_PACKAGE',
+    'CHANGES_REQUESTED',
+    'PUSHING',
+    'CREATING_PR',
+    'COMPLETED',
+  ],
   BUILDING_REVIEW_PACKAGE: ['RUNNING_CODEX'],
   RUNNING_CODEX: ['CHANGES_REQUESTED', 'PROMPT_APPROVED'],
   CHANGES_REQUESTED: ['RUNNING_CLAUDE', 'RUNNING_TESTS'],
-  PROMPT_APPROVED: ['COMMITTING', 'RUNNING_CLAUDE', 'PUSHING', 'CREATING_PR', 'COMPLETED'],
-  COMMITTING: ['RUNNING_CLAUDE', 'PUSHING', 'CREATING_PR', 'COMPLETED'],
+  PROMPT_APPROVED: [
+    'COMMITTING',
+    'RUNNING_CLAUDE',
+    'RUNNING_TESTS',
+    'PUSHING',
+    'CREATING_PR',
+    'COMPLETED',
+  ],
+  // `RUNNING_TESTS` é alcançável daqui porque, depois do último commit, o
+  // orquestrador executa a suíte COMPLETA antes de publicar a branch.
+  COMMITTING: ['RUNNING_CLAUDE', 'RUNNING_TESTS', 'PUSHING', 'CREATING_PR', 'COMPLETED'],
   PUSHING: [
     'CREATING_PR',
     'WAITING_CI',

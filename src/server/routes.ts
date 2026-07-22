@@ -84,6 +84,11 @@ export function createApiRouter(deps: RouterDeps): {
       handle: handleConsensus,
     },
     {
+      method: 'POST',
+      pattern: /^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/audit$/,
+      handle: handleTriggerAudit,
+    },
+    {
       method: 'GET',
       pattern: /^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/report$/,
       handle: handleReport,
@@ -388,6 +393,56 @@ async function handleConsensus(ctx: RouteContext): Promise<void> {
     checks: run.checks,
     finalTests: run.finalTests,
     mergeOutcome: run.mergeOutcome,
+  });
+}
+
+/**
+ * Dispara as auditorias finais de merge para uma execução já publicada.
+ *
+ * O painel oferece este botão quando a PR existe e o CI terminou. A execução
+ * roda em segundo plano e o resultado chega pelo barramento SSE; a resposta é
+ * 202 justamente porque as duas auditorias levam minutos.
+ */
+async function handleTriggerAudit(ctx: RouteContext): Promise<void> {
+  const projectId = requireId(ctx, 0);
+  if (projectId === null) return;
+  const runId = requireId(ctx, 1);
+  if (runId === null) return;
+
+  const loaded = loadRun(projectId, runId);
+  if (!loaded.ok) {
+    sendJson(ctx.res, 404, { error: loaded.error.message });
+    return;
+  }
+  const run = loaded.value;
+
+  if (!run.pullRequest) {
+    sendJson(ctx.res, 409, {
+      error:
+        'Esta execução ainda não possui pull request. As auditorias finais só fazem sentido sobre uma PR publicada.',
+    });
+    return;
+  }
+
+  const started = startRunInBackground({
+    projectId,
+    dryRun: false,
+    resumeRunId: runId,
+    config: ctx.deps.config,
+    logger: ctx.deps.logger,
+    events: ctx.deps.events,
+  });
+  if (!started.ok) {
+    sendJson(ctx.res, 409, { error: started.error.message });
+    return;
+  }
+
+  ctx.deps.events.publishRun(run, 'Auditorias finais solicitadas pelo painel.');
+  sendJson(ctx.res, 202, {
+    started: true,
+    runId,
+    headSha: run.pullRequest.headSha,
+    note: 'As duas auditorias independentes foram disparadas. O merge só ocorre se os 20 gates passarem.',
   });
 }
 

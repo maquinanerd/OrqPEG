@@ -14,6 +14,7 @@ import { ensureDir } from '../utils/paths';
 import { BLOCKING_API_ENV_VARS, assertChildEnvIsClean } from '../security/api-guard';
 import { buildSanitizedEnv } from '../security/env-sanitizer';
 import { commandExists, runProcess } from './process-runner';
+import { buildFailureScanText } from './failure-scan';
 
 /**
  * Adaptador do Codex CLI.
@@ -154,7 +155,16 @@ export async function runCodex(options: CodexRunOptions): Promise<Result<AgentRu
 
   // Só varremos a saída principal quando houve falha: assim o texto da própria
   // revisão (que pode citar "rate limit" ou "authentication") não gera engano.
-  const scanText = [processResult.stderr, failed ? output : ''].join('\n').toLowerCase();
+  // O Codex ecoa o prompt inteiro na stderr. Como o pacote de auditoria contém
+  // o código-fonte do OrqPEG — que traz estes marcadores como literais —, o eco
+  // precisa ser removido antes da varredura, sob pena de o adaptador classificar
+  // uma falha comum como limite de cota ou falta de autenticação.
+  const scanText = buildFailureScanText({
+    stderr: processResult.stderr,
+    output,
+    instruction: options.instruction,
+    includeOutput: failed,
+  });
 
   const usageLimitReached = containsAny(scanText, USAGE_LIMIT_MARKERS);
   const authRequired = !usageLimitReached && containsAny(scanText, AUTH_REQUIRED_MARKERS);
@@ -196,7 +206,9 @@ export async function runCodex(options: CodexRunOptions): Promise<Result<AgentRu
     return fail('TOOL_MISSING', codexMissingMessage(command), details);
   }
 
-  if (failed && containsAny(processResult.stderr.toLowerCase(), UNKNOWN_OPTION_MARKERS)) {
+  // Usa o texto já saneado do eco: "unknown option" também aparece como literal
+  // no código-fonte que trafega dentro do pacote de auditoria.
+  if (failed && containsAny(scanText, UNKNOWN_OPTION_MARKERS)) {
     return fail(
       'TOOL_MISSING',
       `A versão instalada do Codex CLI rejeitou os argumentos usados (${args.join(' ')}). ` +

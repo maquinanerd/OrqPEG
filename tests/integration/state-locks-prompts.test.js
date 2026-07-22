@@ -271,6 +271,69 @@ test('estado terminal não transiciona para estado ativo', () => {
   assert.equal(canTransition('CANCELLED', 'MERGING'), false);
 });
 
+/*
+ * Regressão: a suíte final de testes roda depois do último commit, e a
+ * transição COMMITTING -> RUNNING_TESTS não existia no mapa. Como transições
+ * inválidas são apenas registradas (não lançam), o defeito ficou invisível:
+ * o estado não avançava e o fluxo seguia por acidente. Ao corrigir a primeira
+ * lacuna, apareceu a segunda — RUNNING_TESTS não tinha saída para PUSHING —,
+ * e aí a execução ficava presa de verdade.
+ *
+ * Este teste percorre a cadeia real do orquestrador, ponta a ponta, para que
+ * nenhuma etapa do fluxo volte a depender de uma transição rejeitada.
+ */
+test('a cadeia completa do orquestrador é percorrível sem transição rejeitada', () => {
+  const caminhoFeliz = [
+    'IDLE', 'VALIDATING', 'PREPARING_WORKTREE',
+    'RUNNING_CLAUDE', 'RUNNING_TESTS', 'BUILDING_REVIEW_PACKAGE', 'RUNNING_CODEX',
+    'PROMPT_APPROVED', 'COMMITTING',
+    'RUNNING_TESTS',            // suíte COMPLETA antes de publicar
+    'PUSHING', 'CREATING_PR', 'WAITING_CI',
+    'RUNNING_CLAUDE_MERGE_AUDIT', 'RUNNING_CODEX_MERGE_AUDIT',
+    'MERGE_CONSENSUS_PENDING', 'MERGE_APPROVED', 'MERGING', 'MERGED',
+  ];
+
+  for (let i = 0; i < caminhoFeliz.length - 1; i += 1) {
+    const de = caminhoFeliz[i];
+    const para = caminhoFeliz[i + 1];
+    assert.equal(canTransition(de, para), true, `${de} -> ${para} deveria ser permitido`);
+  }
+});
+
+test('a cadeia percorrida de fato muda o estado (nenhuma transição é ignorada)', () => {
+  const project = makeProject();
+  let run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+
+  const cadeia = [
+    'VALIDATING', 'PREPARING_WORKTREE', 'RUNNING_CLAUDE', 'RUNNING_TESTS',
+    'BUILDING_REVIEW_PACKAGE', 'RUNNING_CODEX', 'PROMPT_APPROVED', 'COMMITTING',
+    'RUNNING_TESTS', 'PUSHING', 'CREATING_PR', 'WAITING_CI',
+  ];
+
+  for (const alvo of cadeia) {
+    run = transition(run, alvo, 'etapa ' + alvo);
+    assert.equal(run.state, alvo, `o estado deveria ter avançado para ${alvo}`);
+  }
+
+  const rejeitadas = run.events.filter((e) => e.message.startsWith('Transição rejeitada'));
+  assert.deepEqual(
+    rejeitadas.map((e) => e.message),
+    [],
+    'nenhuma etapa do fluxo real pode depender de uma transição rejeitada',
+  );
+});
+
+test('variantes do fluxo também são percorríveis', () => {
+  // Projeto que não publica: a suíte final leva direto a COMPLETED.
+  assert.equal(canTransition('RUNNING_TESTS', 'COMPLETED'), true);
+  // Suíte final reprovada: BLOCKED é alcançável de qualquer estado ativo.
+  assert.equal(canTransition('RUNNING_TESTS', 'BLOCKED'), true);
+  // Retomada após CI vermelho volta ao trabalho.
+  assert.equal(canTransition('CI_FAILED', 'RUNNING_CLAUDE'), true);
+  // Consenso não alcançado volta para correção.
+  assert.equal(canTransition('MERGE_CONSENSUS_PENDING', 'CHANGES_REQUESTED'), true);
+});
+
 test('progresso de prompt e agregados', () => {
   const project = makeProject();
   let run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });

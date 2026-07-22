@@ -21,7 +21,20 @@ import { formatDuration, nowIso } from '../utils/time';
  */
 
 /** Limite máximo de caracteres do patch dentro do pacote. */
-export const MAX_PATCH_CHARS = 2_000_000;
+/**
+ * Limite do patch embutido no pacote de revisão.
+ *
+ * Medido contra o Codex CLI 0.145.0 nesta plataforma: instruções de 400 KB são
+ * aceitas e 1,2 MB fazem o processo terminar com erro antes de produzir
+ * qualquer resposta. O limite fica com folga abaixo do ponto de falha para que
+ * o cabeçalho, os testes e o restante do pacote também caibam.
+ *
+ * O corte NUNCA é silencioso: quando ele acontece, o documento traz um aviso em
+ * destaque com o tamanho original, e o revisor é instruído a tratar o veredito
+ * como parcial. Melhor uma auditoria que se declara incompleta do que uma que
+ * aprova sem ter visto o código.
+ */
+export const MAX_PATCH_CHARS = 300_000;
 
 /** Quantidade de caracteres do fim de cada fluxo de saída de teste exibida. */
 export const TEST_OUTPUT_TAIL_CHARS = 6_000;

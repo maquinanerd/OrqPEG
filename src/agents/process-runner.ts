@@ -31,6 +31,12 @@ const COMMAND_EXISTS_TIMEOUT_MS = 20_000;
 const CMD_COMMAND_NOT_FOUND_EXIT_CODE = 9009;
 
 /**
+ * Só o começo da stderr é considerado ao procurar a mensagem de "comando não
+ * reconhecido" do cmd.exe. Ver a justificativa em `isCmdCommandNotFound`.
+ */
+const CMD_MARKER_SCAN_LIMIT = 512;
+
+/**
  * Mensagens do cmd.exe para "comando não reconhecido". O texto muda conforme o
  * idioma do Windows, por isso verificamos as variantes mais comuns (en/pt/es).
  */
@@ -523,7 +529,21 @@ function resolveStatus(input: StatusInput): ProcessStatus {
 function isCmdCommandNotFound(exitCode: number | null, stderrText: string): boolean {
   if (exitCode === CMD_COMMAND_NOT_FOUND_EXIT_CODE) return true;
   if (exitCode === null || exitCode === 0) return false;
-  const normalized = normalizeForMarkerMatch(stderrText);
+
+  /*
+   * A varredura é limitada ao INÍCIO da stderr de propósito.
+   *
+   * Quando o cmd.exe não encontra o comando, ele escreve a mensagem de erro
+   * imediatamente e nada mais é produzido. Já um programa que existe e falha
+   * depois pode emitir megabytes — e alguns CLIs (o Codex, por exemplo) ecoam o
+   * prompt inteiro na stderr. Como o OrqPEG envia o próprio código-fonte dentro
+   * do pacote de auditoria, e esse código contém estes marcadores como literais,
+   * varrer a stderr inteira fazia o runner "ler a si mesmo" e concluir que o
+   * comando não existia. Foi exatamente esse falso positivo que reprovou uma
+   * auditoria real do Codex com a mensagem errada de "CLI não encontrado".
+   */
+  const head = stderrText.slice(0, CMD_MARKER_SCAN_LIMIT);
+  const normalized = normalizeForMarkerMatch(head);
   return CMD_NOT_RECOGNIZED_MARKERS.some((marker) => normalized.includes(marker));
 }
 
