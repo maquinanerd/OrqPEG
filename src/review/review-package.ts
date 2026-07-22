@@ -53,6 +53,27 @@ export interface ReviewPackageInput {
   previousReview?: PromptReview | null;
 }
 
+/**
+ * Conteúdo de um prompt executado, para constar do pacote de auditoria.
+ *
+ * `RunRecord.prompts` guarda apenas metadados (`PromptProgress`: id, status,
+ * tentativas...). Sem o texto original, o auditor não tem como verificar
+ * atendimento ao escopo nem violação de área proibida — foi exatamente por isso
+ * que as duas auditorias finais bloquearam a entrega inicial. Quem monta o
+ * pacote passa a carregar os prompts aqui.
+ */
+export interface AuditedPromptContent {
+  id: string;
+  name: string;
+  /** Texto integral do prompt, como o autor escreveu. */
+  body: string;
+  scope: readonly string[];
+  outOfScope: readonly string[];
+  allowedAreas: readonly string[];
+  forbiddenAreas: readonly string[];
+  acceptanceCriteria: readonly string[];
+}
+
 export interface MergeAuditPackageInput {
   project: ProjectConfig;
   run: RunRecord;
@@ -62,6 +83,12 @@ export interface MergeAuditPackageInput {
   commitLog: string;
   diffStat: string;
   diffPatch: string;
+  /**
+   * Conteúdo dos prompts executados. Quando ausente ou vazio, o pacote declara
+   * a lacuna em destaque, para que o auditor saiba que não pode afirmar nada
+   * sobre aderência ao escopo — e não a assuma silenciosamente como satisfeita.
+   */
+  promptContents?: readonly AuditedPromptContent[];
 }
 
 /* ------------------------------------------------------------------------- */
@@ -269,6 +296,11 @@ export function buildMergeAuditPackage(input: MergeAuditPackageInput): string {
   }
   lines.push('');
 
+  lines.push('### 3.1 Conteúdo dos prompts (escopo e critérios de aceitação)');
+  lines.push('');
+  lines.push(...promptContentsSection(input.promptContents ?? []));
+  lines.push('');
+
   lines.push('## 4. Checks de CI');
   lines.push('');
   lines.push(...checksSection(input.checks, headSha));
@@ -308,6 +340,50 @@ export function buildMergeAuditPackage(input: MergeAuditPackageInput): string {
 /* ------------------------------------------------------------------------- */
 /* Seções reutilizadas                                                        */
 /* ------------------------------------------------------------------------- */
+
+/**
+ * Renderiza o texto dos prompts executados.
+ *
+ * A ausência é declarada em voz alta: um auditor que não recebeu o escopo não
+ * pode afirmar que o escopo foi respeitado, e o pacote precisa dizer isso em
+ * vez de deixar a lacuna passar como se fosse conformidade.
+ */
+function promptContentsSection(prompts: readonly AuditedPromptContent[]): string[] {
+  if (prompts.length === 0) {
+    return [
+      '> **LACUNA DECLARADA:** o conteúdo dos prompts não foi fornecido a este ' +
+        'pacote. Sem o texto original — escopo obrigatório, áreas permitidas, ' +
+        'áreas proibidas e critérios de aceitação — NÃO é possível verificar ' +
+        'aderência ao escopo nem identificar alteração fora da área permitida. ' +
+        'Trate `scopeAssessment.withinScope` como NÃO VERIFICÁVEL e registre ' +
+        'isso como problema bloqueador em vez de assumir conformidade.',
+    ];
+  }
+
+  const lines: string[] = [];
+  for (const prompt of prompts) {
+    lines.push(`#### ${prompt.id} — ${prompt.name}`);
+    lines.push('');
+    lines.push(...promptFieldList('Escopo obrigatório', prompt.scope));
+    lines.push(...promptFieldList('Fora do escopo', prompt.outOfScope));
+    lines.push(...promptFieldList('Áreas permitidas', prompt.allowedAreas));
+    lines.push(...promptFieldList('Áreas proibidas', prompt.forbiddenAreas));
+    lines.push(...promptFieldList('Critérios de aceitação', prompt.acceptanceCriteria));
+    lines.push('');
+    lines.push('<details><summary>Texto integral do prompt</summary>');
+    lines.push('');
+    lines.push(...fencedBlock(prompt.body, 'markdown'));
+    lines.push('');
+    lines.push('</details>');
+    lines.push('');
+  }
+  return lines;
+}
+
+function promptFieldList(title: string, items: readonly string[]): string[] {
+  if (items.length === 0) return [`- **${title}:** (não declarado no prompt)`];
+  return [`- **${title}:**`, ...items.map((item) => `  - ${item}`)];
+}
 
 function patchSection(patch: string): string[] {
   const source = typeof patch === 'string' ? patch : '';

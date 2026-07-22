@@ -33,6 +33,7 @@ import {
 } from '../state/run-state';
 import { withLock } from '../state/locks';
 import { buildMergeAuditPackage, buildReviewPackage } from '../review/review-package';
+import type { AuditedPromptContent } from '../review/review-package';
 import {
   loadSchema,
   parseMergeReview,
@@ -857,6 +858,10 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
   const diffStat = await ports.git.diffStat(ctx.workingDir, run.baseCommitSha ?? undefined);
   const diffPatch = await ports.git.diffPatch(ctx.workingDir, run.baseCommitSha ?? undefined);
 
+  // Os auditores precisam do TEXTO dos prompts para julgar aderência ao escopo:
+  // `run.prompts` guarda só metadados. Sem isto, ambos bloqueiam — corretamente.
+  const promptContents = collectPromptContents(ctx);
+
   const auditPackage = buildMergeAuditPackage({
     project,
     run,
@@ -866,6 +871,7 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
     commitLog: commitLog.ok ? commitLog.value : '',
     diffStat: diffStat.ok ? diffStat.value : '',
     diffPatch: diffPatch.ok ? diffPatch.value : '',
+    promptContents,
   });
 
   const headSha = currentPr.headSha;
@@ -1101,6 +1107,36 @@ function mapAgentErrorState(code: string): RunState {
     default:
       return 'BLOCKED';
   }
+}
+
+/**
+ * Lê do disco o texto de cada prompt da execução, para o pacote de auditoria.
+ *
+ * Um prompt ilegível não interrompe a auditoria: ele é omitido da lista, e a
+ * própria seção do pacote declara a lacuna ao auditor.
+ */
+function collectPromptContents(ctx: Context): AuditedPromptContent[] {
+  const contents: AuditedPromptContent[] = [];
+  for (const promptFile of ctx.prompts) {
+    const parsed = readPrompt(promptFile);
+    if (!parsed.ok) {
+      ctx.logger.warn(
+        `Não foi possível ler o prompt ${promptFile.id} para o pacote de auditoria: ${parsed.error.message}`,
+      );
+      continue;
+    }
+    contents.push({
+      id: parsed.value.id,
+      name: parsed.value.name,
+      body: parsed.value.rawBody,
+      scope: parsed.value.scope,
+      outOfScope: parsed.value.outOfScope,
+      allowedAreas: parsed.value.allowedAreas,
+      forbiddenAreas: parsed.value.forbiddenAreas,
+      acceptanceCriteria: parsed.value.acceptanceCriteria,
+    });
+  }
+  return contents;
 }
 
 function describeChecks(run: RunRecord): string {

@@ -12,6 +12,7 @@ import type {
   TestSuiteResult,
 } from '../types';
 import { nowIso } from '../utils/time';
+import { verifyTestEvidence } from '../tests-runner/evidence';
 
 /**
  * Gates de merge do OrqPEG.
@@ -492,6 +493,26 @@ function gateLocalTestsPassed(input: GateEvaluationInput): GateOutcome {
           ? `Os testes locais terminaram com status ${finalTests.status}. Comandos com falha: ${finalTests.failedCommands.join(', ')}.`
           : `Os testes locais terminaram com status ${finalTests.status}.`,
       evidence,
+    };
+  }
+
+  /*
+   * Um "PASSED" só vale se puder ter vindo de uma execução real.
+   *
+   * Numa auditoria real desta plataforma, um resultado montado à mão (duração
+   * de 1 ms, sem horários, com saída inventada) passou por este gate e só foi
+   * pego pelo auditor de IA. O gate agora rejeita evidência implausível por
+   * conta própria: aprovar merge com base em dado sintético é pior do que
+   * declarar que os testes não foram verificados.
+   */
+  const authenticity = verifyTestEvidence(finalTests);
+  if (!authenticity.authentic) {
+    return {
+      status: 'FAILED',
+      reason:
+        'Os testes locais se declaram aprovados, mas a evidência não é consistente com uma ' +
+        `execução real: ${authenticity.problems.map((p) => p.message).join(' ')}`,
+      evidence: { ...evidence, evidenceProblems: authenticity.problems },
     };
   }
 
