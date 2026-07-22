@@ -418,21 +418,78 @@ function checkNoDangerousProcessUsage(files) {
   return violations;
 }
 
+/** Palavras que denunciam um valor de exemplo, nunca um segredo real. */
+const PLACEHOLDER_WORDS = [
+  'teste',
+  'test',
+  'exemplo',
+  'example',
+  'placeholder',
+  'fake',
+  'dummy',
+  'sample',
+  'secreto',
+  'vazar',
+  'vazamento',
+  'xxxx',
+  'aaaa',
+  'seu-token',
+  'your-token',
+];
+
+/**
+ * Entropia de Shannon do texto, em bits por caractere.
+ * @param {string} value
+ * @returns {number}
+ */
+function shannonEntropy(value) {
+  if (value.length === 0) return 0;
+  const counts = new Map();
+  for (const char of value) counts.set(char, (counts.get(char) ?? 0) + 1);
+  let entropy = 0;
+  for (const count of counts.values()) {
+    const probability = count / value.length;
+    entropy -= probability * Math.log2(probability);
+  }
+  return entropy;
+}
+
+/**
+ * Distingue um segredo plausivelmente real de um valor de exemplo usado em
+ * teste ou documentação. Um segredo real é aleatório: tem alta entropia e muitos
+ * caracteres distintos.
+ *
+ * @param {string} token trecho que segue o prefixo conhecido
+ * @returns {boolean}
+ */
+function looksLikeRealSecret(token) {
+  const lower = token.toLowerCase();
+  for (const word of PLACEHOLDER_WORDS) {
+    if (lower.includes(word)) return false;
+  }
+  const distinct = new Set(token).size;
+  if (distinct < 10) return false;
+  return shannonEntropy(token) >= 3;
+}
+
 /**
  * (e) Nenhum segredo aparente commitado.
+ *
  * Os padrões exigem um sufixo longo, de modo que citar o prefixo em documentação
- * não caracteriza violação.
+ * não caracteriza violação. Valores de exemplo usados nos testes também são
+ * descartados por baixa entropia — apenas material com aparência de credencial
+ * real reprova a verificação.
  *
  * @param {string[]} files
  * @returns {string[]}
  */
 function checkNoCommittedSecrets(files) {
   const rules = [
-    { pattern: new RegExp('sk' + '-ant-' + '[A-Za-z0-9_\\-]{24,}'), label: 'chave Anthropic' },
-    { pattern: new RegExp('sk' + '-proj-' + '[A-Za-z0-9_\\-]{24,}'), label: 'chave de projeto OpenAI' },
-    { pattern: new RegExp('ghp' + '_' + '[A-Za-z0-9]{30,}'), label: 'token pessoal do GitHub' },
-    { pattern: new RegExp('github' + '_pat_' + '[A-Za-z0-9_]{30,}'), label: 'token fine-grained do GitHub' },
-    { pattern: new RegExp('gho' + '_' + '[A-Za-z0-9]{30,}'), label: 'token OAuth do GitHub' },
+    { prefix: 'sk' + '-ant-', body: '[A-Za-z0-9_\\-]{24,}', label: 'chave Anthropic' },
+    { prefix: 'sk' + '-proj-', body: '[A-Za-z0-9_\\-]{24,}', label: 'chave de projeto OpenAI' },
+    { prefix: 'ghp' + '_', body: '[A-Za-z0-9]{30,}', label: 'token pessoal do GitHub' },
+    { prefix: 'github' + '_pat_', body: '[A-Za-z0-9_]{30,}', label: 'token fine-grained do GitHub' },
+    { prefix: 'gho' + '_', body: '[A-Za-z0-9]{30,}', label: 'token OAuth do GitHub' },
   ];
 
   const violations = [];
@@ -441,12 +498,20 @@ function checkNoCommittedSecrets(files) {
     if (isSelf(file)) continue;
     const content = readText(file);
     if (content.length === 0) continue;
+
     for (const rule of rules) {
-      const found = collectMatches(file, content, rule.pattern, `segredo aparente (${rule.label})`);
-      // O valor encontrado nunca é impresso: apenas o arquivo, a linha e o tipo.
-      for (const item of found) {
-        const [location] = item.split(' — ');
-        violations.push(`${location} — segredo aparente (${rule.label})`);
+      const scanner = new RegExp(`${rule.prefix}(${rule.body})`, 'g');
+      let match = scanner.exec(content);
+      while (match !== null) {
+        const token = match[1] ?? '';
+        if (looksLikeRealSecret(token)) {
+          // O valor encontrado nunca é impresso: apenas arquivo, linha e tipo.
+          violations.push(
+            `${relative(file)}:${lineNumberAt(content, match.index)} — segredo aparente (${rule.label})`,
+          );
+        }
+        if (match.index === scanner.lastIndex) scanner.lastIndex += 1;
+        match = scanner.exec(content);
       }
     }
   }

@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "panel": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "openBrowserOnStart": true
+  },
+  "agents": {
+    "claudeCommand": "claude",
+    "codexCommand": "codex",
+    "claudeTimeoutSeconds": 3600,
+    "codexTimeoutSeconds": 1800,
+    "defaultClaudeModel": null,
+    "defaultCodexModel": null
+  },
+  "security": {
+    "blockWhenApiKeysPresent": true,
+    "strippedEnvVars": [
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "CODEX_API_KEY",
+      "ANTHROPIC_AUTH_TOKEN",
+      "OPENAI_API_KEY_PATH",
+      "ANTHROPIC_ADMIN_KEY"
+    ],
+    "warnEnvVars": [
+      "ANTHROPIC_BASE_URL",
+      "OPENAI_BASE_URL",
+      "ANTHROPIC_BEDROCK_BASE_URL",
+      "CLAUDE_CODE_USE_BEDROCK",
+      "CLAUDE_CODE_USE_VERTEX",
+      "OPENAI_ORGANIZATION"
+    ]
+  },
+  "git": {
+    "allowForcePush": false
+  },
+  "paths": {
+    "defaultWorktreeRoot": null
+  }
+}
