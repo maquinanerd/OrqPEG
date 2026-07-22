@@ -99,6 +99,10 @@ function makeProject(overrides = {}) {
 }
 
 function promptReviewJson(verdict = 'APPROVED', extra = {}) {
+  // Um pedido de mudança PRECISA trazer ação concreta: o Loop Guard recusa
+  // CHANGES_REQUESTED vago, porque encaminhá-lo produziria correção às cegas.
+  const actions =
+    verdict === 'CHANGES_REQUESTED' ? ['Adicionar validação do caso de borda X.'] : [];
   return JSON.stringify({
     verdict,
     summary: 'Revisão automatizada de teste.',
@@ -106,7 +110,7 @@ function promptReviewJson(verdict = 'APPROVED', extra = {}) {
     meetsPromptRequirements: verdict === 'APPROVED',
     blockingIssues: [],
     nonBlockingIssues: [],
-    requiredActions: [],
+    requiredActions: actions,
     scopeAssessment: { withinScope: true, unexpectedChanges: [] },
     testsAssessment: { localTestsPassed: true, coverageAcceptable: true },
     riskAssessment: { level: 'low', summary: 'Baixo risco.' },

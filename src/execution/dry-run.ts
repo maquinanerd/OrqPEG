@@ -7,6 +7,7 @@ import { getProject } from '../projects/project-store';
 import { discoverPrompts } from '../prompts/prompt-store';
 import { defaultWorktreePath } from '../git/worktree';
 import { GATE_DEFINITIONS } from '../merge/gates';
+import { describeLoopGuardPolicy } from './loop-guard-config';
 import { compactStamp } from '../utils/time';
 
 /**
@@ -29,6 +30,7 @@ export interface DryRunPlan {
   gitPolicy: string[];
   pullRequestPolicy: string[];
   mergePolicy: string[];
+  loopGuardPolicy: Array<[string, string]>;
   gates: Array<{ index: number; id: string; title: string }>;
   apiGuard: { presentKeys: string[]; warnKeys: string[]; blocked: boolean };
   warnings: string[];
@@ -117,6 +119,7 @@ export function buildDryRunPlan(
       `invalidar aprovação se o head SHA mudar: ${yesNo(project.merge.invalidateApprovalOnHeadChange)}`,
       `apagar branch após merge: ${yesNo(project.merge.deleteBranchAfterMerge)}`,
     ],
+    loopGuardPolicy: describeLoopGuardPolicy(project.execution.loopGuard),
     gates: GATE_DEFINITIONS.map((gate) => ({
       index: gate.index,
       id: gate.id,
@@ -179,6 +182,12 @@ export function renderDryRunPlan(plan: DryRunPlan): string {
   lines.push('');
   lines.push('  POLÍTICA DE MERGE');
   for (const item of plan.mergePolicy) lines.push(`    · ${item}`);
+  lines.push('');
+
+  lines.push('  POLÍTICA ANTI-LOOP');
+  for (const [label, value] of plan.loopGuardPolicy) {
+    lines.push(`    ${label.padEnd(30, ' ')} ${value}`);
+  }
   lines.push('');
 
   lines.push('  GATES OBRIGATÓRIOS DO MERGE');

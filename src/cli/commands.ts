@@ -20,6 +20,7 @@ import { findActiveRun, listRuns, requestCancel, requestPause, saveRun } from '.
 import { runProject, describeRunState } from '../execution/orchestrator';
 import { createDefaultPorts } from '../execution/default-ports';
 import { buildDryRunPlan, renderDryRunPlan } from '../execution/dry-run';
+import { defaultLoopGuardConfig } from '../execution/loop-guard-config';
 import { runDiagnostics, renderDiagnosticReport } from './diagnostics';
 import { startPanelServer } from '../server/http-server';
 import { abortAll } from '../server/run-manager';
@@ -352,6 +353,7 @@ async function interactiveAddProject(): Promise<number> {
       maxReviewerRetries: 2,
       continueAfterApproval: true,
       stopOnBlocked: true,
+      loopGuard: defaultLoopGuardConfig(),
     },
     editor: editor.length > 0 ? editor : null,
   });

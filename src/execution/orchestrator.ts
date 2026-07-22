@@ -3,8 +3,10 @@ import type {
   AttemptSummary,
   GlobalConfig,
   Logger,
+  LoopGuardDecision,
   MergeReview,
   MergeReviewRecord,
+  PromptBudget,
   ProjectConfig,
   PromptFile,
   PromptReview,
@@ -14,8 +16,15 @@ import type {
   TestSuiteResult,
 } from '../types';
 import { fail, ok } from '../utils/errors';
-import { writeArtifactSync } from '../utils/fs-atomic';
-import { attemptArtifactDir, ensureDir, mergeAuditArtifactDir } from '../utils/paths';
+import { readTextSync, writeArtifactSync } from '../utils/fs-atomic';
+import {
+  attemptArtifactDir,
+  ensureDir,
+  mergeAuditArtifactDir,
+  projectArtifactsDir,
+  projectDir,
+  projectReportsDir,
+} from '../utils/paths';
 import { compactStamp, nowIso } from '../utils/time';
 import { buildRunBranchName } from '../security/branch-name';
 import { inspectApiEnvironment } from '../security/api-guard';
@@ -53,6 +62,22 @@ import { computeConsensus } from '../merge/consensus';
 import { defaultWorktreePath } from '../git/worktree';
 import { remoteMatchesRepository } from '../git/git';
 import { writeRunReport } from '../reports/report-generator';
+import { renderLoopGuardReport } from '../reports/loop-guard-report';
+import {
+  assertRunCanContinue,
+  createPromptBudget,
+  describeDecision,
+  evaluateLoopGuard,
+} from './loop-guard';
+import {
+  contentHash,
+  diffFingerprint,
+  measureDiff,
+  projectConfigHash,
+  pushBounded,
+  reviewFingerprint,
+  testFailureFingerprint,
+} from './fingerprints';
 import { renderPullRequestBody } from './pr-body';
 import type { OrchestratorPorts } from './ports';
 
@@ -86,6 +111,19 @@ interface Context {
   onUpdate: ((run: RunRecord) => void) | undefined;
   prompts: PromptFile[];
   workingDir: string;
+
+  /* --- Evidência corrente, alimentada a cada tentativa -------------------
+   * O Loop Guard precisa comparar a tentativa atual com as anteriores. Estes
+   * campos guardam o que a última volta produziu, para que a decisão seja
+   * tomada sobre fatos e não sobre suposição.
+   * -------------------------------------------------------------------- */
+  /** Hash do prompt no instante em que a execução começou, por prompt. */
+  promptSnapshots: Map<string, string>;
+  lastScopeViolations: string[];
+  lastForbiddenViolations: string[];
+  lastChangedFileCount: number;
+  lastChangedLineCount: number;
+  lastReviewEvidenceComplete: boolean;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -159,6 +197,12 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
     onUpdate: options.onUpdate,
     prompts,
     workingDir: run.workingDirectory ?? project.repositoryPath,
+    promptSnapshots: snapshotPrompts(prompts),
+    lastScopeViolations: [],
+    lastForbiddenViolations: [],
+    lastChangedFileCount: 0,
+    lastChangedLineCount: 0,
+    lastReviewEvidenceComplete: true,
   };
 
   try {
@@ -232,7 +276,14 @@ async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRec
 /* ------------------------------------------------------------------------- */
 
 async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord>> {
-  let run = save(ctx, transition(input, 'VALIDATING', 'Validando configuração e ferramentas.'));
+  /* Congela contexto e configuração: alteração posterior invalida a execução
+     em vez de ser absorvida silenciosamente no meio das tentativas. */
+  const contextRaw = readTextSync(path.join(projectDir(input.projectId), 'PROJECT-CONTEXT.md'));
+  let run = save(ctx, {
+    ...transition(input, 'VALIDATING', 'Validando configuração e ferramentas.'),
+    projectContextHash: contextRaw.ok ? contentHash(contextRaw.value) : '',
+    projectConfigHash: projectConfigHash(ctx.project),
+  });
 
   const { project, ports, config, logger } = ctx;
 
@@ -378,10 +429,28 @@ async function executeSinglePrompt(
   let lastTests: TestSuiteResult | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    /* ---------------------------------------------------------------------
+     * Portão do Loop Guard.
+     *
+     * Nenhuma chamada de IA acontece sem passar por aqui. A decisão é tomada
+     * ANTES de gastar a assinatura, e a ausência de motivo para parar não é
+     * autorização: `assertRunCanContinue` exige aprovação explícita.
+     * ------------------------------------------------------------------- */
+    const gateDecision = decideNextAttempt(ctx, run, promptFile.id, attempt, {
+      previousReview,
+      lastTests,
+    });
+    const gate = assertRunCanContinue(gateDecision);
+    if (!gate.canContinue) {
+      run = save(ctx, applyLoopGuardStop(ctx, run, promptFile.id, gateDecision));
+      return ok(run);
+    }
+
     const artifactDir = ensureDir(
       attemptArtifactDir(project.id, run.runId, promptFile.id, attempt),
     );
     const attemptStartedAt = nowIso();
+    run = save(ctx, startPromptClock(run, promptFile.id, attemptStartedAt));
 
     writeArtifactSync(path.join(artifactDir, 'prompt-original.md'), parsed.rawBody);
 
@@ -446,6 +515,9 @@ async function executeSinglePrompt(
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
 
+    // A chamada é contabilizada mesmo quando falha: ela consumiu orçamento.
+    run = save(ctx, recordAgentCall(run, promptFile.id, 'claude'));
+
     if (!claude.ok) {
       const state = mapAgentErrorState(claude.error.code);
       run = save(ctx, {
@@ -483,6 +555,28 @@ async function executeSinglePrompt(
     const diffPatch = await ports.git.diffPatch(ctx.workingDir, run.baseCommitSha ?? undefined);
 
     const changedFiles = changed.ok ? changed.value : [];
+
+    /* Assinatura do que o executor produziu nesta volta. É o que permite
+       detectar, na próxima, que nada mudou ou que o código está oscilando. */
+    const patchText = diffPatch.ok ? diffPatch.value : '';
+    const currentDiffPrint = diffFingerprint(patchText);
+    const measured = measureDiff(patchText);
+
+    run = save(
+      ctx,
+      withBudget(run, promptFile.id, (budget) => ({
+        ...budget,
+        diffFingerprints: pushBounded(budget.diffFingerprints, currentDiffPrint),
+      })),
+    );
+
+    ctx.lastChangedFileCount = measured.files;
+    ctx.lastChangedLineCount = measured.lines;
+    const violations = classifyScope(parsed, changedFiles);
+    ctx.lastScopeViolations = violations.outsideAllowed;
+    ctx.lastForbiddenViolations = violations.forbidden;
+    ctx.lastReviewEvidenceComplete =
+      changedFiles.length === 0 || patchText.trim().length > 0;
     writeArtifactSync(path.join(artifactDir, 'changed-files.txt'), changedFiles.join('\n'));
     writeArtifactSync(
       path.join(artifactDir, 'git-status.txt'),
@@ -540,6 +634,8 @@ async function executeSinglePrompt(
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
 
+    run = save(ctx, recordAgentCall(run, promptFile.id, 'codex'));
+
     if (!codex.ok) {
       // Sem revisor não há aprovação possível: o prompt fica bloqueado. Jamais
       // aprovamos por ausência do revisor.
@@ -585,6 +681,26 @@ async function executeSinglePrompt(
     }
 
     previousReview = review.value;
+
+    /* Assinaturas de revisão e de falha alimentam os detectores de repetição
+       e de oscilação na próxima volta do laço. */
+    run = save(
+      ctx,
+      withBudget(run, promptFile.id, (budget) => {
+        const reviewPrint = reviewFingerprint(review.value);
+        const testPrint = testFailureFingerprint(tests);
+        return {
+          ...budget,
+          reviewFingerprints: reviewPrint
+            ? pushBounded(budget.reviewFingerprints, reviewPrint)
+            : budget.reviewFingerprints,
+          testFailureFingerprints: testPrint
+            ? pushBounded(budget.testFailureFingerprints, testPrint)
+            : budget.testFailureFingerprints,
+        };
+      }),
+    );
+
     const approved = tests.passed && reviewIsApproval(review.value);
 
     writeAttemptSummary(ctx, run, promptFile, attempt, attemptStartedAt, {
@@ -1062,6 +1178,254 @@ function toRecord(
 /* Auxiliares                                                                 */
 /* ------------------------------------------------------------------------- */
 
+/* ------------------------------------------------------------------------- */
+/* Loop Guard — integração                                                    */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Congela o conteúdo de cada prompt no início da execução.
+ *
+ * Toda tentativa posterior é comparada com este instantâneo: editar o arquivo
+ * no meio do caminho invalida a execução em vez de misturar requisitos novos
+ * com tentativas feitas sob requisitos antigos.
+ */
+/**
+ * Confronta os arquivos alterados com as áreas declaradas no prompt.
+ *
+ * Regra de leitura: área proibida é sempre violação. Área permitida só é
+ * cobrada quando o prompt declara alguma — um prompt sem `# Áreas permitidas`
+ * declara escopo global, e nesse caso não há do que reclamar. O contrário
+ * transformaria todo prompt sem essa seção em violação permanente.
+ */
+function classifyScope(
+  prompt: ParsedPrompt,
+  changedFiles: readonly string[],
+): { outsideAllowed: string[]; forbidden: string[] } {
+  const normalize = (value: string): string => value.replace(/\\/g, '/').replace(/^\.\//, '');
+  const areas = (list: readonly string[]): string[] =>
+    list.map(normalize).map((area) => area.replace(/\/+$/, '')).filter((area) => area.length > 0);
+
+  const allowed = areas(prompt.allowedAreas);
+  const forbiddenAreas = areas(prompt.forbiddenAreas);
+
+  const matches = (file: string, area: string): boolean =>
+    file === area || file.startsWith(`${area}/`);
+
+  const forbidden: string[] = [];
+  const outsideAllowed: string[] = [];
+
+  for (const raw of changedFiles) {
+    const file = normalize(raw);
+    if (forbiddenAreas.some((area) => matches(file, area))) {
+      forbidden.push(file);
+      continue;
+    }
+    if (allowed.length > 0 && !allowed.some((area) => matches(file, area))) {
+      outsideAllowed.push(file);
+    }
+  }
+
+  return { outsideAllowed, forbidden };
+}
+
+function snapshotPrompts(prompts: readonly PromptFile[]): Map<string, string> {
+  const snapshots = new Map<string, string>();
+  for (const prompt of prompts) {
+    const raw = readTextSync(prompt.absolutePath);
+    snapshots.set(prompt.id, raw.ok ? contentHash(raw.value) : '');
+  }
+  return snapshots;
+}
+
+function budgetOf(run: RunRecord, promptId: string): PromptBudget {
+  return (
+    run.budgets.find((entry) => entry.promptId === promptId) ?? createPromptBudget(promptId)
+  );
+}
+
+function withBudget(
+  run: RunRecord,
+  promptId: string,
+  update: (budget: PromptBudget) => PromptBudget,
+): RunRecord {
+  const existing = run.budgets.find((entry) => entry.promptId === promptId);
+  const next = update(existing ?? createPromptBudget(promptId));
+  const budgets = existing
+    ? run.budgets.map((entry) => (entry.promptId === promptId ? next : entry))
+    : [...run.budgets, next];
+  return { ...run, budgets };
+}
+
+/** Marca o início do relógio do prompt sem zerar o tempo já consumido. */
+function startPromptClock(run: RunRecord, promptId: string, at: string): RunRecord {
+  return withBudget(run, promptId, (budget) => ({
+    ...budget,
+    attempts: budget.attempts + 1,
+    startedAt: budget.startedAt ?? at,
+  }));
+}
+
+/** Contabiliza uma chamada de IA. Chamado imediatamente após cada invocação. */
+export function recordAgentCall(
+  run: RunRecord,
+  promptId: string,
+  agent: 'claude' | 'codex',
+): RunRecord {
+  return withBudget(run, promptId, (budget) => ({
+    ...budget,
+    claudeCalls: budget.claudeCalls + (agent === 'claude' ? 1 : 0),
+    codexCalls: budget.codexCalls + (agent === 'codex' ? 1 : 0),
+  }));
+}
+
+/**
+ * Reúne a evidência da tentativa anterior e consulta o Loop Guard.
+ *
+ * Os hashes de prompt, contexto e configuração são recalculados a cada volta:
+ * é assim que uma edição feita no meio da execução é detectada em vez de
+ * silenciosamente misturada às tentativas já realizadas.
+ */
+function decideNextAttempt(
+  ctx: Context,
+  run: RunRecord,
+  promptId: string,
+  nextAttempt: number,
+  evidence: { previousReview: PromptReview | null; lastTests: TestSuiteResult | null },
+): LoopGuardDecision {
+  const budget = budgetOf(run, promptId);
+  const loopConfig = ctx.project.execution.loopGuard;
+
+  const promptFile = ctx.prompts.find((p) => p.id === promptId);
+  const currentPromptRaw = promptFile ? readTextSync(promptFile.absolutePath) : null;
+  const promptHashNow =
+    currentPromptRaw && currentPromptRaw.ok ? contentHash(currentPromptRaw.value) : '';
+
+  const contextRaw = readTextSync(
+    path.join(projectDir(ctx.project.id), 'PROJECT-CONTEXT.md'),
+  );
+  const contextHashNow = contextRaw.ok ? contentHash(contextRaw.value) : '';
+
+  const diffs = budget.diffFingerprints;
+  const previousDiff = diffs.length >= 2 ? diffs[diffs.length - 2] ?? null : null;
+  const currentDiff = diffs.length >= 1 ? diffs[diffs.length - 1] ?? null : null;
+
+  return evaluateLoopGuard({
+    config: loopConfig,
+    budget,
+    maxAttemptsPerPrompt: ctx.project.execution.maxAttemptsPerPrompt,
+    nextAttempt,
+    nowMs: Date.now(),
+    runStartedAtMs: Date.parse(run.createdAt) || Date.now(),
+
+    pauseRequested: run.pauseRequested,
+    cancelRequested: run.cancelRequested,
+    aborted: ctx.signal?.aborted === true,
+
+    lastAgentErrorCode: run.lastError ? run.lastError.code : null,
+
+    promptHashNow,
+    promptHashSnapshot: ctx.promptSnapshots.get(promptId) ?? '',
+    contextHashNow,
+    contextHashSnapshot: run.projectContextHash ?? '',
+    configHashNow: projectConfigHash(ctx.project),
+    configHashSnapshot: run.projectConfigHash ?? '',
+
+    previousDiffFingerprint: previousDiff,
+    currentDiffFingerprint: currentDiff,
+    reviewFingerprint: reviewFingerprint(evidence.previousReview),
+    testFailureFingerprint: testFailureFingerprint(evidence.lastTests),
+    lastReview: evidence.previousReview,
+
+    scopeViolations: ctx.lastScopeViolations,
+    forbiddenViolations: ctx.lastForbiddenViolations,
+    changedFileCount: ctx.lastChangedFileCount,
+    changedLineCount: ctx.lastChangedLineCount,
+
+    reviewEvidenceComplete: ctx.lastReviewEvidenceComplete,
+
+    overrideAvailable: hasUnconsumedOverride(run, promptId),
+  });
+}
+
+function hasUnconsumedOverride(run: RunRecord, promptId: string): boolean {
+  return run.overrides.some(
+    (override) => override.promptId === promptId && override.consumed === false,
+  );
+}
+
+/**
+ * Aplica a parada: registra a decisão, bloqueia o prompt e leva a execução ao
+ * estado `LOOP_GUARD_TRIGGERED`. O trabalho não é desfeito — worktree, branch,
+ * arquivos e artefatos permanecem intactos para inspeção humana.
+ */
+function applyLoopGuardStop(
+  ctx: Context,
+  run: RunRecord,
+  promptId: string,
+  decision: LoopGuardDecision,
+): RunRecord {
+  ctx.logger.warn(describeDecision(decision));
+
+  const withRecord = withBudget(run, promptId, (budget) => ({
+    ...budget,
+    lastTrigger: decision.trigger,
+    lastDecisionAt: nowIso(),
+  }));
+
+  const marked = updatePromptProgress(withRecord, promptId, { status: 'BLOCKED' });
+
+  const nextState: RunState =
+    decision.trigger === 'USER_CANCELLED'
+      ? 'CANCELLED'
+      : decision.trigger === 'USER_PAUSED'
+        ? 'INTERRUPTED'
+        : decision.trigger === 'AUTH_REQUIRED'
+          ? 'AUTH_REQUIRED'
+          : decision.trigger === 'USAGE_LIMIT_REACHED'
+            ? 'USAGE_LIMIT_REACHED'
+            : 'LOOP_GUARD_TRIGGERED';
+
+  const message = `Prompt ${promptId}: ${decision.trigger ?? 'parada'} — ${decision.reason}`;
+
+  writeLoopGuardArtifacts(ctx, run, promptId, decision);
+
+  return {
+    ...transition(marked, nextState, message, { trigger: decision.trigger }),
+    lastLoopGuard: decision,
+  };
+}
+
+/** Grava a evidência da parada junto aos artefatos e ao relatório da execução. */
+function writeLoopGuardArtifacts(
+  ctx: Context,
+  run: RunRecord,
+  promptId: string,
+  decision: LoopGuardDecision,
+): void {
+  const budget = budgetOf(run, promptId);
+  const dir = ensureDir(
+    path.join(projectArtifactsDir(ctx.project.id), run.runId, promptId),
+  );
+  writeArtifactSync(
+    path.join(dir, 'loop-guard.json'),
+    `${JSON.stringify({ decision, budget, at: nowIso() }, null, 2)}\n`,
+  );
+
+  const reportDir = ensureDir(
+    path.join(projectReportsDir(ctx.project.id), run.runId, 'prompts', promptId),
+  );
+  writeArtifactSync(
+    path.join(reportDir, 'LOOP-GUARD.md'),
+    renderLoopGuardReport({
+      project: ctx.project,
+      run,
+      promptId,
+      decision,
+      budget,
+    }),
+  );
+}
+
 /**
  * A auditoria final só faz sentido quando a publicação chegou até o fim com
  * sucesso: PR aberta e CI aprovado. Qualquer estado de parada interrompe aqui.
@@ -1251,6 +1615,7 @@ export function describeRunState(state: RunState): string {
     INTERRUPTED: 'interrompido',
     FAILED: 'falhou',
     COMPLETED: 'concluído',
+    LOOP_GUARD_TRIGGERED: 'interrompido pela proteção contra looping',
     CANCELLED: 'cancelado',
   };
   return labels[state];

@@ -11,6 +11,7 @@ import type {
 import { fail, ok } from '../utils/errors';
 import { fileExists, listFilesSync, readJsonSync, writeJsonAtomicSync } from '../utils/fs-atomic';
 import { naturalCompare } from '../utils/natural-sort';
+import { createPromptBudget } from '../execution/loop-guard';
 import { ensureDir, projectStateDir, runStatePath } from '../utils/paths';
 import { compactStamp, nowIso } from '../utils/time';
 import { validateIdentifier } from '../security/path-guard';
@@ -114,6 +115,15 @@ const BASE_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
   USAGE_LIMIT_REACHED: [],
   INTERRUPTED: [],
   FAILED: [],
+  /* Parada consciente do Loop Guard. Sai dela por decisão humana: retomar o
+     fluxo, pular o prompt ou encerrar. Nunca automaticamente. */
+  LOOP_GUARD_TRIGGERED: [
+    'RUNNING_CLAUDE',
+    'RUNNING_TESTS',
+    'BLOCKED',
+    'COMPLETED',
+    'CANCELLED',
+  ],
   COMPLETED: [],
   CANCELLED: [],
 };
@@ -149,6 +159,9 @@ const RESUMABLE_STATES: ReadonlySet<RunState> = new Set<RunState>([
   'AUTH_REQUIRED',
   'USAGE_LIMIT_REACHED',
   'CI_FAILED',
+  // Retomável apenas por ação humana explícita: o Loop Guard parou de
+  // propósito, e a retomada preserva o orçamento já consumido.
+  'LOOP_GUARD_TRIGGERED',
 ]);
 
 /** Estados do fluxo normal (nem terminais, nem de exceção). */
@@ -322,6 +335,16 @@ export function createRun(input: CreateRunInput): RunRecord {
     consensus: null,
     gateReport: null,
     mergeOutcome: null,
+
+    // Um orçamento por prompt, criado já na abertura da execução: retomar
+    // depois nunca recria contadores zerados.
+    budgets: prompts.map((prompt) => createPromptBudget(prompt.promptId)),
+    overrides: [],
+    lastLoopGuard: null,
+    ciRepairCycles: 0,
+    mergeCorrectionCycles: 0,
+    projectContextHash: null,
+    projectConfigHash: null,
 
     events: [initialEvent],
     lastError: null,

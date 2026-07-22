@@ -13,6 +13,10 @@ import { validateBranchName } from '../security/branch-name';
 import { validateAbsolutePath } from '../security/path-guard';
 import { remoteMatchesRepository } from '../git/git';
 import { isValidSlug, toSlug } from './slug';
+import {
+  normalizeLoopGuardConfig,
+  validateLoopGuardConfig,
+} from '../execution/loop-guard-config';
 
 /**
  * Validação de projetos.
@@ -202,6 +206,13 @@ function validateExecutionSection(value: unknown): string[] {
   const maxRetries = value['maxReviewerRetries'];
   if (!Number.isInteger(maxRetries) || (typeof maxRetries === 'number' && maxRetries < 0)) {
     issues.push('execution.maxReviewerRetries: deve ser um número inteiro maior ou igual a 0.');
+  }
+
+  /* A seção do Loop Guard é opcional no arquivo — projetos anteriores à sua
+     introdução continuam válidos e recebem os padrões seguros. O que não é
+     aceito é uma seção presente com combinação incoerente de limites. */
+  if (value['loopGuard'] !== undefined) {
+    issues.push(...validateLoopGuardConfig(normalizeLoopGuardConfig(value['loopGuard'])));
   }
   return issues;
 }
@@ -540,6 +551,9 @@ export function normalizeProjectConfig(
       maxReviewerRetries: pickInteger(execution?.maxReviewerRetries, 2, 0),
       continueAfterApproval: execution?.continueAfterApproval ?? true,
       stopOnBlocked: execution?.stopOnBlocked ?? true,
+      // Projetos cadastrados antes do Loop Guard não têm esta seção: a
+      // normalização preenche com os padrões seguros, sem quebrar o cadastro.
+      loopGuard: normalizeLoopGuardConfig(execution?.loopGuard),
     },
     git: {
       commitAfterApproval: git?.commitAfterApproval ?? true,

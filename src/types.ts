@@ -134,11 +134,197 @@ export interface ProjectCommandsConfig {
   timeoutSeconds: number;
 }
 
+/**
+ * Política de proteção contra looping.
+ *
+ * Contar tentativas não basta: um ciclo pode repetir o mesmo diff, receber a
+ * mesma revisão e falhar no mesmo teste indefinidamente sem nunca estourar o
+ * contador. Estes orçamentos e detectores existem para que nenhuma repetição
+ * seja ilimitada e nenhuma assinatura seja consumida sem progresso comprovado.
+ */
+export interface LoopGuardConfig {
+  enabled: boolean;
+
+  /* Orçamento de chamadas de IA, por prompt. */
+  maxClaudeCallsPerPrompt: number;
+  maxCodexCallsPerPrompt: number;
+  maxTotalAgentCallsPerPrompt: number;
+
+  /* Orçamento de tempo. */
+  maxPromptDurationMinutes: number;
+  maxRunDurationMinutes: number;
+
+  /* Detecção de repetição. */
+  maxConsecutiveNoProgress: number;
+  maxRepeatedReviewFingerprints: number;
+  maxRepeatedTestFailureFingerprints: number;
+
+  /* Detectores booleanos. */
+  detectDiffOscillation: boolean;
+  detectReviewOscillation: boolean;
+  stopOnPromptMutation: boolean;
+  stopOnContextMutation: boolean;
+  stopOnScopeViolation: boolean;
+
+  /* Orçamento de tamanho do diff. `null` desativa o limite. */
+  maxChangedFilesPerPrompt: number | null;
+  maxChangedLinesPerPrompt: number | null;
+
+  /* Ciclos de correção fora do laço do prompt. */
+  maxManualOverridesPerPrompt: number;
+  maxCiRepairCycles: number;
+  maxMergeCorrectionCycles: number;
+
+  /* Espera do CI. */
+  ciPollIntervalSeconds: number;
+  ciPollMaxIntervalSeconds: number;
+  ciWaitTimeoutMinutes: number;
+
+  /* Retentativas de formato do revisor, separadas da correção de código. */
+  maxReviewFormatRetries: number;
+}
+
 export interface ProjectExecutionConfig {
   maxAttemptsPerPrompt: number;
   maxReviewerRetries: number;
   continueAfterApproval: boolean;
   stopOnBlocked: boolean;
+  loopGuard: LoopGuardConfig;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Loop Guard                                                                 */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Motivos pelos quais uma nova tentativa automática pode ser recusada.
+ * Enumerados aqui para que nenhum módulo use string solta.
+ */
+export type LoopGuardTrigger =
+  | 'MAX_ATTEMPTS_REACHED'
+  | 'CLAUDE_CALL_BUDGET_EXHAUSTED'
+  | 'CODEX_CALL_BUDGET_EXHAUSTED'
+  | 'AGENT_CALL_BUDGET_EXHAUSTED'
+  | 'PROMPT_TIME_BUDGET_EXHAUSTED'
+  | 'RUN_TIME_BUDGET_EXHAUSTED'
+  | 'NO_PROGRESS'
+  | 'REPEATED_REVIEW_ISSUES'
+  | 'REPEATED_TEST_FAILURE'
+  | 'OSCILLATION_DETECTED'
+  | 'REVIEW_OSCILLATION_DETECTED'
+  | 'PROMPT_CHANGED_DURING_RUN'
+  | 'PROJECT_CONTEXT_CHANGED'
+  | 'SCOPE_VIOLATION'
+  | 'FORBIDDEN_AREA_CHANGED'
+  | 'DIFF_BUDGET_EXCEEDED'
+  | 'INCOMPLETE_REVIEW_EVIDENCE'
+  | 'REVIEW_FORMAT_RETRIES_EXHAUSTED'
+  | 'INVALID_CHANGES_REQUEST'
+  | 'AUTH_REQUIRED'
+  | 'USAGE_LIMIT_REACHED'
+  | 'TOOL_MISSING'
+  | 'PROCESS_TIMEOUT'
+  | 'REPEATED_CI_FAILURE'
+  | 'CI_WAIT_TIMEOUT'
+  | 'MERGE_CORRECTION_BUDGET_EXHAUSTED'
+  | 'USER_PAUSED'
+  | 'USER_CANCELLED';
+
+/**
+ * `hard_stop` exige que a causa seja corrigida fora do laço: nenhum botão de
+ * "continuar" o dispensa. `soft_stop` admite, no máximo, uma tentativa extra
+ * autorizada explicitamente por uma pessoa.
+ */
+export type LoopGuardSeverity = 'none' | 'soft_stop' | 'hard_stop';
+
+export type LoopGuardNextAction =
+  | 'OPEN_REPORT'
+  | 'OPEN_DIFF'
+  | 'OPEN_TESTS'
+  | 'OPEN_REVIEW'
+  | 'EDIT_PROMPT'
+  | 'AUTHORIZE_EXTRA_ATTEMPT'
+  | 'MARK_FOR_MANUAL_REVIEW'
+  | 'SKIP_PROMPT'
+  | 'CANCEL_RUN'
+  | 'FIX_AUTH'
+  | 'WAIT_QUOTA'
+  | 'INSTALL_TOOL'
+  | 'SPLIT_PROMPT'
+  | 'START_NEW_RUN';
+
+export interface LoopGuardDecision {
+  allowed: boolean;
+  severity: LoopGuardSeverity;
+  trigger: LoopGuardTrigger | null;
+  reason: string;
+  evidence: Readonly<Record<string, unknown>>;
+  nextActions: LoopGuardNextAction[];
+}
+
+/** Assinaturas normalizadas usadas para detectar repetição e oscilação. */
+export interface LoopFingerprints {
+  diff: string;
+  review: string | null;
+  testFailure: string | null;
+}
+
+/** Contadores e evidências de uma tentativa, persistidos com o estado. */
+export interface AttemptLoopEvidence {
+  attempt: number;
+  claudeCallCount: number;
+  codexCallCount: number;
+  totalAgentCallCount: number;
+
+  promptSnapshotHash: string;
+  projectContextHash: string;
+  projectConfigHash: string;
+
+  diffFingerprintBefore: string;
+  diffFingerprintAfter: string;
+  reviewFingerprint: string | null;
+  testFailureFingerprint: string | null;
+
+  changedFileCount: number;
+  changedLineCount: number;
+
+  elapsedPromptMs: number;
+  noProgressCount: number;
+  repeatedReviewCount: number;
+  repeatedTestFailureCount: number;
+
+  triggered: LoopGuardTrigger | null;
+}
+
+/**
+ * Orçamento acumulado de um prompt dentro de uma execução.
+ * Sobrevive à retomada: retomar nunca zera o que já foi consumido.
+ */
+export interface PromptBudget {
+  promptId: string;
+  attempts: number;
+  claudeCalls: number;
+  codexCalls: number;
+  reviewFormatRetries: number;
+  startedAt: string | null;
+  consumedMs: number;
+  manualOverridesUsed: number;
+  /* Históricos limitados: só existem para detectar repetição. */
+  diffFingerprints: string[];
+  reviewFingerprints: string[];
+  testFailureFingerprints: string[];
+  lastTrigger: LoopGuardTrigger | null;
+  lastDecisionAt: string | null;
+}
+
+/** Autorização humana, pontual e não reutilizável, de uma tentativa extra. */
+export interface ManualOverride {
+  promptId: string;
+  trigger: LoopGuardTrigger;
+  authorizedAt: string;
+  authorizedBy: string;
+  justification: string;
+  consumed: boolean;
 }
 
 export interface ProjectGitConfig {
@@ -574,6 +760,11 @@ export type RunState =
   | 'MERGING'
   | 'MERGED'
   | 'BLOCKED'
+  /**
+   * A execução parou de propósito, por decisão do Loop Guard. Não é falha
+   * inesperada: o estado foi preservado e falta uma decisão humana.
+   */
+  | 'LOOP_GUARD_TRIGGERED'
   | 'AUTH_REQUIRED'
   | 'USAGE_LIMIT_REACHED'
   | 'INTERRUPTED'
@@ -627,6 +818,16 @@ export interface RunRecord {
   lastError: OrqError | null;
   pauseRequested: boolean;
   cancelRequested: boolean;
+
+  /* Loop Guard — orçamento e decisões, preservados através de retomadas. */
+  budgets: PromptBudget[];
+  overrides: ManualOverride[];
+  lastLoopGuard: LoopGuardDecision | null;
+  ciRepairCycles: number;
+  mergeCorrectionCycles: number;
+  /** Hashes tirados no início da execução; divergência invalida a execução. */
+  projectContextHash: string | null;
+  projectConfigHash: string | null;
 }
 
 /* ------------------------------------------------------------------------- */

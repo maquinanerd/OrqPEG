@@ -14,6 +14,10 @@ import { ORQPEG_DIRS, ensureDir, isInside, projectDir } from '../utils/paths';
 import { nowIso } from '../utils/time';
 import { validateIdentifier } from '../security/path-guard';
 import { validateProjectConfig } from './project-validator';
+import {
+  defaultLoopGuardConfig,
+  normalizeLoopGuardConfig,
+} from '../execution/loop-guard-config';
 
 /**
  * Cadastro de projetos.
@@ -72,7 +76,7 @@ export function listProjects(): Result<ProjectConfig[]> {
     const raw = readJsonSync<unknown>(configPath);
     if (!raw.ok) continue;
 
-    const validated = validateProjectConfig(raw.value);
+    const validated = validateProjectConfig(migrateProjectShape(raw.value));
     if (!validated.ok) continue;
 
     projects.push(validated.value);
@@ -94,7 +98,33 @@ export function getProject(projectId: string): Result<ProjectConfig> {
 
   const raw = readJsonSync<unknown>(configPath);
   if (!raw.ok) return raw;
-  return validateProjectConfig(raw.value);
+  return validateProjectConfig(migrateProjectShape(raw.value));
+}
+
+/**
+ * Migração aditiva na leitura.
+ *
+ * Um projeto cadastrado antes de uma seção existir continua válido: os campos
+ * que faltam recebem o padrão seguro em memória, sem reescrever o arquivo do
+ * usuário. Nada é movido, nada é apagado e nada é gravado às escondidas — se a
+ * pessoa quiser materializar os novos padrões, edita o projeto pelo painel.
+ */
+export function migrateProjectShape(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const config = value as Record<string, unknown>;
+
+  const execution =
+    config['execution'] && typeof config['execution'] === 'object'
+      ? { ...(config['execution'] as Record<string, unknown>) }
+      : {};
+
+  if (execution['loopGuard'] === undefined) {
+    execution['loopGuard'] = defaultLoopGuardConfig();
+  } else {
+    execution['loopGuard'] = normalizeLoopGuardConfig(execution['loopGuard']);
+  }
+
+  return { ...config, execution };
 }
 
 export function projectExists(projectId: string): boolean {
