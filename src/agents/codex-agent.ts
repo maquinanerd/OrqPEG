@@ -56,10 +56,16 @@ const USAGE_LIMIT_MARKERS: readonly string[] = [
 const AUTH_REQUIRED_MARKERS: readonly string[] = [
   'not logged in',
   'please log in',
-  'authentication',
+  // O radical cobre authenticate/authentication/authenticating de uma vez.
+  'authenticat',
+  'oauth',
+  'session expired',
   'unauthorized',
+  'invalid api key',
+  'credentials',
   '/login',
   'codex login',
+  'sign in with chatgpt',
 ];
 
 /** Marcadores de flag desconhecida: indicam incompatibilidade de versão. */

@@ -35,7 +35,7 @@
   --border-strong: #aab4c2;
   --text: #10151d;
   --text-dim: #4d586a;
-  --text-faint: #6d7889;
+  --text-faint: #58616f;
   --accent: #14428f;
   --accent-text: #ffffff;
   --focus: #0b57d0;
@@ -714,11 +714,13 @@ table.data th[scope="row"] {
 .step__body { min-width: 0; }
 
 .step__name {
+  display: block;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
 .step__meta {
+  display: block;
   font-size: 11.5px;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;

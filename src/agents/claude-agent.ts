@@ -94,14 +94,47 @@ const USAGE_LIMIT_MARKERS: readonly string[] = [
   'limit reached',
 ];
 
-/** Marcadores de falta de autenticação. Verificados sem diferenciar maiúsculas. */
+/**
+ * Marcadores de falta de autenticação. Verificados sem diferenciar maiúsculas.
+ *
+ * A sessão OAuth do Claude Max expira periodicamente e o CLI responde
+ * "Failed to authenticate: OAuth session expired and could not be refreshed".
+ * O radical "authenticat" cobre authenticate/authentication/authenticating de
+ * uma vez; sem ele, essa falha era classificada como erro genérico de processo
+ * e o usuário não recebia a orientação de refazer o login.
+ */
 const AUTH_REQUIRED_MARKERS: readonly string[] = [
   'not logged in',
   'please log in',
-  'authentication',
+  'authenticat',
+  'oauth',
+  'session expired',
   'unauthorized',
+  'invalid api key',
+  'credentials',
   '/login',
 ];
+
+export { USAGE_LIMIT_MARKERS, AUTH_REQUIRED_MARKERS };
+
+/**
+ * Classifica o motivo de uma falha do Claude a partir do texto de saída.
+ *
+ * O limite de uso tem precedência sobre a autenticação: quando a assinatura
+ * esgota a cota, pedir um novo login não resolveria nada, e tratar o caso como
+ * `AUTH_REQUIRED` mandaria o usuário para o caminho errado.
+ */
+export function classifyClaudeFailure(text: string): {
+  usageLimitReached: boolean;
+  authRequired: boolean;
+} {
+  const lowered = text.toLowerCase();
+  const usageLimitReached = containsAny(lowered, USAGE_LIMIT_MARKERS);
+  return {
+    usageLimitReached,
+    authRequired: !usageLimitReached && containsAny(lowered, AUTH_REQUIRED_MARKERS),
+  };
+}
 
 export async function runClaude(options: ClaudeRunOptions): Promise<Result<AgentRunResult>> {
   const artifactDir = options.artifactDir;
@@ -175,8 +208,7 @@ export async function runClaude(options: ClaudeRunOptions): Promise<Result<Agent
     .join('\n')
     .toLowerCase();
 
-  const usageLimitReached = containsAny(scanText, USAGE_LIMIT_MARKERS);
-  const authRequired = !usageLimitReached && containsAny(scanText, AUTH_REQUIRED_MARKERS);
+  const { usageLimitReached, authRequired } = classifyClaudeFailure(scanText);
 
   const invocation: AgentInvocation = {
     agent: 'claude',

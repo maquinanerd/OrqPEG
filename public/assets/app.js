@@ -1797,7 +1797,15 @@
         'PR',
         pullRequest
           ? chip(
-              pullRequest.merged ? 'MESCLADA' : pullRequest.state,
+              pullRequest.merged
+                ? 'MESCLADA'
+                : pullRequest.state === 'OPEN'
+                ? pullRequest.isDraft
+                  ? 'ABERTA (RASCUNHO)'
+                  : 'ABERTA'
+                : pullRequest.state === 'CLOSED'
+                ? 'FECHADA'
+                : text(pullRequest.state),
               pullRequest.merged
                 ? 'approved'
                 : pullRequest.state === 'OPEN'
