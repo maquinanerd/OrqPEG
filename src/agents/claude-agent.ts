@@ -215,7 +215,13 @@ export async function runClaude(options: ClaudeRunOptions): Promise<Result<Agent
     includeOutput: failed || payload.isError,
   });
 
-  const { usageLimitReached, authRequired } = classifyClaudeFailure(scanText);
+  // Só classificamos o motivo quando o processo de fato falhou: uma execução
+  // bem-sucedida não vira "sem autenticação" só porque a palavra apareceu no
+  // texto ecoado. Ver a justificativa detalhada no adaptador do Codex.
+  const classified = classifyClaudeFailure(scanText);
+  const processFailed = failed || payload.isError;
+  const usageLimitReached = processFailed && classified.usageLimitReached;
+  const authRequired = processFailed && classified.authRequired;
 
   const invocation: AgentInvocation = {
     agent: 'claude',

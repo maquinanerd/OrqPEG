@@ -166,8 +166,19 @@ export async function runCodex(options: CodexRunOptions): Promise<Result<AgentRu
     includeOutput: failed,
   });
 
-  const usageLimitReached = containsAny(scanText, USAGE_LIMIT_MARKERS);
-  const authRequired = !usageLimitReached && containsAny(scanText, AUTH_REQUIRED_MARKERS);
+  /*
+   * A classificação por marcador só vale quando o processo REALMENTE falhou.
+   *
+   * Um Codex que terminou com código 0 e devolveu o JSON da auditoria não está
+   * sem autenticação, por mais que a palavra apareça no texto ecoado. Sem esta
+   * condição, uma auditoria bem-sucedida foi descartada e reportada como
+   * `AUTH_REQUIRED`: o gatilho foi a string "Sign in with ChatGPT", que consta
+   * do README do próprio projeto e trafega dentro do pacote de auditoria.
+   * Marcador em texto nunca deve sobrepor o fato objetivo do código de saída.
+   */
+  const usageLimitReached = failed && containsAny(scanText, USAGE_LIMIT_MARKERS);
+  const authRequired =
+    failed && !usageLimitReached && containsAny(scanText, AUTH_REQUIRED_MARKERS);
 
   const invocation: AgentInvocation = {
     agent: 'codex',

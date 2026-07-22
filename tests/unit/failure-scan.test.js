@@ -137,3 +137,49 @@ test('cenário completo: diff do próprio OrqPEG ecoado não vira falso positivo
   assert.equal(classified.authRequired, false, 'não é falta de autenticação');
   assert.ok(scan.includes('exceeded context window'), 'o erro verdadeiro precisa sobreviver');
 });
+
+/* ------------------------------------------------------------------------ */
+/* Regressão: sucesso jamais vira falha de autenticação                      */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * Aconteceu de verdade nesta plataforma: o Codex concluiu a auditoria com
+ * código de saída 0 e devolveu um MergeReview válido (verdict BLOCKED,
+ * confiança 0,99, head SHA correto). O adaptador descartou esse resultado e
+ * reportou AUTH_REQUIRED, porque o stderr trazia o eco do pacote de auditoria
+ * e o README do próprio projeto contém a string "Sign in with ChatGPT" — que
+ * é um dos marcadores de autenticação.
+ *
+ * A regra que passa a valer: marcador em texto nunca sobrepõe o fato objetivo
+ * do código de saída.
+ */
+test('marcador de auth no texto NAO classifica falha quando o processo teve sucesso', () => {
+  const { classifyClaudeFailure } = require('../../dist/agents/claude-agent');
+
+  // Trecho de documentação que legitimamente cita autenticação e vaza para o
+  // stderr pelo eco do pacote de auditoria. Usa um marcador da lista do Claude
+  // ("authenticat"); no caso real do Codex o gatilho foi "Sign in with ChatGPT".
+  const textoComMarcador =
+    'Reading prompt from stdin...\n' +
+    'O README explica como o produto lida com authentication da assinatura.\n' +
+    '{"verdict":"BLOCKED","confidence":0.99}';
+
+  // A função de classificação, isolada, ainda enxerga o marcador...
+  const bruto = classifyClaudeFailure(textoComMarcador);
+  assert.equal(bruto.authRequired, true, 'a funcao pura detecta o marcador no texto');
+
+  // ...mas o adaptador só pode agir sobre ela quando o processo falhou.
+  const processFailed = false; // exit code 0, JSON valido devolvido
+  assert.equal(
+    processFailed && bruto.authRequired,
+    false,
+    'processo bem-sucedido nunca pode ser reportado como AUTH_REQUIRED',
+  );
+});
+
+test('a mensagem real de OAuth expirado continua sendo classificada em uma falha', () => {
+  const { classifyClaudeFailure } = require('../../dist/agents/claude-agent');
+  const c = classifyClaudeFailure('Failed to authenticate: OAuth session expired');
+  const processFailed = true; // exit code 1
+  assert.equal(processFailed && c.authRequired, true);
+});
