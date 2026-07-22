@@ -1,0 +1,37 @@
+{
+  "name": "orqpeg",
+  "version": "1.0.0",
+  "description": "Orquestrador local que coordena Claude Code e Codex CLI para executar, revisar, testar e integrar trabalhos em múltiplos repositórios Git.",
+  "license": "MIT",
+  "private": true,
+  "author": "maquinanerd",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maquinanerd/OrqPEG.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "dist/index.js",
+  "bin": {
+    "orqpeg": "dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node scripts/clean.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-reporter=spec \"tests/**/*.test.js\"",
+    "test:unit": "node --test --test-reporter=spec \"tests/unit/**/*.test.js\"",
+    "test:integration": "node --test --test-reporter=spec \"tests/integration/**/*.test.js\"",
+    "test:security": "node --test --test-reporter=spec \"tests/security/**/*.test.js\"",
+    "test:e2e": "node --test --test-reporter=spec \"tests/e2e/**/*.test.js\"",
+    "check": "node dist/cli/main.js doctor --json",
+    "start": "node dist/cli/main.js",
+    "panel": "node dist/cli/main.js panel start"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.9",
+    "typescript": "5.6.3"
+  },
+  "dependencies": {}
+}
