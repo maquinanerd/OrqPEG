@@ -165,9 +165,79 @@
           <dl class="kv" id="loopguard-decision">
             <dt>Situação</dt><dd class="faint">Sem parada registrada</dd>
           </dl>
+          <div id="loopguard-override-area">
+            <p class="faint" id="loopguard-override-note"></p>
+          </div>
         </section>
       </div>
+
+      <section class="card" id="loopguard-history-card" aria-labelledby="h-loopguard-history" hidden>
+        <h3 id="h-loopguard-history">Autorizações manuais concedidas</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead>
+              <tr>
+                <th scope="col">Prompt</th>
+                <th scope="col">Gatilho suprimido</th>
+                <th scope="col">Autorizado por</th>
+                <th scope="col">Quando</th>
+                <th scope="col">Situação</th>
+                <th scope="col">Justificativa</th>
+              </tr>
+            </thead>
+            <tbody id="loopguard-history"></tbody>
+          </table>
+        </div>
+      </section>
     </section>
+
+    <dialog id="dlg-override" aria-labelledby="h-override">
+      <form id="form-override" method="dialog">
+        <div class="dialog-head">
+          <h2 id="h-override">Autorizar uma tentativa adicional</h2>
+        </div>
+        <div class="dialog-body">
+          <div class="warn-box">
+            <p class="warn-box__title">Leia antes de autorizar</p>
+            <p>
+              A execução parou porque o OrqPEG detectou que continuar automaticamente consumiria
+              sua assinatura sem produzir progresso. Autorizar libera <strong>uma única</strong>
+              tentativa, que será consumida ao ser usada e não poderá ser repetida.
+            </p>
+          </div>
+
+          <dl class="kv kv--wide" id="override-evidence">
+            <dt>Gatilho</dt><dd class="faint">—</dd>
+          </dl>
+
+          <div class="warn-box" id="override-error-box" hidden>
+            <span id="override-error"></span>
+          </div>
+
+          <p class="field">
+            <label for="override-justification">Justificativa (obrigatória)</label>
+            <textarea id="override-justification" name="justification" rows="4" required
+              minlength="20" maxlength="2000"
+              placeholder="Explique por que outra tentativa deve resolver o que as anteriores não resolveram."></textarea>
+            <span class="hint">
+              Mínimo de 20 caracteres. Fica registrada no estado da execução e no relatório.
+            </span>
+          </p>
+
+          <p class="field">
+            <label for="override-author">Autorizado por (opcional)</label>
+            <input type="text" id="override-author" name="authorizedBy" autocomplete="off"
+              placeholder="operador local">
+          </p>
+        </div>
+        <div class="dialog-foot">
+          <button type="button" class="btn" id="btn-override-cancel">Cancelar</button>
+          <button type="submit" class="btn btn--primary" id="btn-override-submit">
+            Autorizar uma tentativa
+          </button>
+        </div>
+      </form>
+    </dialog>
 
     <div class="grid grid--2">
       <section class="card" aria-labelledby="h-consensus">

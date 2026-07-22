@@ -557,7 +557,10 @@ async function commandResume(args: string[], config: GlobalConfig): Promise<numb
       run.state === 'BLOCKED' ||
       run.state === 'CI_FAILED' ||
       run.state === 'AUTH_REQUIRED' ||
-      run.state === 'USAGE_LIMIT_REACHED',
+      run.state === 'USAGE_LIMIT_REACHED' ||
+      // Sem isto, uma execução parada pelo Loop Guard jamais poderia ser
+      // retomada — e a autorização manual seria impossível de exercer.
+      run.state === 'LOOP_GUARD_TRIGGERED',
   );
   if (!resumable) {
     print('  Nenhuma execução retomável encontrada.');

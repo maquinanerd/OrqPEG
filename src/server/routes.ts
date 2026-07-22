@@ -30,6 +30,7 @@ import { readTextSync } from '../utils/fs-atomic';
 import { nowIso } from '../utils/time';
 import { startRunInBackground } from './run-manager';
 import { openTarget } from './open-target';
+import { describeOverrides, grantManualOverride } from '../execution/override';
 
 /**
  * Roteador da API do painel.
@@ -87,6 +88,11 @@ export function createApiRouter(deps: RouterDeps): {
       method: 'POST',
       pattern: /^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/audit$/,
       handle: handleTriggerAudit,
+    },
+    {
+      method: 'POST',
+      pattern: /^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/override$/,
+      handle: handleGrantOverride,
     },
     {
       method: 'GET',
@@ -377,9 +383,45 @@ async function handleListRuns(ctx: RouteContext): Promise<void> {
 }
 
 async function handleGetRun(ctx: RouteContext): Promise<void> {
+  const projectId = requireId(ctx, 0);
+  if (projectId === null) return;
   const run = loadRunFromParams(ctx);
   if (!run) return;
-  sendJson(ctx.res, 200, { run });
+
+  /*
+   * Os limites do Loop Guard acompanham a execução.
+   *
+   * O painel mostra "consumido / limite" e precisa do limite REAL do projeto:
+   * exibir o padrão do produto quando o projeto configurou outro valor daria
+   * um denominador errado, e um número errado na tela é pior que número
+   * nenhum. A situação de override vem junto pelo mesmo motivo.
+   */
+  const project = getProject(projectId);
+  const loopGuard = project.ok ? project.value.execution.loopGuard : null;
+  const budget = run.currentPromptId
+    ? run.budgets.find((entry) => entry.promptId === run.currentPromptId)
+    : undefined;
+
+  sendJson(ctx.res, 200, {
+    run,
+    loopGuard: loopGuard
+      ? {
+          ...loopGuard,
+          maxAttemptsPerPrompt: project.ok
+            ? project.value.execution.maxAttemptsPerPrompt
+            : null,
+        }
+      : null,
+    override:
+      loopGuard && project.ok
+        ? describeOverrides(
+            run,
+            run.currentPromptId ?? run.budgets[0]?.promptId ?? '',
+            budget ?? run.budgets[0],
+            loopGuard,
+          )
+        : null,
+  });
 }
 
 async function handleConsensus(ctx: RouteContext): Promise<void> {
@@ -443,6 +485,85 @@ async function handleTriggerAudit(ctx: RouteContext): Promise<void> {
     runId,
     headSha: run.pullRequest.headSha,
     note: 'As duas auditorias independentes foram disparadas. O merge só ocorre se os 20 gates passarem.',
+  });
+}
+
+/**
+ * Autoriza uma única tentativa adicional após uma parada branda.
+ *
+ * A validação inteira vive no backend de propósito. A interface esconde o botão
+ * quando o gatilho não admite override, mas esconder não é impedir: uma
+ * requisição forjada para `FORBIDDEN_AREA_CHANGED` precisa falhar aqui, com
+ * motivo explícito, e falha.
+ */
+async function handleGrantOverride(ctx: RouteContext): Promise<void> {
+  const projectId = requireId(ctx, 0);
+  if (projectId === null) return;
+  const runId = requireId(ctx, 1);
+  if (runId === null) return;
+
+  const body = await readJsonBody<{ promptId?: string; justification?: string; authorizedBy?: string }>(
+    ctx.req,
+  );
+  if (!body.ok) {
+    sendJson(ctx.res, 400, { error: body.error.message });
+    return;
+  }
+
+  const promptIdRaw = (body.value.promptId ?? '').trim();
+  const promptId = validateIdentifier(promptIdRaw, 'prompt');
+  if (!promptId.ok) {
+    sendJson(ctx.res, 400, { error: promptId.error.message });
+    return;
+  }
+
+  const project = getProject(projectId);
+  if (!project.ok) {
+    sendJson(ctx.res, 404, { error: project.error.message });
+    return;
+  }
+
+  const loaded = loadRun(projectId, runId);
+  if (!loaded.ok) {
+    sendJson(ctx.res, 404, { error: loaded.error.message });
+    return;
+  }
+
+  const granted = grantManualOverride({
+    run: loaded.value,
+    promptId: promptId.value,
+    justification: body.value.justification ?? '',
+    authorizedBy: body.value.authorizedBy ?? '',
+    loopGuard: project.value.execution.loopGuard,
+  });
+
+  if (!granted.ok) {
+    // 409: o pedido é sintaticamente válido, mas o estado não o permite.
+    sendJson(ctx.res, 409, {
+      error: granted.error.message,
+      details: granted.error.details ?? null,
+    });
+    return;
+  }
+
+  const saved = saveRun(granted.value.run);
+  if (!saved.ok) {
+    sendJson(ctx.res, 500, { error: saved.error.message });
+    return;
+  }
+
+  ctx.deps.logger.warn(
+    `Override manual autorizado para ${projectId}/${runId}/${promptId.value}: ` +
+      `gatilho ${granted.value.override.trigger}, por ${granted.value.override.authorizedBy}.`,
+  );
+  ctx.deps.events.publishRun(granted.value.run, 'Tentativa adicional autorizada manualmente.');
+
+  sendJson(ctx.res, 201, {
+    granted: true,
+    override: granted.value.override,
+    note:
+      'A autorização vale para UMA tentativa e será consumida ao ser usada. ' +
+      'Retome a execução para exercê-la.',
   });
 }
 
@@ -538,7 +659,8 @@ async function handleResume(ctx: RouteContext): Promise<void> {
       run.state === 'BLOCKED' ||
       run.state === 'CI_FAILED' ||
       run.state === 'AUTH_REQUIRED' ||
-      run.state === 'USAGE_LIMIT_REACHED',
+      run.state === 'USAGE_LIMIT_REACHED' ||
+      run.state === 'LOOP_GUARD_TRIGGERED',
   );
   if (!resumable) {
     sendJson(ctx.res, 404, { error: 'Nenhuma execução retomável encontrada.' });

@@ -68,7 +68,9 @@ import {
   createPromptBudget,
   describeDecision,
   evaluateLoopGuard,
+  wasOverrideApplied,
 } from './loop-guard';
+import { consumeOverride, hasPendingOverride, pendingOverrideCount } from './override';
 import {
   contentHash,
   diffFingerprint,
@@ -370,6 +372,27 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     return ok(run);
   }
 
+  /*
+   * Retomada adota o próprio worktree, sujo ou não.
+   *
+   * A regra de "não reaproveitar worktree sujo" existe para impedir que uma
+   * execução NOVA se aproprie do trabalho pendente de outra. Ao retomar, o
+   * worktree é desta mesma execução e está na mesma branch: a sujeira é o
+   * trabalho que o OrqPEG preservou de propósito ao parar. Recriá-lo seria
+   * perder exatamente o que se quis proteger — e sem isto nenhuma execução
+   * parada pelo Loop Guard poderia ser retomada.
+   */
+  if (run.worktreePath && run.branchName === branchName) {
+    const existing = await ports.git.currentBranch(run.worktreePath);
+    if (existing.ok && existing.value === branchName) {
+      ctx.logger.info(
+        `Retomando no worktree já existente desta execução: ${run.worktreePath}`,
+      );
+      run = save(ctx, { ...run, workingDirectory: run.worktreePath });
+      return ok(run);
+    }
+  }
+
   const worktreePath = resolveWorktreePath(project, run.runId);
   const prepared = await ports.worktree.prepare({
     repoDir: project.repositoryPath,
@@ -449,7 +472,21 @@ async function executeSinglePrompt(
   let previousReview: PromptReview | null = null;
   let lastTests: TestSuiteResult | null = null;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  /*
+   * A numeração continua de onde parou, e o teto inclui as tentativas extras
+   * já autorizadas por uma pessoa.
+   *
+   * Continuar a contagem não é cosmético: o diretório de artefatos é
+   * `attempt-<n>`. Reiniciar em 1 ao retomar SOBRESCREVIA a evidência da
+   * primeira tentativa original — diff, saída do Claude, testes e revisão do
+   * Codex eram substituídos e perdidos. Sem o teto estendido, por sua vez, um
+   * override concedido nunca seria exercido: o `for` terminaria antes de o
+   * portão ser consultado.
+   */
+  const alreadyAttempted = budgetOf(run, promptFile.id).attempts;
+  const effectiveMaxAttempts = maxAttempts + pendingOverrideCount(run, promptFile.id);
+
+  for (let attempt = alreadyAttempted + 1; attempt <= effectiveMaxAttempts; attempt += 1) {
     /* ---------------------------------------------------------------------
      * Portão do Loop Guard.
      *
@@ -465,6 +502,16 @@ async function executeSinglePrompt(
     if (!gate.canContinue) {
       run = save(ctx, applyLoopGuardStop(ctx, run, promptFile.id, gateDecision));
       return ok(run);
+    }
+
+    // A autorização é consumida no instante da passagem, não ao fim da
+    // tentativa: se o processo cair no meio, ela não volta a valer.
+    if (wasOverrideApplied(gateDecision)) {
+      run = save(ctx, consumeOverride(run, promptFile.id));
+      ctx.logger.warn(
+        `Tentativa ${attempt} de ${promptFile.id} liberada por autorização manual ` +
+          `(gatilho suprimido: ${String(gateDecision.evidence['suppressedTrigger'])}).`,
+      );
     }
 
     const artifactDir = ensureDir(
@@ -1387,9 +1434,7 @@ function decideNextAttempt(
 }
 
 function hasUnconsumedOverride(run: RunRecord, promptId: string): boolean {
-  return run.overrides.some(
-    (override) => override.promptId === promptId && override.consumed === false,
-  );
+  return hasPendingOverride(run, promptId);
 }
 
 /**

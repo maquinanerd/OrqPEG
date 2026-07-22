@@ -171,9 +171,35 @@ export function evaluateLoopGuard(input: LoopGuardInput): LoopGuardDecision {
   }
 
   const severity = severityOf(finding.trigger);
+
+  /*
+   * Override concedido: libera EXATAMENTE esta tentativa.
+   *
+   * Vale apenas para parada branda. Uma parada dura permanece bloqueada mesmo
+   * com autorização pendente — a causa está fora do laço e insistir não a
+   * corrige. O consumo é responsabilidade do orquestrador, feito no instante
+   * em que a passagem é concedida.
+   */
+  if (severity === 'soft_stop' && input.overrideAvailable) {
+    return {
+      allowed: true,
+      severity: 'none',
+      trigger: null,
+      reason:
+        `Tentativa adicional liberada por autorização manual, apesar de ${finding.trigger}. ` +
+        'A autorização vale para esta tentativa e será consumida agora.',
+      evidence: {
+        ...budgetSnapshot(input),
+        ...finding.evidence,
+        overrideApplied: true,
+        suppressedTrigger: finding.trigger,
+      },
+      nextActions: [],
+    };
+  }
+
   const overrideUsable =
     severity === 'soft_stop' &&
-    input.overrideAvailable &&
     input.budget.manualOverridesUsed < Math.max(0, config.maxManualOverridesPerPrompt);
 
   return {
@@ -184,6 +210,11 @@ export function evaluateLoopGuard(input: LoopGuardInput): LoopGuardDecision {
     evidence: { ...budgetSnapshot(input), ...finding.evidence },
     nextActions: nextActionsFor(finding.trigger, overrideUsable),
   };
+}
+
+/** A decisão passou por causa de uma autorização manual? */
+export function wasOverrideApplied(decision: LoopGuardDecision): boolean {
+  return decision.allowed === true && decision.evidence['overrideApplied'] === true;
 }
 
 /* --- 1. Interrupção humana --------------------------------------------- */

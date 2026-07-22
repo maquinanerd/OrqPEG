@@ -575,6 +575,90 @@ test('esgotar as tentativas com progresso real nomeia MAX_ATTEMPTS_REACHED', asy
   );
 });
 
+/*
+ * Regressão de campo: ao retomar, o contador local do laço reiniciava em 1
+ * enquanto o orçamento persistia. Como o diretório de artefatos é
+ * `attempt-<n>`, a retomada SOBRESCREVIA a evidência da primeira tentativa —
+ * diff, saída do Claude, testes e revisão do Codex eram perdidos.
+ */
+test('retomar continua a numeração e não sobrescreve artefatos anteriores', async () => {
+  const project = makeProject();
+
+  // Progresso genuíno em todas as dimensões para que as três tentativas
+  // aconteçam e a parada seja por MAX_ATTEMPTS_REACHED.
+  let rodada = 0;
+  const revisaoDistinta = () => {
+    rodada += 1;
+    return agentResult(
+      promptReviewJson('CHANGES_REQUESTED', {
+        requiredActions: ['Ajuste número ' + rodada + '.'],
+        blockingIssues: [
+          { severity: 'blocking', title: 'Item ' + rodada, description: 'Detalhe ' + rodada + '.' },
+        ],
+      }),
+    );
+  };
+
+  const primeira = await execute(project, {
+    codexReview: revisaoDistinta,
+    varyingDiff: true,
+  });
+  assert.equal(primeira.result.value.state, 'LOOP_GUARD_TRIGGERED');
+
+  const antes = primeira.result.value.budgets.find((b) => b.promptId === '010-fundacao');
+  assert.equal(antes.attempts, 3);
+
+  // Autoriza uma tentativa extra e retoma.
+  const { grantManualOverride } = require('../../dist/execution/override');
+  const { saveRun } = require('../../dist/state/run-state');
+  const concedido = grantManualOverride({
+    run: primeira.result.value,
+    promptId: '010-fundacao',
+    justification: 'Ajustei o ambiente manualmente; mais uma tentativa deve resolver.',
+    authorizedBy: 'teste',
+    loopGuard: project.execution.loopGuard,
+  });
+  assert.equal(concedido.ok, true, concedido.ok ? '' : concedido.error.message);
+  saveRun(concedido.value.run);
+
+  const { ports } = makePorts({
+    codexReview: revisaoDistinta,
+    varyingDiff: true,
+  });
+  const retomada = await runProject({
+    projectId: project.id,
+    dryRun: false,
+    resumeRunId: primeira.result.value.runId,
+    config: defaultGlobalConfig(),
+    logger: nullLogger(),
+    ports,
+  });
+
+  assert.equal(retomada.ok, true, retomada.ok ? '' : JSON.stringify(retomada.error));
+  const depois = retomada.value.budgets.find((b) => b.promptId === '010-fundacao');
+
+  assert.equal(depois.attempts, 4, 'a quarta tentativa continua a contagem, não reinicia');
+  assert.equal(depois.manualOverridesUsed, 1, 'a autorização foi consumida');
+  assert.equal(
+    retomada.value.overrides.filter((o) => o.consumed === false).length,
+    0,
+    'nenhuma autorização pode sobrar pendente após ser exercida',
+  );
+
+  // O diretório da quarta tentativa existe; os das anteriores continuam lá.
+  const artifactRoot = path.join(
+    HOME, 'data', 'projects', project.id, 'artifacts',
+    primeira.result.value.runId, '010-fundacao',
+  );
+  for (const n of [1, 2, 3, 4]) {
+    assert.equal(
+      fs.existsSync(path.join(artifactRoot, 'attempt-' + n)),
+      true,
+      `attempt-${n} precisa existir e não ter sido sobrescrito`,
+    );
+  }
+});
+
 test('o orçamento consumido fica registrado por prompt', async () => {
   const project = makeProject();
   let rodada = 0;

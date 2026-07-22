@@ -361,32 +361,49 @@ test('hard stops nunca oferecem tentativa adicional', () => {
   }
 });
 
-test('soft stop com override disponível oferece a tentativa adicional', () => {
+/*
+ * `overrideAvailable` significa "existe autorização CONCEDIDA e ainda não
+ * consumida", não "seria possível pedir uma". Por isso ele libera a passagem
+ * em vez de apenas sugerir a ação.
+ */
+test('soft stop com autorização concedida libera a tentativa', () => {
   const decision = evaluateLoopGuard(
     scenario({
       budget: { testFailureFingerprints: ['T', 'T'] },
       top: { overrideAvailable: true },
     }),
   );
-  assert.equal(decision.severity, 'soft_stop');
-  assert.ok(decision.nextActions.includes('AUTHORIZE_EXTRA_ATTEMPT'));
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.trigger, null);
+  assert.equal(decision.evidence.overrideApplied, true);
+  assert.equal(decision.evidence.suppressedTrigger, 'REPEATED_TEST_FAILURE');
 });
 
-test('soft stop sem override não oferece a tentativa adicional', () => {
+test('soft stop sem autorização bloqueia e OFERECE pedir uma', () => {
   const decision = evaluateLoopGuard(
     scenario({ budget: { testFailureFingerprints: ['T', 'T'] }, top: { overrideAvailable: false } }),
   );
-  assert.equal(decision.nextActions.includes('AUTHORIZE_EXTRA_ATTEMPT'), false);
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.severity, 'soft_stop');
+  assert.ok(
+    decision.nextActions.includes('AUTHORIZE_EXTRA_ATTEMPT'),
+    'com orçamento de override livre, a ação deve ser oferecida',
+  );
 });
 
-test('override esgotado não reabre a tentativa adicional', () => {
+test('override já usado não é oferecido de novo', () => {
   const decision = evaluateLoopGuard(
     scenario({
       budget: { testFailureFingerprints: ['T', 'T'], manualOverridesUsed: 1 },
-      top: { overrideAvailable: true },
+      top: { overrideAvailable: false },
     }),
   );
-  assert.equal(decision.nextActions.includes('AUTHORIZE_EXTRA_ATTEMPT'), false);
+  assert.equal(decision.allowed, false);
+  assert.equal(
+    decision.nextActions.includes('AUTHORIZE_EXTRA_ATTEMPT'),
+    false,
+    'o orçamento de override do prompt já foi consumido',
+  );
 });
 
 /* ------------------------------------------------------------------------ */

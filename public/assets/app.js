@@ -1644,6 +1644,13 @@
             : [];
         var consensusPayload = consensusResult.ok ? consensusResult.data || {} : {};
 
+        // Limites e situação de override vêm do servidor junto com a execução:
+        // o painel não adivinha a configuração do projeto.
+        if (run && runResult.data) {
+          run.__loopGuard = runResult.data.loopGuard || null;
+          run.__override = runResult.data.override || null;
+        }
+
         renderRun(projectId, runId, run, prompts, consensusPayload);
       });
     }
@@ -1691,6 +1698,8 @@
     on('btn-report-json', 'click', function () {
       openReport(projectId, runId, 'json');
     });
+
+    wireOverrideDialog(projectId, runId, refresh);
 
     var crumb = $('crumb-project-link');
     if (crumb) {
@@ -1877,7 +1886,175 @@
     );
 
     setHtml('loopguard-decision', loopDecisionRows(budget, decision));
+    renderOverrideArea(run, budget, decision);
+    renderOverrideHistory(run);
   }
+
+  /**
+   * Área de autorização manual.
+   *
+   * O botão só aparece quando o backend informa que o override é possível. Se a
+   * informação não vier, nada é oferecido: na dúvida, não sugerimos uma ação
+   * que a API vai recusar. E esconder o botão não é a proteção — o backend
+   * recusa a requisição de qualquer forma.
+   */
+  function renderOverrideArea(run, budget, decision) {
+    var area = $('loopguard-override-area');
+    var note = $('loopguard-override-note');
+    if (!area || !note) return;
+
+    var info = run.__override || null;
+
+    if (!decision || !decision.trigger) {
+      note.textContent = '';
+      removeOverrideButton();
+      return;
+    }
+
+    if (!info) {
+      note.textContent =
+        'Situação de autorização indisponível: recarregue a página para consultar o servidor.';
+      removeOverrideButton();
+      return;
+    }
+
+    note.textContent =
+      info.reason +
+      ' Overrides usados neste prompt: ' +
+      text(info.used) +
+      ' de ' +
+      text(info.limit) +
+      '.';
+
+    if (!info.overridable) {
+      removeOverrideButton();
+      return;
+    }
+
+    if (!$('btn-override')) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn--primary';
+      button.id = 'btn-override';
+      button.textContent = 'Autorizar uma tentativa adicional';
+      area.insertBefore(button, note);
+      button.addEventListener('click', function () {
+        openOverrideDialog(run, budget, decision);
+      });
+    }
+  }
+
+  function removeOverrideButton() {
+    var existing = $('btn-override');
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+  }
+
+  function openOverrideDialog(run, budget, decision) {
+    var dialog = $('dlg-override');
+    if (!dialog) return;
+
+    setHtml(
+      'override-evidence',
+      kvRow('Gatilho', '<span class="mono">' + esc(text(decision.trigger)) + '</span>') +
+        kvRow('Descrição', esc(LOOP_TRIGGER_LABEL[decision.trigger] || DASH)) +
+        kvRow('Prompt', '<span class="mono">' + esc(text(budget.promptId)) + '</span>') +
+        kvRow('Motivo registrado', esc(text(decision.reason))) +
+        kvRow(
+          'Tentativas consumidas',
+          esc(text(budget.attempts)) + ' · Claude ' + esc(text(budget.claudeCalls)) +
+            ' · Codex ' + esc(text(budget.codexCalls))
+        ) +
+        kvRow('Assinaturas de teste', fingerprintTrail(budget.testFailureFingerprints)) +
+        kvRow('Assinaturas de revisão', fingerprintTrail(budget.reviewFingerprints))
+    );
+
+    currentOverridePromptId = text(budget.promptId);
+
+    var box = $('override-error-box');
+    if (box) box.hidden = true;
+    var field = $('override-justification');
+    if (field) field.value = '';
+
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', 'open');
+  }
+
+  function renderOverrideHistory(run) {
+    var card = $('loopguard-history-card');
+    var body = $('loopguard-history');
+    if (!card || !body) return;
+
+    if (!isNonEmptyArray(run.overrides)) {
+      card.hidden = true;
+      body.innerHTML = '';
+      return;
+    }
+
+    card.hidden = false;
+    body.innerHTML = run.overrides
+      .map(function (entry) {
+        return (
+          '<tr>' +
+          '<th scope="row"><span class="mono">' + esc(text(entry.promptId)) + '</span></th>' +
+          '<td><span class="mono">' + esc(text(entry.trigger)) + '</span></td>' +
+          '<td>' + esc(text(entry.authorizedBy)) + '</td>' +
+          '<td>' + esc(fmtDateTime(entry.authorizedAt)) + '</td>' +
+          '<td>' +
+          (entry.consumed ? chip('CONSUMIDO', 'pending') : chip('PENDENTE', 'waiting')) +
+          '</td>' +
+          '<td>' + esc(text(entry.justification)) + '</td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+  }
+
+  function wireOverrideDialog(projectId, runId, afterGrant) {
+    var dialog = $('dlg-override');
+    var form = $('form-override');
+    if (!dialog || !form) return;
+
+    on('btn-override-cancel', 'click', function () {
+      if (typeof dialog.close === 'function') dialog.close();
+      else dialog.removeAttribute('open');
+    });
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var justification = ($('override-justification') || {}).value || '';
+      var authorizedBy = ($('override-author') || {}).value || '';
+      var submit = $('btn-override-submit');
+      if (submit) submit.disabled = true;
+
+      apiPost(
+        '/api/projects/' + encodeURIComponent(projectId) +
+          '/runs/' + encodeURIComponent(runId) + '/override',
+        {
+          promptId: currentOverridePromptId,
+          justification: justification,
+          authorizedBy: authorizedBy,
+        }
+      ).then(function (result) {
+        if (submit) submit.disabled = false;
+        if (!result.ok) {
+          var box = $('override-error-box');
+          if (box) box.hidden = false;
+          setText('override-error', result.error || 'Não foi possível autorizar.');
+          return;
+        }
+        if (typeof dialog.close === 'function') dialog.close();
+        else dialog.removeAttribute('open');
+        showBanner(
+          'info',
+          'Tentativa adicional autorizada. Retome a execução para exercê-la.'
+        );
+        if (typeof afterGrant === 'function') afterGrant();
+      });
+    });
+  }
+
+  /** Prompt alvo do diálogo aberto; definido ao abrir. */
+  var currentOverridePromptId = '';
 
   function renderLoopGuardAlert(decision) {
     var box = $('loopguard-alert');
@@ -1998,8 +2175,13 @@
    * execução não carrega o projeto, então os padrões do produto são usados como
    * referência — e ficam explícitos no título de cada célula.
    */
+  /**
+   * Limites reais do projeto, enviados pelo servidor junto com a execução.
+   * Os padrões só entram quando o servidor não informou nada — e nesse caso o
+   * denominador é uma referência, não a configuração em vigor.
+   */
   function loopLimits(run) {
-    var guard = (run.project && run.project.execution && run.project.execution.loopGuard) || {};
+    var guard = run.__loopGuard || {};
     return {
       attempts: num(guard.maxAttemptsPerPrompt) || 3,
       claude: num(guard.maxClaudeCallsPerPrompt) || 3,
