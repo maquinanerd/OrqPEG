@@ -48,7 +48,9 @@ const MAX_EVENTS = 500;
 const BASE_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
   IDLE: ['VALIDATING'],
   VALIDATING: ['PREPARING_WORKTREE', 'RUNNING_CLAUDE', 'COMPLETED'],
-  PREPARING_WORKTREE: ['RUNNING_CLAUDE'],
+  // `COMPLETED` é alcançável daqui porque o dry-run valida tudo, monta o plano
+  // e encerra logo após a preparação, sem nunca chamar uma IA.
+  PREPARING_WORKTREE: ['RUNNING_CLAUDE', 'COMPLETED'],
   RUNNING_CLAUDE: ['RUNNING_TESTS', 'BUILDING_REVIEW_PACKAGE'],
   RUNNING_TESTS: ['BUILDING_REVIEW_PACKAGE', 'CHANGES_REQUESTED'],
   BUILDING_REVIEW_PACKAGE: ['RUNNING_CODEX'],

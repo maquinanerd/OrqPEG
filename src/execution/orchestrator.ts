@@ -211,6 +211,13 @@ async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRec
   if (!published.ok) return published;
   run = published.value;
 
+  // Sem push, PR e CI verdes não há o que auditar para merge. Interromper aqui
+  // evita gastar duas auditorias de IA sobre um estado que já reprovou.
+  if (!canProceedToAudit(run)) {
+    writeRunReport({ project: ctx.project, run });
+    return ok(run);
+  }
+
   const audited = await auditAndMerge(ctx, run);
   if (!audited.ok) return audited;
   run = audited.value;
@@ -1048,6 +1055,25 @@ function toRecord(
 /* ------------------------------------------------------------------------- */
 /* Auxiliares                                                                 */
 /* ------------------------------------------------------------------------- */
+
+/**
+ * A auditoria final só faz sentido quando a publicação chegou até o fim com
+ * sucesso: PR aberta e CI aprovado. Qualquer estado de parada interrompe aqui.
+ */
+function canProceedToAudit(run: RunRecord): boolean {
+  const blocking: ReadonlySet<RunState> = new Set<RunState>([
+    'CI_FAILED',
+    'BLOCKED',
+    'FAILED',
+    'INTERRUPTED',
+    'CANCELLED',
+    'COMPLETED',
+    'AUTH_REQUIRED',
+    'USAGE_LIMIT_REACHED',
+  ]);
+  if (blocking.has(run.state)) return false;
+  return run.pullRequest !== null;
+}
 
 function save(ctx: Context, run: RunRecord): RunRecord {
   saveRun(run);

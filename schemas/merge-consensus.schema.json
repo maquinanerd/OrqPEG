@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://orqpeg.local/schemas/merge-consensus.schema.json",
+  "title": "Consenso de merge do OrqPEG",
+  "description": "Estrutura da apuração de consenso entre as auditorias finais do Claude e do Codex (MergeConsensus). O consenso só é considerado atingido quando ambos aprovam o mesmo head SHA com confiança igual ou superior ao mínimo exigido pelo projeto.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reached",
+    "headSha",
+    "claude",
+    "codex",
+    "sameHeadSha",
+    "minimumConfidence",
+    "reasons"
+  ],
+  "properties": {
+    "reached": {
+      "type": "boolean",
+      "description": "Verdadeiro somente quando todas as condições do consenso foram satisfeitas."
+    },
+    "headSha": {
+      "type": "string",
+      "description": "Head SHA observado pelo OrqPEG no momento da apuração.",
+      "minLength": 1
+    },
+    "claude": {
+      "description": "Posição da auditoria do Claude na apuração.",
+      "$ref": "#/definitions/AuditorPosition"
+    },
+    "codex": {
+      "description": "Posição da auditoria do Codex na apuração.",
+      "$ref": "#/definitions/AuditorPosition"
+    },
+    "sameHeadSha": {
+      "type": "boolean",
+      "description": "Verdadeiro quando os dois auditores analisaram exatamente o mesmo head SHA."
+    },
+    "minimumConfidence": {
+      "type": "number",
+      "description": "Confiança mínima exigida pelo projeto para cada auditoria, entre 0 e 1.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "reasons": {
+      "type": "array",
+      "description": "Motivos, em português, que sustentam o resultado da apuração.",
+      "items": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "AuditorPosition": {
+      "type": "object",
+      "description": "Parecer resumido de um dos auditores considerado na apuração.",
+      "additionalProperties": false,
+      "required": ["verdict", "confidence", "reviewedHeadSha", "available"],
+      "properties": {
+        "verdict": {
+          "type": ["string", "null"],
+          "description": "Veredito do auditor; nulo quando não há parecer válido disponível.",
+          "enum": ["APPROVED_FOR_MERGE", "CHANGES_REQUIRED", "BLOCKED", null]
+        },
+        "confidence": {
+          "type": ["number", "null"],
+          "description": "Confiança declarada pelo auditor, entre 0 e 1; nula quando não há parecer.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reviewedHeadSha": {
+          "type": ["string", "null"],
+          "description": "Head SHA efetivamente auditado; nulo quando não há parecer."
+        },
+        "available": {
+          "type": "boolean",
+          "description": "Verdadeiro quando existe parecer válido e não invalidado deste auditor."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1128 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://orqpeg.local/schemas/state.schema.json",
+  "title": "Estado persistido de uma execução do OrqPEG",
+  "description": "Estrutura do arquivo de estado de uma execução (RunRecord). Guarda a máquina de estados, o progresso de cada prompt, os commits, o pull request, os checks, as auditorias de merge, o consenso, o relatório de portões e o desfecho do merge.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runId",
+    "projectId",
+    "state",
+    "previousState",
+    "createdAt",
+    "updatedAt",
+    "finishedAt",
+    "dryRun",
+    "baseCommitSha",
+    "branchName",
+    "worktreePath",
+    "workingDirectory",
+    "prompts",
+    "currentPromptId",
+    "currentAttempt",
+    "commits",
+    "pushedAt",
+    "pushedRemote",
+    "pullRequest",
+    "checks",
+    "finalTests",
+    "mergeReviews",
+    "consensus",
+    "gateReport",
+    "mergeOutcome",
+    "events",
+    "lastError",
+    "pauseRequested",
+    "cancelRequested"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "Versão do formato do arquivo de estado. Sempre 1 nesta versão do produto."
+    },
+    "runId": {
+      "type": "string",
+      "description": "Identificador da execução, também usado como nome de diretório em data/.",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "projectId": {
+      "type": "string",
+      "description": "Identificador do projeto ao qual a execução pertence.",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "state": {
+      "description": "Estado corrente da máquina de execução.",
+      "$ref": "#/definitions/RunState"
+    },
+    "previousState": {
+      "description": "Estado imediatamente anterior; nulo na primeira transição.",
+      "anyOf": [{ "$ref": "#/definitions/RunState" }, { "type": "null" }]
+    },
+    "createdAt": {
+      "type": "string",
+      "description": "Momento de criação da execução, em ISO 8601.",
+      "minLength": 1
+    },
+    "updatedAt": {
+      "type": "string",
+      "description": "Momento da última alteração do estado, em ISO 8601.",
+      "minLength": 1
+    },
+    "finishedAt": {
+      "type": ["string", "null"],
+      "description": "Momento de encerramento da execução, em ISO 8601; nulo enquanto ela estiver ativa."
+    },
+    "dryRun": {
+      "type": "boolean",
+      "description": "Quando verdadeiro, nenhuma operação destrutiva ou remota é efetivada."
+    },
+    "baseCommitSha": {
+      "type": ["string", "null"],
+      "description": "SHA do commit da base no início da execução."
+    },
+    "branchName": {
+      "type": ["string", "null"],
+      "description": "Nome da branch de trabalho criada ou reutilizada."
+    },
+    "worktreePath": {
+      "type": ["string", "null"],
+      "description": "Caminho absoluto do worktree dedicado, quando houver."
+    },
+    "workingDirectory": {
+      "type": ["string", "null"],
+      "description": "Diretório em que os agentes e os comandos locais são executados."
+    },
+    "prompts": {
+      "type": "array",
+      "description": "Progresso de cada prompt da fila, na ordem natural de execução.",
+      "items": { "$ref": "#/definitions/PromptProgress" }
+    },
+    "currentPromptId": {
+      "type": ["string", "null"],
+      "description": "Identificador do prompt em execução; nulo quando nenhum está ativo."
+    },
+    "currentAttempt": {
+      "type": "integer",
+      "description": "Número da tentativa corrente do prompt ativo.",
+      "minimum": 0
+    },
+    "commits": {
+      "type": "array",
+      "description": "Commits criados pela execução, na ordem em que foram gerados.",
+      "items": { "$ref": "#/definitions/RunCommit" }
+    },
+    "pushedAt": {
+      "type": ["string", "null"],
+      "description": "Momento do último push bem-sucedido, em ISO 8601."
+    },
+    "pushedRemote": {
+      "type": ["string", "null"],
+      "description": "Nome do remoto para o qual a branch foi enviada."
+    },
+    "pullRequest": {
+      "description": "Estado do pull request associado; nulo quando ainda não existe.",
+      "anyOf": [{ "$ref": "#/definitions/PullRequestInfo" }, { "type": "null" }]
+    },
+    "checks": {
+      "description": "Resumo dos checks do GitHub para o head atual; nulo quando não consultado.",
+      "anyOf": [{ "$ref": "#/definitions/ChecksSummary" }, { "type": "null" }]
+    },
+    "finalTests": {
+      "description": "Resultado da suíte de testes local executada antes do merge.",
+      "anyOf": [{ "$ref": "#/definitions/TestSuiteResult" }, { "type": "null" }]
+    },
+    "mergeReviews": {
+      "type": "array",
+      "description": "Auditorias finais de merge produzidas pelo Claude e pelo Codex.",
+      "items": { "$ref": "#/definitions/MergeReviewRecord" }
+    },
+    "consensus": {
+      "description": "Apuração do consenso entre as duas auditorias de merge.",
+      "anyOf": [{ "$ref": "#/definitions/MergeConsensus" }, { "type": "null" }]
+    },
+    "gateReport": {
+      "description": "Relatório da avaliação dos portões obrigatórios de merge.",
+      "anyOf": [{ "$ref": "#/definitions/MergeGateReport" }, { "type": "null" }]
+    },
+    "mergeOutcome": {
+      "description": "Desfecho da tentativa de merge.",
+      "anyOf": [{ "$ref": "#/definitions/MergeOutcome" }, { "type": "null" }]
+    },
+    "events": {
+      "type": "array",
+      "description": "Histórico cronológico de transições e mensagens da execução.",
+      "items": { "$ref": "#/definitions/RunEvent" }
+    },
+    "lastError": {
+      "description": "Último erro registrado pela execução.",
+      "anyOf": [{ "$ref": "#/definitions/OrqError" }, { "type": "null" }]
+    },
+    "pauseRequested": {
+      "type": "boolean",
+      "description": "Sinaliza pedido de pausa na próxima fronteira segura."
+    },
+    "cancelRequested": {
+      "type": "boolean",
+      "description": "Sinaliza pedido de cancelamento na próxima fronteira segura."
+    }
+  },
+  "definitions": {
+    "RunState": {
+      "type": "string",
+      "description": "Estados possíveis da máquina de execução.",
+      "enum": [
+        "IDLE",
+        "VALIDATING",
+        "PREPARING_WORKTREE",
+        "RUNNING_CLAUDE",
+        "RUNNING_TESTS",
+        "BUILDING_REVIEW_PACKAGE",
+        "RUNNING_CODEX",
+        "CHANGES_REQUESTED",
+        "PROMPT_APPROVED",
+        "COMMITTING",
+        "PUSHING",
+        "CREATING_PR",
+        "WAITING_CI",
+        "CI_FAILED",
+        "RUNNING_CLAUDE_MERGE_AUDIT",
+        "RUNNING_CODEX_MERGE_AUDIT",
+        "MERGE_CONSENSUS_PENDING",
+        "MERGE_APPROVED",
+        "MERGING",
+        "MERGED",
+        "BLOCKED",
+        "AUTH_REQUIRED",
+        "USAGE_LIMIT_REACHED",
+        "INTERRUPTED",
+        "FAILED",
+        "COMPLETED",
+        "CANCELLED"
+      ]
+    },
+    "PromptProgress": {
+      "type": "object",
+      "description": "Situação de um prompt individual dentro da execução.",
+      "additionalProperties": false,
+      "required": [
+        "promptId",
+        "status",
+        "attempts",
+        "lastAttemptAt",
+        "approvedAt",
+        "commitSha",
+        "lastVerdict",
+        "blockingIssueCount"
+      ],
+      "properties": {
+        "promptId": {
+          "type": "string",
+          "description": "Identificador do prompt, derivado do nome do arquivo.",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "description": "Situação atual do prompt.",
+          "enum": [
+            "PENDING",
+            "RUNNING",
+            "CHANGES_REQUESTED",
+            "APPROVED",
+            "BLOCKED",
+            "SKIPPED",
+            "FAILED"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "description": "Quantidade de tentativas já realizadas para este prompt.",
+          "minimum": 0
+        },
+        "lastAttemptAt": {
+          "type": ["string", "null"],
+          "description": "Momento da última tentativa, em ISO 8601."
+        },
+        "approvedAt": {
+          "type": ["string", "null"],
+          "description": "Momento da aprovação do prompt, em ISO 8601."
+        },
+        "commitSha": {
+          "type": ["string", "null"],
+          "description": "SHA do commit gerado após a aprovação."
+        },
+        "lastVerdict": {
+          "type": ["string", "null"],
+          "description": "Último veredito recebido do revisor de prompt.",
+          "enum": ["APPROVED", "CHANGES_REQUESTED", "BLOCKED", null]
+        },
+        "blockingIssueCount": {
+          "type": "integer",
+          "description": "Quantidade de problemas bloqueantes apontados na última revisão.",
+          "minimum": 0
+        }
+      }
+    },
+    "RunCommit": {
+      "type": "object",
+      "description": "Commit criado pela execução para um prompt aprovado.",
+      "additionalProperties": false,
+      "required": ["promptId", "sha", "message", "at"],
+      "properties": {
+        "promptId": {
+          "type": "string",
+          "description": "Prompt que originou o commit.",
+          "minLength": 1
+        },
+        "sha": {
+          "type": "string",
+          "description": "SHA do commit.",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "description": "Mensagem do commit."
+        },
+        "at": {
+          "type": "string",
+          "description": "Momento da criação do commit, em ISO 8601.",
+          "minLength": 1
+        }
+      }
+    },
+    "RunEvent": {
+      "type": "object",
+      "description": "Entrada do histórico de eventos da execução.",
+      "additionalProperties": false,
+      "required": ["at", "state", "message"],
+      "properties": {
+        "at": {
+          "type": "string",
+          "description": "Momento do evento, em ISO 8601.",
+          "minLength": 1
+        },
+        "state": {
+          "description": "Estado vigente no momento do evento.",
+          "$ref": "#/definitions/RunState"
+        },
+        "message": {
+          "type": "string",
+          "description": "Descrição do evento em português."
+        },
+        "data": {
+          "type": "object",
+          "description": "Dados adicionais do evento, já redigidos contra segredos."
+        }
+      }
+    },
+    "PullRequestInfo": {
+      "type": "object",
+      "description": "Situação do pull request no GitHub.",
+      "additionalProperties": false,
+      "required": [
+        "number",
+        "url",
+        "title",
+        "state",
+        "isDraft",
+        "baseRefName",
+        "headRefName",
+        "headSha",
+        "baseSha",
+        "mergeable",
+        "mergeStateStatus",
+        "merged",
+        "mergeCommitSha",
+        "reviewDecision",
+        "unresolvedThreadCount"
+      ],
+      "properties": {
+        "number": {
+          "type": "integer",
+          "description": "Número do pull request.",
+          "minimum": 1
+        },
+        "url": {
+          "type": "string",
+          "description": "URL pública do pull request."
+        },
+        "title": {
+          "type": "string",
+          "description": "Título do pull request."
+        },
+        "state": {
+          "type": "string",
+          "description": "Situação do pull request.",
+          "enum": ["OPEN", "CLOSED", "MERGED"]
+        },
+        "isDraft": {
+          "type": "boolean",
+          "description": "Indica se o pull request está como rascunho."
+        },
+        "baseRefName": {
+          "type": "string",
+          "description": "Branch base do pull request."
+        },
+        "headRefName": {
+          "type": "string",
+          "description": "Branch de origem do pull request."
+        },
+        "headSha": {
+          "type": "string",
+          "description": "SHA do commit no topo da branch de origem.",
+          "minLength": 1
+        },
+        "baseSha": {
+          "type": ["string", "null"],
+          "description": "SHA do commit da base considerado pelo GitHub."
+        },
+        "mergeable": {
+          "type": "string",
+          "description": "Resultado da checagem de conflitos.",
+          "enum": ["MERGEABLE", "CONFLICTING", "UNKNOWN"]
+        },
+        "mergeStateStatus": {
+          "type": ["string", "null"],
+          "description": "Estado detalhado de mergeabilidade informado pelo GitHub."
+        },
+        "merged": {
+          "type": "boolean",
+          "description": "Indica se o pull request já foi integrado."
+        },
+        "mergeCommitSha": {
+          "type": ["string", "null"],
+          "description": "SHA do commit de merge, quando já integrado."
+        },
+        "reviewDecision": {
+          "type": ["string", "null"],
+          "description": "Decisão agregada das revisões humanas.",
+          "enum": ["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", null]
+        },
+        "unresolvedThreadCount": {
+          "type": "integer",
+          "description": "Quantidade de comentários de revisão ainda não resolvidos.",
+          "minimum": 0
+        }
+      }
+    },
+    "CheckRun": {
+      "type": "object",
+      "description": "Execução individual de um check do GitHub.",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status",
+        "conclusion",
+        "detailsUrl",
+        "required",
+        "workflowName",
+        "startedAt",
+        "completedAt"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Nome do check."
+        },
+        "status": {
+          "type": "string",
+          "description": "Estágio de execução do check.",
+          "enum": ["QUEUED", "IN_PROGRESS", "COMPLETED", "PENDING", "UNKNOWN"]
+        },
+        "conclusion": {
+          "type": "string",
+          "description": "Conclusão do check.",
+          "enum": [
+            "SUCCESS",
+            "FAILURE",
+            "NEUTRAL",
+            "CANCELLED",
+            "SKIPPED",
+            "TIMED_OUT",
+            "ACTION_REQUIRED",
+            "STALE",
+            "STARTUP_FAILURE",
+            "PENDING"
+          ]
+        },
+        "detailsUrl": {
+          "type": ["string", "null"],
+          "description": "URL com os detalhes da execução do check."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Indica se o check é obrigatório para o merge."
+        },
+        "workflowName": {
+          "type": ["string", "null"],
+          "description": "Nome do workflow que originou o check."
+        },
+        "startedAt": {
+          "type": ["string", "null"],
+          "description": "Início da execução do check, em ISO 8601."
+        },
+        "completedAt": {
+          "type": ["string", "null"],
+          "description": "Término da execução do check, em ISO 8601."
+        }
+      }
+    },
+    "ChecksSummary": {
+      "type": "object",
+      "description": "Resumo consolidado dos checks para um head SHA.",
+      "additionalProperties": false,
+      "required": [
+        "headSha",
+        "total",
+        "passed",
+        "failed",
+        "pending",
+        "skipped",
+        "allRequiredPassed",
+        "anyRequiredPending",
+        "anyRequiredFailed",
+        "anyRequiredSkipped",
+        "runs"
+      ],
+      "properties": {
+        "headSha": {
+          "type": "string",
+          "description": "Head SHA ao qual os checks se referem.",
+          "minLength": 1
+        },
+        "total": {
+          "type": "integer",
+          "description": "Quantidade total de checks observados.",
+          "minimum": 0
+        },
+        "passed": {
+          "type": "integer",
+          "description": "Quantidade de checks concluídos com sucesso.",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "description": "Quantidade de checks com falha.",
+          "minimum": 0
+        },
+        "pending": {
+          "type": "integer",
+          "description": "Quantidade de checks ainda em andamento.",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "description": "Quantidade de checks ignorados.",
+          "minimum": 0
+        },
+        "allRequiredPassed": {
+          "type": "boolean",
+          "description": "Verdadeiro quando todos os checks obrigatórios passaram."
+        },
+        "anyRequiredPending": {
+          "type": "boolean",
+          "description": "Verdadeiro quando algum check obrigatório ainda está pendente."
+        },
+        "anyRequiredFailed": {
+          "type": "boolean",
+          "description": "Verdadeiro quando algum check obrigatório falhou."
+        },
+        "anyRequiredSkipped": {
+          "type": "boolean",
+          "description": "Verdadeiro quando algum check obrigatório foi ignorado."
+        },
+        "runs": {
+          "type": "array",
+          "description": "Lista completa dos checks observados.",
+          "items": { "$ref": "#/definitions/CheckRun" }
+        }
+      }
+    },
+    "TestCommandResult": {
+      "type": "object",
+      "description": "Resultado de um comando de teste local.",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "cwd",
+        "status",
+        "exitCode",
+        "startedAt",
+        "finishedAt",
+        "durationMs",
+        "stdout",
+        "stderr"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Comando executado, como configurado no projeto."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Diretório onde o comando foi executado."
+        },
+        "status": {
+          "description": "Situação final do comando.",
+          "$ref": "#/definitions/TestStatus"
+        },
+        "exitCode": {
+          "type": ["integer", "null"],
+          "description": "Código de saída do processo; nulo quando encerrado por sinal."
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "Início da execução, em ISO 8601.",
+          "minLength": 1
+        },
+        "finishedAt": {
+          "type": "string",
+          "description": "Término da execução, em ISO 8601.",
+          "minLength": 1
+        },
+        "durationMs": {
+          "type": "number",
+          "description": "Duração em milissegundos.",
+          "minimum": 0
+        },
+        "stdout": {
+          "type": "string",
+          "description": "Saída padrão capturada, possivelmente truncada e redigida."
+        },
+        "stderr": {
+          "type": "string",
+          "description": "Saída de erro capturada, possivelmente truncada e redigida."
+        }
+      }
+    },
+    "TestStatus": {
+      "type": "string",
+      "description": "Situação possível de uma suíte ou comando de teste.",
+      "enum": ["PASSED", "FAILED", "TIMEOUT", "INTERRUPTED", "COMMAND_NOT_FOUND", "NOT_RUN"]
+    },
+    "TestSuiteResult": {
+      "type": "object",
+      "description": "Resultado consolidado da suíte de testes local.",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "passed",
+        "startedAt",
+        "finishedAt",
+        "durationMs",
+        "commands",
+        "failedCommands"
+      ],
+      "properties": {
+        "status": {
+          "description": "Situação final da suíte.",
+          "$ref": "#/definitions/TestStatus"
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Verdadeiro somente quando todos os comandos passaram."
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "Início da suíte, em ISO 8601.",
+          "minLength": 1
+        },
+        "finishedAt": {
+          "type": "string",
+          "description": "Término da suíte, em ISO 8601.",
+          "minLength": 1
+        },
+        "durationMs": {
+          "type": "number",
+          "description": "Duração total em milissegundos.",
+          "minimum": 0
+        },
+        "commands": {
+          "type": "array",
+          "description": "Resultado de cada comando executado.",
+          "items": { "$ref": "#/definitions/TestCommandResult" }
+        },
+        "failedCommands": {
+          "type": "array",
+          "description": "Comandos que falharam, na ordem de execução.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ReviewIssue": {
+      "type": "object",
+      "description": "Problema apontado por uma revisão de IA.",
+      "additionalProperties": false,
+      "required": ["severity", "title", "description"],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "description": "Gravidade do problema.",
+          "enum": ["blocking", "major", "minor", "info"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Título curto do problema.",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "description": "Descrição objetiva do problema.",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string",
+          "description": "Arquivo afetado, relativo à raiz do repositório."
+        },
+        "line": {
+          "type": "integer",
+          "description": "Linha aproximada do problema.",
+          "minimum": 0
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "Sugestão de correção."
+        }
+      }
+    },
+    "MergeReview": {
+      "type": "object",
+      "description": "Auditoria final de merge produzida por um agente.",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "reviewedHeadSha",
+        "summary",
+        "confidence",
+        "blockingIssues",
+        "nonBlockingIssues",
+        "requiredActions",
+        "riskAssessment",
+        "testsAssessment",
+        "scopeAssessment"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "description": "Veredito da auditoria de merge.",
+          "enum": ["APPROVED_FOR_MERGE", "CHANGES_REQUIRED", "BLOCKED"]
+        },
+        "reviewedHeadSha": {
+          "type": "string",
+          "description": "Head SHA efetivamente auditado.",
+          "pattern": "^[0-9a-fA-F]{7,40}$"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Resumo do parecer.",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Confiança do auditor, entre 0 e 1.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "blockingIssues": {
+          "type": "array",
+          "description": "Problemas que impedem o merge.",
+          "items": { "$ref": "#/definitions/ReviewIssue" }
+        },
+        "nonBlockingIssues": {
+          "type": "array",
+          "description": "Problemas que não impedem o merge.",
+          "items": { "$ref": "#/definitions/ReviewIssue" }
+        },
+        "requiredActions": {
+          "type": "array",
+          "description": "Ações exigidas antes de uma nova auditoria.",
+          "items": { "type": "string" }
+        },
+        "riskAssessment": {
+          "type": "object",
+          "description": "Avaliação de risco da integração.",
+          "additionalProperties": false,
+          "required": ["level", "summary"],
+          "properties": {
+            "level": {
+              "type": "string",
+              "description": "Nível de risco.",
+              "enum": ["low", "medium", "high", "critical"]
+            },
+            "summary": {
+              "type": "string",
+              "description": "Justificativa do nível de risco."
+            }
+          }
+        },
+        "testsAssessment": {
+          "type": "object",
+          "description": "Avaliação da cobertura e dos resultados de teste.",
+          "additionalProperties": false,
+          "required": ["localTestsPassed", "ciPassed", "coverageAcceptable"],
+          "properties": {
+            "localTestsPassed": {
+              "type": "boolean",
+              "description": "Testes locais aprovados."
+            },
+            "ciPassed": {
+              "type": "boolean",
+              "description": "Checks obrigatórios do GitHub aprovados."
+            },
+            "coverageAcceptable": {
+              "type": "boolean",
+              "description": "Cobertura de testes considerada suficiente."
+            }
+          }
+        },
+        "scopeAssessment": {
+          "type": "object",
+          "description": "Avaliação de aderência ao escopo pedido.",
+          "additionalProperties": false,
+          "required": ["withinScope", "unexpectedChanges"],
+          "properties": {
+            "withinScope": {
+              "type": "boolean",
+              "description": "Verdadeiro quando as alterações ficam dentro do escopo."
+            },
+            "unexpectedChanges": {
+              "type": "array",
+              "description": "Alterações fora do escopo identificadas.",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "MergeReviewRecord": {
+      "type": "object",
+      "description": "Registro de uma auditoria de merge com os metadados do OrqPEG.",
+      "additionalProperties": false,
+      "required": [
+        "auditor",
+        "review",
+        "producedAt",
+        "observedHeadSha",
+        "rawOutputPath",
+        "invalidated",
+        "invalidationReason"
+      ],
+      "properties": {
+        "auditor": {
+          "type": "string",
+          "description": "Agente que produziu a auditoria.",
+          "enum": ["claude", "codex"]
+        },
+        "review": {
+          "description": "Parecer completo da auditoria.",
+          "$ref": "#/definitions/MergeReview"
+        },
+        "producedAt": {
+          "type": "string",
+          "description": "Momento em que o parecer foi obtido, em ISO 8601.",
+          "minLength": 1
+        },
+        "observedHeadSha": {
+          "type": "string",
+          "description": "Head SHA observado pelo OrqPEG ao disparar a auditoria.",
+          "minLength": 1
+        },
+        "rawOutputPath": {
+          "type": ["string", "null"],
+          "description": "Caminho do artefato com a saída bruta do agente."
+        },
+        "invalidated": {
+          "type": "boolean",
+          "description": "Verdadeiro quando o parecer deixou de valer."
+        },
+        "invalidationReason": {
+          "type": ["string", "null"],
+          "description": "Motivo da invalidação do parecer."
+        }
+      }
+    },
+    "MergeConsensusSide": {
+      "type": "object",
+      "description": "Posição de um dos auditores na apuração do consenso.",
+      "additionalProperties": false,
+      "required": ["verdict", "confidence", "reviewedHeadSha", "available"],
+      "properties": {
+        "verdict": {
+          "type": ["string", "null"],
+          "description": "Veredito do auditor; nulo quando não há parecer válido.",
+          "enum": ["APPROVED_FOR_MERGE", "CHANGES_REQUIRED", "BLOCKED", null]
+        },
+        "confidence": {
+          "type": ["number", "null"],
+          "description": "Confiança declarada pelo auditor, entre 0 e 1.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reviewedHeadSha": {
+          "type": ["string", "null"],
+          "description": "Head SHA auditado por este auditor."
+        },
+        "available": {
+          "type": "boolean",
+          "description": "Verdadeiro quando existe parecer válido deste auditor."
+        }
+      }
+    },
+    "MergeConsensus": {
+      "type": "object",
+      "description": "Apuração do consenso entre as auditorias de merge.",
+      "additionalProperties": false,
+      "required": [
+        "reached",
+        "headSha",
+        "claude",
+        "codex",
+        "sameHeadSha",
+        "minimumConfidence",
+        "reasons"
+      ],
+      "properties": {
+        "reached": {
+          "type": "boolean",
+          "description": "Verdadeiro quando o consenso foi atingido."
+        },
+        "headSha": {
+          "type": "string",
+          "description": "Head SHA considerado na apuração.",
+          "minLength": 1
+        },
+        "claude": {
+          "description": "Posição da auditoria do Claude.",
+          "$ref": "#/definitions/MergeConsensusSide"
+        },
+        "codex": {
+          "description": "Posição da auditoria do Codex.",
+          "$ref": "#/definitions/MergeConsensusSide"
+        },
+        "sameHeadSha": {
+          "type": "boolean",
+          "description": "Verdadeiro quando ambos auditaram exatamente o mesmo head SHA."
+        },
+        "minimumConfidence": {
+          "type": "number",
+          "description": "Confiança mínima exigida pelo projeto, entre 0 e 1.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reasons": {
+          "type": "array",
+          "description": "Motivos que sustentam o resultado da apuração.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "GateResult": {
+      "type": "object",
+      "description": "Resultado da avaliação de um portão obrigatório de merge.",
+      "additionalProperties": false,
+      "required": ["id", "index", "title", "status", "reason"],
+      "properties": {
+        "id": {
+          "description": "Identificador do portão.",
+          "$ref": "#/definitions/GateId"
+        },
+        "index": {
+          "type": "integer",
+          "description": "Posição do portão na ordem de avaliação.",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string",
+          "description": "Título legível do portão."
+        },
+        "status": {
+          "type": "string",
+          "description": "Situação da avaliação do portão.",
+          "enum": ["PASSED", "FAILED", "SKIPPED", "NOT_EVALUATED"]
+        },
+        "reason": {
+          "type": "string",
+          "description": "Justificativa da situação registrada."
+        },
+        "evidence": {
+          "type": "object",
+          "description": "Evidências coletadas durante a avaliação."
+        }
+      }
+    },
+    "GateId": {
+      "type": "string",
+      "description": "Identificadores dos portões obrigatórios de merge.",
+      "enum": [
+        "ALL_PROMPTS_APPROVED",
+        "ALL_COMMITS_CREATED",
+        "BRANCH_PUSHED_TO_CORRECT_REMOTE",
+        "PR_OPEN",
+        "PR_BASE_CORRECT",
+        "NO_CONFLICTS",
+        "LOCAL_TESTS_PASSED",
+        "REQUIRED_CHECKS_PASSED",
+        "NO_PENDING_REQUIRED_CHECKS",
+        "NO_SKIPPED_REQUIRED_CHECKS",
+        "NO_UNRESOLVED_THREADS",
+        "NO_HUMAN_CHANGES_REQUESTED",
+        "CLAUDE_MERGE_APPROVED",
+        "CODEX_MERGE_APPROVED",
+        "AUDITORS_SAME_HEAD_SHA",
+        "MINIMUM_CONFIDENCE_MET",
+        "NO_BLOCKING_ISSUES",
+        "HEAD_SHA_UNCHANGED",
+        "BASE_NOT_INVALIDATED",
+        "PROJECT_ALLOWS_DUAL_AI_CONSENSUS"
+      ]
+    },
+    "MergeGateReport": {
+      "type": "object",
+      "description": "Relatório completo da avaliação dos portões de merge.",
+      "additionalProperties": false,
+      "required": ["evaluatedAt", "headSha", "baseSha", "allPassed", "gates", "failedGates"],
+      "properties": {
+        "evaluatedAt": {
+          "type": "string",
+          "description": "Momento da avaliação, em ISO 8601.",
+          "minLength": 1
+        },
+        "headSha": {
+          "type": "string",
+          "description": "Head SHA avaliado.",
+          "minLength": 1
+        },
+        "baseSha": {
+          "type": "string",
+          "description": "SHA da base considerado na avaliação."
+        },
+        "allPassed": {
+          "type": "boolean",
+          "description": "Verdadeiro somente quando todos os portões passaram."
+        },
+        "gates": {
+          "type": "array",
+          "description": "Resultado de cada portão, na ordem de avaliação.",
+          "items": { "$ref": "#/definitions/GateResult" }
+        },
+        "failedGates": {
+          "type": "array",
+          "description": "Identificadores dos portões que reprovaram.",
+          "items": { "$ref": "#/definitions/GateId" }
+        }
+      }
+    },
+    "MergeOutcome": {
+      "type": "object",
+      "description": "Desfecho da tentativa de integrar o pull request.",
+      "additionalProperties": false,
+      "required": [
+        "attempted",
+        "merged",
+        "mergeSha",
+        "strategy",
+        "matchedHeadSha",
+        "performedAt",
+        "reason",
+        "idempotentSkip"
+      ],
+      "properties": {
+        "attempted": {
+          "type": "boolean",
+          "description": "Verdadeiro quando o merge chegou a ser tentado."
+        },
+        "merged": {
+          "type": "boolean",
+          "description": "Verdadeiro quando o merge foi efetivado."
+        },
+        "mergeSha": {
+          "type": ["string", "null"],
+          "description": "SHA do commit de merge."
+        },
+        "strategy": {
+          "type": "string",
+          "description": "Estratégia usada na integração.",
+          "enum": ["squash", "merge", "rebase"]
+        },
+        "matchedHeadSha": {
+          "type": ["string", "null"],
+          "description": "Head SHA exigido e confirmado no momento do merge."
+        },
+        "performedAt": {
+          "type": ["string", "null"],
+          "description": "Momento da integração, em ISO 8601."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Explicação do desfecho, em português."
+        },
+        "idempotentSkip": {
+          "type": "boolean",
+          "description": "Verdadeiro quando o merge foi dispensado por já ter sido feito."
+        }
+      }
+    },
+    "OrqError": {
+      "type": "object",
+      "description": "Erro estruturado do OrqPEG.",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Código do erro.",
+          "enum": [
+            "CONFIG_INVALID",
+            "CONFIG_NOT_FOUND",
+            "PROJECT_NOT_FOUND",
+            "PROJECT_INVALID",
+            "PROMPT_NOT_FOUND",
+            "SCHEMA_INVALID",
+            "VALIDATION_FAILED",
+            "PATH_UNSAFE",
+            "API_KEY_PRESENT",
+            "TOOL_MISSING",
+            "AUTH_REQUIRED",
+            "USAGE_LIMIT_REACHED",
+            "GIT_FAILED",
+            "GH_FAILED",
+            "WORKTREE_FAILED",
+            "LOCK_HELD",
+            "LOCK_FAILED",
+            "STATE_CORRUPT",
+            "PROCESS_FAILED",
+            "PROCESS_TIMEOUT",
+            "PROCESS_INTERRUPTED",
+            "REVIEW_INVALID_JSON",
+            "REVIEW_SCHEMA_MISMATCH",
+            "TESTS_FAILED",
+            "CI_FAILED",
+            "MERGE_GATE_FAILED",
+            "MERGE_CONFLICT",
+            "MERGE_ALREADY_DONE",
+            "REMOTE_MISMATCH",
+            "CANCELLED",
+            "IO_FAILED",
+            "INTERNAL"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "description": "Mensagem em português explicando o erro.",
+          "minLength": 1
+        },
+        "details": {
+          "type": "object",
+          "description": "Detalhes adicionais do erro, já redigidos contra segredos."
+        },
+        "cause": {
+          "type": "string",
+          "description": "Causa original resumida."
+        }
+      }
+    }
+  }
+}

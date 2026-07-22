@@ -36,12 +36,29 @@ const CMD_COMMAND_NOT_FOUND_EXIT_CODE = 9009;
  */
 const CMD_NOT_RECOGNIZED_MARKERS: readonly string[] = [
   'is not recognized as an internal or external command',
-  'não é reconhecido como um comando interno',
-  'nao e reconhecido como um comando interno',
+  'reconhecido como um comando interno',
   'no se reconoce como un comando interno',
   'cannot find the path specified',
-  'o sistema não pode encontrar o caminho especificado',
+  'nao pode encontrar o caminho especificado',
+  'command not found',
 ];
+
+/**
+ * Normaliza a saída do cmd.exe antes de comparar com os marcadores.
+ *
+ * O cmd.exe escreve no code page OEM do Windows (850/437 em português), mas o
+ * fluxo é lido como UTF-8. O resultado é mojibake: "não é" chega como "n?o ?".
+ * Por isso os marcadores acima são fragmentos SEM acento, e aqui removemos
+ * diacríticos e caracteres de substituição para que a comparação funcione em
+ * qualquer idioma do Windows.
+ */
+function normalizeForMarkerMatch(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/�/g, '')
+    .toLowerCase();
+}
 
 interface LaunchPlan {
   /** Executável realmente entregue ao `spawn`. */
@@ -506,8 +523,8 @@ function resolveStatus(input: StatusInput): ProcessStatus {
 function isCmdCommandNotFound(exitCode: number | null, stderrText: string): boolean {
   if (exitCode === CMD_COMMAND_NOT_FOUND_EXIT_CODE) return true;
   if (exitCode === null || exitCode === 0) return false;
-  const lowered = stderrText.toLowerCase();
-  return CMD_NOT_RECOGNIZED_MARKERS.some((marker) => lowered.includes(marker));
+  const normalized = normalizeForMarkerMatch(stderrText);
+  return CMD_NOT_RECOGNIZED_MARKERS.some((marker) => normalized.includes(marker));
 }
 
 interface ResultInput {
