@@ -244,10 +244,31 @@ async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRec
   run = executed.value;
 
   if (!allPromptsApproved(run)) {
-    run = save(
-      ctx,
-      transition(run, 'BLOCKED', 'Nem todos os prompts foram aprovados; publicação interrompida.'),
-    );
+    /*
+     * O estado de parada já definido pelo laço é PRESERVADO.
+     *
+     * Quando o Loop Guard interrompe, ele nomeia o motivo (LOOP_GUARD_TRIGGERED
+     * com gatilho e relatório). Sobrescrever isso aqui por um BLOCKED genérico
+     * apagaria a causa da linha do tempo e faria a parada consciente parecer
+     * uma falha qualquer. Só descrevemos a interrupção quando nenhum estado de
+     * parada específico foi registrado.
+     */
+    if (!isStopState(run.state)) {
+      run = save(
+        ctx,
+        transition(
+          run,
+          'BLOCKED',
+          'Nem todos os prompts foram aprovados; publicação interrompida.',
+        ),
+      );
+    } else {
+      ctx.logger.info(
+        `Publicação interrompida: a execução parou em ${run.state}${
+          run.lastLoopGuard?.trigger ? ` (${run.lastLoopGuard.trigger})` : ''
+        }.`,
+      );
+    }
     writeRunReport({ project: ctx.project, run });
     return ok(run);
   }
@@ -748,15 +769,19 @@ async function executeSinglePrompt(
     );
   }
 
-  run = save(ctx, updatePromptProgress(run, promptFile.id, { status: 'FAILED' }));
-  run = save(
-    ctx,
-    transition(
-      run,
-      'BLOCKED',
-      `Prompt ${promptFile.id} não foi aprovado em ${maxAttempts} tentativa(s).`,
-    ),
-  );
+  /*
+   * O laço esgotou. A saída também passa pelo Loop Guard, em vez de ir direto
+   * para BLOCKED: assim o motivo real é nomeado (MAX_ATTEMPTS_REACHED, ou um
+   * gatilho mais específico que já estivesse valendo), a parada entra na linha
+   * do tempo como decisão consciente e o relatório LOOP-GUARD.md é gerado.
+   * Sem isto, o limite de tentativas terminava como bloqueio genérico e sem
+   * evidência — encontrado em execução real, não pelos dublês.
+   */
+  const exhausted = decideNextAttempt(ctx, run, promptFile.id, maxAttempts + 1, {
+    previousReview,
+    lastTests,
+  });
+  run = save(ctx, applyLoopGuardStop(ctx, run, promptFile.id, exhausted));
   return ok(run);
 }
 
@@ -1235,6 +1260,20 @@ function snapshotPrompts(prompts: readonly PromptFile[]): Map<string, string> {
     snapshots.set(prompt.id, raw.ok ? contentHash(raw.value) : '');
   }
   return snapshots;
+}
+
+/** Estados que já representam uma parada nomeada e não devem ser sobrescritos. */
+function isStopState(state: RunState): boolean {
+  const stops: ReadonlySet<RunState> = new Set<RunState>([
+    'LOOP_GUARD_TRIGGERED',
+    'BLOCKED',
+    'AUTH_REQUIRED',
+    'USAGE_LIMIT_REACHED',
+    'INTERRUPTED',
+    'CANCELLED',
+    'FAILED',
+  ]);
+  return stops.has(state);
 }
 
 function budgetOf(run: RunRecord, promptId: string): PromptBudget {

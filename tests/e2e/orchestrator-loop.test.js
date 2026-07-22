@@ -266,6 +266,7 @@ function makePorts(options = {}) {
     // O nome da branch é gerado pelo orquestrador; a PR simulada precisa
     // refletir exatamente esse valor, senão o gate 3 reprova (com razão).
     branch: 'orqpeg/demo/run-1',
+    diffRevision: 0,
   };
 
   const ports = {
@@ -313,6 +314,15 @@ function makePorts(options = {}) {
         return OK(' src/app.ts | 10 +++++');
       },
       async diffPatch() {
+        // Por padrão o diff é constante entre tentativas — é o que caracteriza
+        // ausência de progresso. `varyingDiff` simula um executor que de fato
+        // muda o código a cada correção.
+        if (options.varyingDiff) {
+          spy.diffRevision += 1;
+          return OK(
+            'diff --git a/src/app.ts b/src/app.ts\n@@\n+revisao ' + spy.diffRevision + '\n',
+          );
+        }
         return OK('diff --git a/src/app.ts b/src/app.ts');
       },
       async addPaths() {
@@ -486,6 +496,113 @@ test('Codex pedindo mudanças gera nova tentativa e o Claude é chamado de novo'
   assert.equal(result.value.prompts[0].status, 'APPROVED');
   assert.equal(result.value.prompts[0].attempts, 2, 'deve ter havido uma segunda tentativa');
   assert.ok(spy.claudeCalls.includes('corrector'), 'a correção deve usar o papel de corretor');
+});
+
+/*
+ * Regressão de campo. Numa execução real com Claude e Codex, o laço de
+ * tentativas esgotou e foi direto para BLOCKED com mensagem genérica, SEM
+ * passar pelo Loop Guard: `lastLoopGuard` ficou nulo, o estado não virou
+ * LOOP_GUARD_TRIGGERED e nenhum LOOP-GUARD.md foi gerado. O gatilho
+ * MAX_ATTEMPTS_REACHED existia e era testado em unidade, mas nunca era emitido
+ * na prática porque o `for` nunca chega a perguntar pela tentativa seguinte.
+ */
+test('correção que não muda o código para em NO_PROGRESS antes de gastar o limite', async () => {
+  const project = makeProject();
+  const { result, spy } = await execute(project, {
+    // O revisor pede correção sempre, e o executor devolve o mesmo diff.
+    codexReview: () => agentResult(promptReviewJson('CHANGES_REQUESTED')),
+  });
+
+  assert.equal(result.ok, true, result.ok ? '' : JSON.stringify(result.error));
+  const run = result.value;
+
+  assert.equal(run.state, 'LOOP_GUARD_TRIGGERED', 'parada consciente, não bloqueio genérico');
+  assert.equal(run.lastLoopGuard.trigger, 'NO_PROGRESS');
+  assert.equal(run.lastLoopGuard.severity, 'soft_stop');
+  assert.ok(run.lastLoopGuard.nextActions.length > 0);
+  assert.equal(run.prompts[0].status, 'BLOCKED');
+  assert.equal(spy.commits, 0, 'prompt não aprovado nunca gera commit');
+
+  // O ganho concreto: parou ANTES de gastar a terceira chamada do executor.
+  const executores = spy.claudeCalls.filter((r) => r === 'executor' || r === 'corrector');
+  assert.equal(
+    executores.length,
+    2,
+    'detectar ausência de progresso economiza a tentativa que repetiria o mesmo código',
+  );
+});
+
+test('esgotar as tentativas com progresso real nomeia MAX_ATTEMPTS_REACHED', async () => {
+  const project = makeProject();
+  // Progresso genuíno em todas as dimensões: o código muda a cada volta e o
+  // revisor aponta problemas diferentes. Nenhum gatilho fino se aplica, então
+  // o que resta é o teto de tentativas.
+  let rodada = 0;
+  const { result, spy } = await execute(project, {
+    codexReview: () => {
+      rodada += 1;
+      return agentResult(
+        promptReviewJson('CHANGES_REQUESTED', {
+          requiredActions: ['Corrigir o ponto número ' + rodada + '.'],
+          blockingIssues: [
+            {
+              severity: 'blocking',
+              title: 'Problema distinto ' + rodada,
+              description: 'Descrição específica da rodada ' + rodada + '.',
+            },
+          ],
+        }),
+      );
+    },
+    varyingDiff: true,
+  });
+
+  assert.equal(result.ok, true, result.ok ? '' : JSON.stringify(result.error));
+  const run = result.value;
+
+  assert.equal(run.state, 'LOOP_GUARD_TRIGGERED');
+  assert.ok(run.lastLoopGuard, 'a decisão precisa ficar registrada no estado');
+  assert.equal(run.lastLoopGuard.trigger, 'MAX_ATTEMPTS_REACHED');
+  assert.equal(run.lastLoopGuard.allowed, false);
+  assert.equal(run.prompts[0].status, 'BLOCKED');
+  assert.equal(spy.merged, false);
+
+  const executores = spy.claudeCalls.filter((r) => r === 'executor' || r === 'corrector');
+  assert.equal(
+    executores.length,
+    project.execution.maxAttemptsPerPrompt,
+    'com progresso real o limite de tentativas é usado por inteiro, mas não excedido',
+  );
+});
+
+test('o orçamento consumido fica registrado por prompt', async () => {
+  const project = makeProject();
+  let rodada = 0;
+  const { result } = await execute(project, {
+    codexReview: () => {
+      rodada += 1;
+      return agentResult(
+        promptReviewJson('CHANGES_REQUESTED', {
+          requiredActions: ['Ação distinta ' + rodada + '.'],
+          blockingIssues: [
+            {
+              severity: 'blocking',
+              title: 'Item ' + rodada,
+              description: 'Detalhe ' + rodada + '.',
+            },
+          ],
+        }),
+      );
+    },
+    varyingDiff: true,
+  });
+
+  const budget = result.value.budgets.find((b) => b.promptId === '010-fundacao');
+  assert.ok(budget, 'cada prompt tem orçamento próprio');
+  assert.equal(budget.claudeCalls, 3, 'três chamadas do executor');
+  assert.equal(budget.codexCalls, 3, 'três chamadas do revisor');
+  assert.equal(budget.attempts, 3);
+  assert.ok(budget.diffFingerprints.length >= 3, 'assinaturas de diff registradas por tentativa');
 });
 
 test('veredito BLOCKED interrompe o prompt sem commit', async () => {

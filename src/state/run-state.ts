@@ -147,6 +147,13 @@ const EXCEPTION_STATES: ReadonlySet<RunState> = new Set<RunState>([
   'INTERRUPTED',
   'FAILED',
   'CANCELLED',
+  /*
+   * O Loop Guard interrompe a partir de qualquer ponto do fluxo — inclusive de
+   * CHANGES_REQUESTED, que é o caso mais comum. Sem estar aqui, a transição era
+   * rejeitada e a parada deliberada caía para BLOCKED genérico, perdendo o
+   * gatilho na linha do tempo. Encontrado em execução real, não pelos dublês.
+   */
+  'LOOP_GUARD_TRIGGERED',
 ]);
 
 /**

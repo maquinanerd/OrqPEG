@@ -323,6 +323,56 @@ test('a cadeia percorrida de fato muda o estado (nenhuma transição é ignorada
   );
 });
 
+/*
+ * Regressão de campo: numa execução real com Claude e Codex, o Loop Guard
+ * disparou FORBIDDEN_AREA_CHANGED a partir de CHANGES_REQUESTED e a transição
+ * para LOOP_GUARD_TRIGGERED foi REJEITADA — o estado caiu para BLOCKED genérico
+ * e o gatilho sumiu da linha do tempo. Os dublês não pegaram porque nunca
+ * chegaram ao portão com um gatilho acionado.
+ */
+test('LOOP_GUARD_TRIGGERED é alcançável de todo estado ativo do fluxo', () => {
+  const ativos = [
+    'VALIDATING', 'PREPARING_WORKTREE', 'RUNNING_CLAUDE', 'RUNNING_TESTS',
+    'BUILDING_REVIEW_PACKAGE', 'RUNNING_CODEX', 'CHANGES_REQUESTED',
+    'PROMPT_APPROVED', 'COMMITTING', 'PUSHING', 'CREATING_PR', 'WAITING_CI',
+    'RUNNING_CLAUDE_MERGE_AUDIT', 'RUNNING_CODEX_MERGE_AUDIT',
+    'MERGE_CONSENSUS_PENDING', 'MERGE_APPROVED',
+  ];
+  for (const de of ativos) {
+    assert.equal(
+      canTransition(de, 'LOOP_GUARD_TRIGGERED'),
+      true,
+      `${de} -> LOOP_GUARD_TRIGGERED precisa ser permitido`,
+    );
+  }
+});
+
+test('a parada do Loop Guard muda o estado de verdade, sem rejeição', () => {
+  const project = makeProject();
+  let run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+  const caminho = [
+    'VALIDATING',
+    'RUNNING_CLAUDE',
+    'RUNNING_TESTS',
+    'BUILDING_REVIEW_PACKAGE',
+    'RUNNING_CODEX',
+    'CHANGES_REQUESTED',
+  ];
+  for (const alvo of caminho) {
+    run = transition(run, alvo, 'etapa');
+  }
+  run = transition(run, 'LOOP_GUARD_TRIGGERED', 'FORBIDDEN_AREA_CHANGED');
+
+  assert.equal(run.state, 'LOOP_GUARD_TRIGGERED', 'a parada não pode virar BLOCKED genérico');
+  const rejeitadas = run.events.filter((e) => e.message.startsWith('Transição rejeitada'));
+  assert.deepEqual(rejeitadas.map((e) => e.message), []);
+});
+
+test('de LOOP_GUARD_TRIGGERED a execução pode ser retomada por decisão humana', () => {
+  assert.equal(canTransition('LOOP_GUARD_TRIGGERED', 'RUNNING_CLAUDE'), true);
+  assert.equal(canTransition('LOOP_GUARD_TRIGGERED', 'CANCELLED'), true);
+});
+
 test('variantes do fluxo também são percorríveis', () => {
   // Projeto que não publica: a suíte final leva direto a COMPLETED.
   assert.equal(canTransition('RUNNING_TESTS', 'COMPLETED'), true);
