@@ -134,6 +134,20 @@ a:hover { text-decoration: underline; }
 
 .icon-sprite { display: none; }
 
+.ic {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  vertical-align: -2px;
+}
+
+.ic--inline {
+  width: 12px;
+  height: 12px;
+  margin-left: 4px;
+  opacity: .8;
+}
+
 .mono { font-family: var(--font-mono); font-size: .92em; }
 .muted { color: var(--text-dim); }
 .faint { color: var(--text-faint); font-size: 12px; }
