@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Prompt — OrqPEG</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body data-page="prompt">
+  <a class="skip-link" href="#main">Ir para o conteúdo</a>
+
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#logo"></use></svg>
+      <span>
+        <span class="brand-name">OrqPEG</span>
+        <span class="brand-sub">Painel local</span>
+      </span>
+    </a>
+
+    <nav class="mainnav" aria-label="Navegação principal">
+      <a href="index.html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#project"></use></svg>Painel
+      </a>
+      <a href="settings.html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#settings"></use></svg>Configuração
+      </a>
+    </nav>
+  </header>
+
+  <div class="banner" id="banner" role="status" aria-live="polite" hidden>
+    <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#alert"></use></svg>
+    <span class="banner__text" id="banner-text"></span>
+    <button type="button" class="banner__close" id="banner-close" aria-label="Fechar mensagem">&times;</button>
+  </div>
+
+  <main class="page" id="main">
+    <nav class="crumbs" aria-label="Trilha de navegação">
+      <a href="index.html">
+        <svg class="ic" aria-hidden="true" focusable="false"><use href="assets/icons.svg#back"></use></svg>Painel
+      </a>
+      <span class="sep" aria-hidden="true">/</span>
+      <a id="crumb-project-link" href="index.html">Projeto</a>
+      <span class="sep" aria-hidden="true">/</span>
+      <span id="crumb-prompt">Prompt</span>
+    </nav>
+
+    <section class="page-head">
+      <div class="titles">
+        <h1 id="prompt-name">Carregando…</h1>
+        <p class="sub" id="prompt-sub">Buscando o conteúdo do prompt no servidor local.</p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn" id="btn-refresh">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#refresh"></use></svg>Atualizar
+        </button>
+      </div>
+    </section>
+
+    <div class="grid grid--2">
+      <section class="card" aria-labelledby="h-prompt-data">
+        <h2 id="h-prompt-data">Arquivo</h2>
+        <dl class="kv" id="kv-prompt"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+
+      <section class="card" aria-labelledby="h-prompt-structure">
+        <h2 id="h-prompt-structure">Estrutura reconhecida</h2>
+        <div class="grid" id="prompt-sections">
+          <p class="empty">Sem dados</p>
+        </div>
+      </section>
+    </div>
+
+    <section class="section" aria-labelledby="h-prompt-raw">
+      <h2 id="h-prompt-raw">Conteúdo integral</h2>
+      <pre class="raw" id="prompt-raw" tabindex="0">Sem dados</pre>
+    </section>
+
+    <section class="section" aria-labelledby="h-attempts">
+      <h2 id="h-attempts">Histórico de tentativas e revisões</h2>
+      <div class="table-wrap">
+        <table class="data">
+          <caption>Uma linha por execução que processou este prompt.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Execução</th>
+              <th scope="col">Estado da execução</th>
+              <th scope="col">Status do prompt</th>
+              <th scope="col">Tentativas</th>
+              <th scope="col">Último veredito</th>
+              <th scope="col">Bloqueios</th>
+              <th scope="col">Última tentativa</th>
+              <th scope="col">Aprovado em</th>
+              <th scope="col">Commit</th>
+            </tr>
+          </thead>
+          <tbody id="attempts-body" aria-live="polite">
+            <tr><td class="empty" colspan="9">Sem dados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>O conteúdo exibido vem do arquivo real em data/projects/&lt;projeto&gt;/prompts.</span>
+  </footer>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

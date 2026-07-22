@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Projeto — OrqPEG</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body data-page="project">
+  <a class="skip-link" href="#main">Ir para o conteúdo</a>
+
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#logo"></use></svg>
+      <span>
+        <span class="brand-name">OrqPEG</span>
+        <span class="brand-sub">Painel local</span>
+      </span>
+    </a>
+
+    <nav class="mainnav" aria-label="Navegação principal">
+      <a href="index.html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#project"></use></svg>Painel
+      </a>
+      <a href="settings.html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#settings"></use></svg>Configuração
+      </a>
+    </nav>
+
+    <p class="conn" id="conn">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="conn-label">Iniciando…</span>
+    </p>
+  </header>
+
+  <div class="banner" id="banner" role="status" aria-live="polite" hidden>
+    <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#alert"></use></svg>
+    <span class="banner__text" id="banner-text"></span>
+    <button type="button" class="banner__close" id="banner-close" aria-label="Fechar mensagem">&times;</button>
+  </div>
+
+  <main class="page" id="main">
+    <nav class="crumbs" aria-label="Trilha de navegação">
+      <a href="index.html">
+        <svg class="ic" aria-hidden="true" focusable="false"><use href="assets/icons.svg#back"></use></svg>Painel
+      </a>
+      <span class="sep" aria-hidden="true">/</span>
+      <span id="crumb-project">Projeto</span>
+    </nav>
+
+    <section class="page-head">
+      <div class="titles">
+        <h1 id="project-name">Carregando…</h1>
+        <p class="sub" id="project-sub">Buscando dados do projeto no servidor local.</p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn btn--primary" id="btn-start">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#play"></use></svg>Iniciar
+        </button>
+        <button type="button" class="btn" id="btn-dry-run">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#flask"></use></svg>Dry-run
+        </button>
+        <button type="button" class="btn" id="btn-pause">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#pause"></use></svg>Pausar
+        </button>
+        <button type="button" class="btn" id="btn-resume">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#resume"></use></svg>Retomar
+        </button>
+        <button type="button" class="btn" id="btn-cancel">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#cancel"></use></svg>Cancelar
+        </button>
+        <button type="button" class="btn" id="btn-refresh">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#refresh"></use></svg>Atualizar
+        </button>
+      </div>
+    </section>
+
+    <section class="toolbar" aria-label="Ações do projeto">
+      <span class="toolbar-label">Abrir</span>
+      <button type="button" class="btn btn--sm" id="btn-open-repo">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#folder"></use></svg>Repositório
+      </button>
+      <button type="button" class="btn btn--sm" id="btn-open-worktree">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#worktree"></use></svg>Worktree
+      </button>
+      <button type="button" class="btn btn--sm" id="btn-open-editor">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#editor"></use></svg>Editor
+      </button>
+      <button type="button" class="btn btn--sm" id="btn-open-pr">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#pr"></use></svg>Pull request
+      </button>
+      <button type="button" class="btn btn--sm" id="btn-open-logs">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#logs"></use></svg>Logs
+      </button>
+
+      <span class="toolbar-label">Execução</span>
+      <label class="visually-hidden" for="run-select">Execução usada nas ações de PR e relatório</label>
+      <select id="run-select">
+        <option value="">Carregando…</option>
+      </select>
+
+      <span class="toolbar-label">Relatório</span>
+      <button type="button" class="btn btn--sm" id="btn-report-html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#report"></use></svg>HTML
+      </button>
+      <button type="button" class="btn btn--sm" id="btn-report-md">Markdown</button>
+      <button type="button" class="btn btn--sm" id="btn-report-json">JSON</button>
+
+      <span class="spacer"></span>
+      <button type="button" class="btn btn--sm btn--danger" id="btn-remove">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#trash"></use></svg>Remover cadastro
+      </button>
+    </section>
+
+    <div class="grid grid--2">
+      <section class="card" aria-labelledby="h-identification">
+        <h2 id="h-identification">Identificação</h2>
+        <dl class="kv" id="kv-identification"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+
+      <section class="card" aria-labelledby="h-active">
+        <h2 id="h-active">Execução de referência</h2>
+        <dl class="kv" id="kv-active" aria-live="polite"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+
+      <section class="card" aria-labelledby="h-git">
+        <h2 id="h-git">Git e worktree</h2>
+        <dl class="kv" id="kv-git"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+
+      <section class="card" aria-labelledby="h-commands">
+        <h2 id="h-commands">Comandos e agentes</h2>
+        <dl class="kv" id="kv-commands"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+
+      <section class="card" aria-labelledby="h-execution">
+        <h2 id="h-execution">Execução e pull request</h2>
+        <dl class="kv" id="kv-execution"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+
+      <section class="card" aria-labelledby="h-merge">
+        <h2 id="h-merge">Política de merge</h2>
+        <dl class="kv" id="kv-merge"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+    </div>
+
+    <section class="section" aria-labelledby="h-prompts">
+      <h2 id="h-prompts">Prompts</h2>
+      <div class="table-wrap">
+        <table class="data">
+          <caption>Ordem de execução definida pelo nome do arquivo, com ordenação natural.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Ordem</th>
+              <th scope="col">Prompt</th>
+              <th scope="col">Arquivo</th>
+              <th scope="col">Tamanho</th>
+              <th scope="col">Status</th>
+              <th scope="col">Tentativas</th>
+              <th scope="col">Último veredito</th>
+              <th scope="col">Commit</th>
+            </tr>
+          </thead>
+          <tbody id="prompts-body" aria-live="polite">
+            <tr><td class="empty" colspan="8">Sem dados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-runs">
+      <h2 id="h-runs">Histórico de execuções</h2>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th scope="col">Execução</th>
+              <th scope="col">Estado</th>
+              <th scope="col">Dry-run</th>
+              <th scope="col">Criada em</th>
+              <th scope="col">Duração</th>
+              <th scope="col">Prompts</th>
+              <th scope="col">PR</th>
+              <th scope="col">Merge</th>
+              <th scope="col">Relatório</th>
+            </tr>
+          </thead>
+          <tbody id="runs-body" aria-live="polite">
+            <tr><td class="empty" colspan="9">Sem dados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Todas as ações desta página chamam a API local do painel; nenhuma delas fala com serviços de IA.</span>
+  </footer>
+
+  <dialog id="dlg-remove" aria-labelledby="h-remove">
+    <div class="dialog-head">
+      <h2 id="h-remove">Remover cadastro do projeto</h2>
+    </div>
+    <div class="dialog-body">
+      <p class="warn-box">
+        Esta ação remove <strong>apenas o cadastro do projeto no OrqPEG</strong>, junto com o histórico de execuções
+        guardado pelo painel. O código real do repositório
+        (<span class="mono" id="remove-project-path"></span>) <strong>NÃO será apagado</strong>: nenhum arquivo,
+        branch, worktree ou commit do seu projeto é tocado.
+      </p>
+      <p class="field">
+        <label for="remove-confirm">Para confirmar, digite o identificador do projeto: <span class="mono" id="remove-project-id"></span></label>
+        <input type="text" id="remove-confirm" autocomplete="off" spellcheck="false">
+      </p>
+    </div>
+    <div class="dialog-foot">
+      <button type="button" class="btn" id="btn-remove-cancel">Cancelar</button>
+      <button type="button" class="btn btn--danger" id="btn-remove-confirm" disabled>
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#trash"></use></svg>Remover cadastro
+      </button>
+    </div>
+  </dialog>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>
