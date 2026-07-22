@@ -724,26 +724,51 @@
     );
   }
 
-  function apiGuardCard(guard) {
+  /**
+   * Guarda de API como faixa operacional horizontal.
+   *
+   * Deixou de ser um cartão no meio das ferramentas porque não é uma
+   * ferramenta: é um estado do ambiente. Aqui ele ganha bloco próprio, com o
+   * veredito em destaque no cabeçalho e os parâmetros em linhas rotuladas.
+   */
+  function apiGuardStrip(guard) {
     if (!guard || typeof guard !== 'object') {
-      return (
-        '<article class="card"><div class="card-head"><h3>Variáveis de API</h3></div>' +
-        '<p class="empty">Sem dados</p></article>'
-      );
+      return '<p class="empty">Sem dados</p>';
     }
     var blocked = guard.blocked === true;
+    var warned = !blocked && Array.isArray(guard.warnKeys) && guard.warnKeys.length > 0;
+
     return (
-      '<article class="card">' +
-      '<div class="card-head"><h3>Variáveis de API</h3>' +
-      (blocked ? chip('EXECUÇÃO BLOQUEADA', 'failed') : chip('AMBIENTE LIMPO', 'approved')) +
+      '<div class="opstrip">' +
+      '<div class="opstrip__head">' +
+      '<span class="opstrip__title">Ambiente dos processos filhos</span>' +
+      (blocked
+        ? chip('EXECUÇÃO BLOQUEADA', 'failed')
+        : warned
+        ? chip('AMBIENTE LIMPO · COM AVISO', 'waiting')
+        : chip('AMBIENTE LIMPO', 'approved')) +
       '</div>' +
-      '<dl class="speclist">' +
-      specRow('Detectadas', tagList(guard.presentKeys, blocked ? 'danger' : 'warn')) +
-      specRow('Aviso', tagList(guard.warnKeys, 'warn')) +
-      specRow('Removidas', tagList(guard.strippedForChildren, '')) +
-      '</dl>' +
-      '<p class="faint">O OrqPEG nunca lê o valor dessas variáveis: apenas os nomes são inspecionados.</p>' +
-      '</article>'
+      '<div class="opstrip__rows">' +
+      opRow('Detectadas', tagList(guard.presentKeys, blocked ? 'danger' : 'warn')) +
+      opRow('Aviso', tagList(guard.warnKeys, 'warn')) +
+      opRow('Removidas', tagList(guard.strippedForChildren, '')) +
+      '</div>' +
+      '<p class="opstrip__note">' +
+      'Apenas os nomes são inspecionados. O valor de uma variável de API nunca é lido, ' +
+      'gravado em log, incluído em relatório nem exibido neste painel. A remoção ocorre ' +
+      'somente na cópia entregue ao processo filho; o ambiente do Windows permanece intacto.' +
+      '</p>' +
+      '</div>'
+    );
+  }
+
+  function opRow(label, valueHtml) {
+    return (
+      '<div class="opstrip__row"><span class="opstrip__label">' +
+      esc(label) +
+      '</span><span class="opstrip__value">' +
+      valueHtml +
+      '</span></div>'
     );
   }
 
@@ -751,11 +776,20 @@
     var card = $('card-diagnostics');
     if (card) card.hidden = false;
 
-    if (!report || typeof report !== 'object') {
-      setHtml('diagnostics-body', emptyRow(5, 'Sem dados'));
-      setText('diagnostics-summary', 'Sem dados');
+    // Vazio não abre tabela: uma única linha informativa basta. Cabeçalho de
+    // coluna sem dado algum é ruído, não informação.
+    var wrap = $('diagnostics-table-wrap');
+    if (!report || typeof report !== 'object' || !Array.isArray(report.items) || report.items.length === 0) {
+      if (wrap) wrap.hidden = true;
+      setText(
+        'diagnostics-summary',
+        'Nenhum diagnóstico executado nesta sessão. Use "Diagnóstico" para verificar sistema, ferramentas, schemas, wrappers, porta e locks.'
+      );
+      var emptyOverall = $('diagnostics-overall');
+      if (emptyOverall) emptyOverall.innerHTML = '';
       return;
     }
+    if (wrap) wrap.hidden = false;
 
     var counts = report.counts || {};
     setText(
@@ -854,23 +888,28 @@
   function renderHomeEmpty() {
     setHtml('home-metrics', '<p class="empty">Sem dados</p>');
     setHtml('home-tools', '<p class="empty">Sem dados</p>');
+    setHtml('home-apiguard', '<p class="empty">Sem dados</p>');
     setHtml('projects-body', emptyRow(12, 'Sem dados'));
-    setHtml('recent-activity', '<li class="empty">Sem dados</li>');
-    setHtml('merges-body', emptyRow(5, 'Sem dados'));
-    setText('home-generated', 'Sem dados');
+    setHtml('recent-activity', '<li class="empty">Sem atividade registrada</li>');
+    setHtml('merges-body', emptyRow(5, 'Nenhum merge registrado'));
+    setHtml('home-generated', '<span>Sem dados do servidor</span>');
   }
 
   function renderHome(data) {
     var projects = Array.isArray(data.projects) ? data.projects : [];
     var tools = Array.isArray(data.tools) ? data.tools : [];
 
-    setText(
+    // Faixa monoespaçada do masthead: cada dado da sessão em seu próprio
+    // elemento, separados pelo filete que o CSS insere entre irmãos.
+    setHtml(
       'home-generated',
-      text(data.product) +
-        ' versão ' +
-        text(data.version) +
-        ' · dados de ' +
-        fmtDateTime(data.generatedAt)
+      '<span>Versão ' +
+        esc(text(data.version)) +
+        '</span><span>dados de ' +
+        esc(fmtDateTime(data.generatedAt)) +
+        '</span><span>painel local 127.0.0.1</span><span>' +
+        esc(text(projects.length)) +
+        ' projeto(s)</span>'
     );
 
     var toolsOk = tools.filter(function (tool) {
@@ -893,9 +932,10 @@
 
     setHtml(
       'home-tools',
-      (tools.length === 0 ? '<p class="empty">Sem dados</p>' : tools.map(toolCard).join('')) +
-        apiGuardCard(data.apiGuard)
+      tools.length === 0 ? '<p class="empty">Sem dados</p>' : tools.map(toolCard).join('')
     );
+
+    setHtml('home-apiguard', apiGuardStrip(data.apiGuard));
 
     if (projects.length === 0) {
       setHtml(

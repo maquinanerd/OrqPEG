@@ -42,10 +42,14 @@
   </div>
 
   <main class="page" id="main">
-    <section class="page-head">
-      <div class="titles">
-        <h1>Visão geral</h1>
-        <p class="sub" id="home-generated">Carregando dados do servidor…</p>
+    <section class="masthead">
+      <div class="masthead__block">
+        <span class="eyebrow">Local AI orchestration infrastructure</span>
+        <h1 class="masthead__title">ORQPEG<span class="dot">.</span></h1>
+        <p class="masthead__lede">
+          Orquestração local de desenvolvimento com Claude Code, Codex CLI, testes,
+          Git, pull requests, CI e consenso operacional de merge.
+        </p>
       </div>
       <div class="actions">
         <button type="button" class="btn btn--primary" id="btn-new-project">
@@ -58,10 +62,14 @@
           <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#refresh"></use></svg>Atualizar
         </button>
       </div>
+      <p class="masthead__meta" id="home-generated">Carregando dados do servidor…</p>
     </section>
 
     <section class="section" aria-labelledby="h-status">
-      <h2 id="h-status">Status geral</h2>
+      <div class="section-head">
+        <h2 id="h-status">Status geral</h2>
+        <p class="section-note">Contagens da instalação local no momento da última leitura.</p>
+      </div>
       <div class="grid grid--metrics" id="home-metrics" aria-live="polite">
         <p class="empty">Sem dados</p>
       </div>
@@ -70,12 +78,23 @@
     <section class="section" aria-labelledby="h-detect">
       <div class="section-head">
         <h2 id="h-detect">Detecção do ambiente</h2>
-        <p class="legend">
-          <span>Claude Code</span><span>Codex CLI</span><span>Git</span><span>GitHub CLI</span>
-          <span>Autenticação</span><span>Variáveis de API</span>
+        <p class="section-note">
+          Executáveis locais exigidos pelo fluxo. O OrqPEG só fala com estes binários — nunca com API de IA.
         </p>
       </div>
       <div class="grid grid--cards" id="home-tools" aria-live="polite">
+        <p class="empty">Sem dados</p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-apiguard">
+      <div class="section-head">
+        <h2 id="h-apiguard">Guarda de API</h2>
+        <p class="section-note">
+          Variáveis inspecionadas por nome antes de cada processo filho. O valor nunca é lido, gravado ou exibido.
+        </p>
+      </div>
+      <div id="home-apiguard" aria-live="polite">
         <p class="empty">Sem dados</p>
       </div>
     </section>
@@ -86,9 +105,8 @@
         <span id="diagnostics-overall"></span>
       </div>
       <p class="faint" id="diagnostics-summary">Sem dados</p>
-      <div class="table-wrap">
+      <div class="table-wrap" id="diagnostics-table-wrap">
         <table class="data">
-          <caption>Itens verificados pelo comando de diagnóstico do OrqPEG.</caption>
           <thead>
             <tr>
               <th scope="col">Status</th>
@@ -116,10 +134,12 @@
           <span class="chip chip--pending">Pendente</span>
           <span class="chip chip--audit">Auditoria</span>
         </p>
+        <p class="section-note">
+          Um projeto por linha, com o estado da execução mais recente. O código de cada projeto permanece onde já está.
+        </p>
       </div>
       <div class="table-wrap">
         <table class="data">
-          <caption>Um projeto por linha, com o estado da execução mais recente.</caption>
           <thead>
             <tr>
               <th scope="col">Projeto</th>

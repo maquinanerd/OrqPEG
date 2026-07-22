@@ -28,29 +28,30 @@
   --orq-text-muted: #747c74;
   --orq-text-subtle: #929892;
 
-  /* Verde institucional. */
-  --orq-green: #4b6841;
-  --orq-green-dark: #354d30;
-  --orq-green-light: #dfe9dc;
-  --orq-green-border: #aebfa9;
+  /* Verde institucional — dessaturado de propósito: identifica sem gritar. */
+  --orq-green: #526b49;
+  --orq-green-dark: #33482e;
+  --orq-green-light: #e8efe5;
+  --orq-green-border: #c2d2bd;
 
   /* Traços. */
   --orq-border: #d4d8d1;
   --orq-border-soft: #e5e8e2;
   --orq-border-strong: #bfc6bc;
 
-  /* Semântica de estado — quatro tons, nada além disso. */
-  --orq-success: #3f7140;
-  --orq-success-soft: #edf6ec;
+  /* Semântica de estado — quatro tons discretos. A cor informa o estado; ela
+     não decora e não disputa atenção com o conteúdo. */
+  --orq-success: #446b45;
+  --orq-success-soft: #eef4ed;
 
-  --orq-warning: #8d671c;
-  --orq-warning-soft: #fbf6e7;
+  --orq-warning: #856426;
+  --orq-warning-soft: #f8f4e9;
 
-  --orq-danger: #99483f;
-  --orq-danger-soft: #fff0ed;
+  --orq-danger: #8f4a42;
+  --orq-danger-soft: #f9efed;
 
-  --orq-info: #4c6871;
-  --orq-info-soft: #edf3f4;
+  --orq-info: #4e666e;
+  --orq-info-soft: #eef2f3;
 
   /* Estados de execução — mapeados sobre a paleta acima, sem cores novas. */
   --status-approved: var(--orq-success);
@@ -119,6 +120,18 @@ h2 {
   text-transform: uppercase;
   letter-spacing: .12em;
   color: var(--orq-text-secondary);
+}
+
+/* Rótulo técnico: a menor unidade tipográfica do sistema. Usado em eyebrows,
+   legendas de célula e microdados. Nunca compete com o título da seção. */
+.eyebrow {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .2em;
+  color: var(--orq-text-subtle);
+  line-height: 1.4;
 }
 
 h3 {
@@ -218,7 +231,7 @@ a:hover { text-decoration: underline; }
   gap: 24px;
   flex-wrap: wrap;
   padding: 0 22px;
-  min-height: 46px;
+  min-height: 38px;
   background: var(--orq-surface);
   border-bottom: 1px solid var(--orq-border);
 }
@@ -234,27 +247,31 @@ a:hover { text-decoration: underline; }
 .brand:hover { text-decoration: none; }
 
 .brand svg {
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   color: var(--orq-green);
   flex: none;
 }
 
+/* A marca na barra é deliberadamente pequena: o peso institucional pertence ao
+   masthead da página, não ao topo. Aqui basta identificar o sistema. */
 .brand-name {
-  display: block;
-  font-size: 14px;
+  display: inline;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: .04em;
+  letter-spacing: .08em;
   line-height: 1.15;
 }
 
 .brand-sub {
-  display: block;
-  font-size: 9.5px;
+  display: inline;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--orq-border);
+  font-size: 9px;
   color: var(--orq-text-subtle);
-  letter-spacing: .16em;
+  letter-spacing: .18em;
   text-transform: uppercase;
-  line-height: 1.3;
 }
 
 .mainnav {
@@ -267,13 +284,17 @@ a:hover { text-decoration: underline; }
 .mainnav a {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 12px;
+  gap: 5px;
+  padding: 0 10px;
   border-bottom: 2px solid transparent;
-  color: var(--orq-text-secondary);
-  font-size: 12.5px;
-  font-weight: 500;
+  color: var(--orq-text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .1em;
 }
+
+.mainnav svg { display: none; }
 
 .mainnav a:hover {
   background: var(--orq-surface-soft);
@@ -292,15 +313,16 @@ a:hover { text-decoration: underline; }
 .conn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   margin-left: auto;
-  padding: 3px 9px;
-  background: var(--orq-surface-soft);
-  border: 1px solid var(--orq-border-soft);
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  letter-spacing: .02em;
-  color: var(--orq-text-secondary);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color: var(--orq-text-subtle);
 }
 
 .conn .dot {
@@ -318,13 +340,15 @@ a:hover { text-decoration: underline; }
    4. Layout
    -------------------------------------------------------------------------- */
 
+/* Ritmo vertical mais apertado: o objetivo é densidade organizada, com mais
+   informação por viewport, sem encostar os blocos uns nos outros. */
 .page {
   max-width: var(--maxw);
   margin: 0 auto;
-  padding: 18px 22px 26px;
+  padding: 14px 22px 22px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 15px;
 }
 
 .crumbs {
@@ -342,20 +366,93 @@ a:hover { text-decoration: underline; }
 .crumbs svg { width: 12px; height: 12px; }
 .crumbs .sep { color: var(--orq-border-strong); }
 
+/* --------------------------------------------------------------------------
+   Masthead editorial
+   --------------------------------------------------------------------------
+   A abertura da página é institucional, não um cabeçalho de aplicativo: um
+   rótulo técnico pequeno, a marca em corpo grande, uma linha curta que explica
+   o produto e, ao pé, uma faixa monoespaçada com os dados da sessão. É o único
+   ponto da interface onde a tipografia cresce de verdade. */
+
+.masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding: 6px 0 0;
+  border-bottom: 3px solid var(--orq-text);
+}
+
+.masthead__block { min-width: 300px; flex: 1 1 460px; }
+
+.masthead__title {
+  margin: 6px 0 0;
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -.035em;
+  line-height: .95;
+  color: var(--orq-text);
+}
+
+.masthead__title .dot { color: var(--orq-green); }
+
+.masthead__lede {
+  margin: 9px 0 12px;
+  max-width: 62ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--orq-text-secondary);
+}
+
+.masthead .actions { padding-bottom: 12px; }
+
+/* Faixa de dados da sessão, colada ao filete inferior do masthead. */
+.masthead__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 10px;
+  width: 100%;
+  padding: 6px 0 7px;
+  border-top: 1px solid var(--orq-border);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: -.01em;
+  color: var(--orq-text-muted);
+}
+
+.masthead__meta > * + *::before {
+  content: "·";
+  margin-right: 10px;
+  color: var(--orq-border-strong);
+}
+
+/* Cabeçalho das páginas internas: mesma família do masthead, em escala menor.
+   A marca grande pertence só à home; aqui o peso vai para o nome do recurso. */
 .page-head {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding-bottom: 12px;
-  border-bottom: 2px solid var(--orq-border-strong);
+  padding-bottom: 10px;
+  border-bottom: 3px solid var(--orq-text);
 }
 
 .page-head .titles { min-width: 240px; }
 
-.page-head .sub {
+.page-head h1 {
   margin-top: 3px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  line-height: 1.05;
+}
+
+.page-head .sub {
+  margin-top: 5px;
+  max-width: 74ch;
   color: var(--orq-text-muted);
   font-size: 12px;
 }
@@ -406,7 +503,7 @@ a:hover { text-decoration: underline; }
   justify-content: space-between;
   gap: 14px;
   flex-wrap: wrap;
-  padding-bottom: 6px;
+  padding-bottom: 5px;
   margin-bottom: 8px;
   border-bottom: 1px solid var(--orq-border-strong);
 }
@@ -415,6 +512,28 @@ a:hover { text-decoration: underline; }
   border: 0;
   padding: 0;
   margin: 0;
+}
+
+/* Marcador da seção: um traço verde curto antes do título, repetido em todas
+   as seções para dar ritmo vertical constante à página. */
+.section > h2::before,
+.section-head h2::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  margin-right: 8px;
+  vertical-align: middle;
+  background: var(--orq-green);
+}
+
+/* Linha de descrição curta sob o título, dentro do mesmo cabeçalho. */
+.section-head .section-note {
+  flex: 1 1 100%;
+  order: 3;
+  margin-top: -2px;
+  font-size: 11.5px;
+  color: var(--orq-text-muted);
 }
 
 .grid {
@@ -434,22 +553,30 @@ a:hover { text-decoration: underline; }
   background: var(--orq-surface);
   border: 1px solid var(--orq-border);
   border-radius: var(--radius);
-  padding: 11px 13px;
+  padding: 9px 11px;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 7px;
   min-width: 0;
 }
 
-/* Primeiro título vira faixa de cabeçalho, colada às bordas do cartão. */
+/* Primeiro título vira faixa de cabeçalho verde-clara, colada às bordas do
+   cartão. O verde identifica o bloco como técnico-operacional e amarra os
+   cards à mesma família visual das seções. */
 .card > h2:first-child,
 .card > h3:first-child,
 .card > .card-head:first-child {
-  margin: -11px -13px 0;
-  padding: 7px 13px;
-  background: var(--orq-surface-soft);
-  border-bottom: 1px solid var(--orq-border-soft);
+  margin: -9px -11px 0;
+  padding: 6px 11px;
+  background: var(--orq-green-light);
+  border-bottom: 1px solid var(--orq-green-border);
   border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.card > h2:first-child,
+.card > h3:first-child,
+.card > .card-head:first-child h3 {
+  color: var(--orq-green-dark);
 }
 
 .card--note {
@@ -479,11 +606,84 @@ a:hover { text-decoration: underline; }
 .card > h3 { margin-top: 2px; }
 
 /* --------------------------------------------------------------------------
+   Bloco de parâmetros operacionais
+   --------------------------------------------------------------------------
+   Faixa branca horizontal para exibir um estado do sistema com seus parâmetros
+   em linhas rotuladas. É o formato usado pela guarda de API: parece um painel
+   de controle, não um formulário. */
+
+.opstrip {
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.opstrip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 7px 12px;
+  background: var(--orq-green-light);
+  border-bottom: 1px solid var(--orq-green-border);
+}
+
+.opstrip__title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--orq-green-dark);
+}
+
+.opstrip__rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0;
+}
+
+.opstrip__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 12px;
+  min-width: 0;
+  box-shadow: 1px 0 0 var(--orq-border-soft), 0 1px 0 var(--orq-border-soft);
+}
+
+.opstrip__label {
+  flex: none;
+  width: 92px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--orq-text-subtle);
+}
+
+.opstrip__value {
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--orq-text-secondary);
+}
+
+.opstrip__note {
+  padding: 6px 12px 8px;
+  font-size: 11px;
+  color: var(--orq-text-muted);
+  border-top: 1px solid var(--orq-border-soft);
+}
+
+/* --------------------------------------------------------------------------
    6. Faixa de métricas
    -------------------------------------------------------------------------- */
 
+/* Container único com divisões internas: lido como uma faixa de instrumentos,
+   não como seis cartões soltos. */
 .grid--metrics {
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 0;
   background: var(--orq-surface);
   border: 1px solid var(--orq-border);
@@ -492,16 +692,16 @@ a:hover { text-decoration: underline; }
 }
 
 .metric {
-  padding: 10px 14px;
+  padding: 9px 13px 10px;
   box-shadow: 1px 0 0 var(--orq-border-soft), 0 1px 0 var(--orq-border-soft);
 }
 
 .metric__value {
-  font-size: 23px;
+  font-size: 27px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -.02em;
-  line-height: 1.1;
+  letter-spacing: -.035em;
+  line-height: 1.05;
   color: var(--orq-text);
 }
 
@@ -728,24 +928,26 @@ table.data caption {
 
 table.data th,
 table.data td {
-  padding: 6px 11px;
+  padding: 5px 10px;
   text-align: left;
   vertical-align: top;
   border-bottom: 1px solid var(--orq-border-soft);
 }
 
+/* Cabeçalho de tabela em verde-claro: mesma família dos cabeçalhos de cartão,
+   para que listagem e cartão sejam lidos como o mesmo tipo de bloco. */
 table.data thead th {
   position: sticky;
   top: 0;
-  background: var(--orq-surface-soft);
+  background: var(--orq-green-light);
   font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: .11em;
-  color: var(--orq-text-muted);
+  color: var(--orq-green-dark);
   font-weight: 700;
   white-space: nowrap;
-  padding: 7px 11px;
-  border-bottom: 1px solid var(--orq-border);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--orq-green-border);
   z-index: 1;
 }
 
@@ -758,9 +960,20 @@ table.data td.num {
   text-align: right;
 }
 
+/* A primeira coluna carrega a identidade da linha: nome com peso real e, logo
+   abaixo, o slug em monoespaçada. É o ponto de entrada visual da listagem. */
 table.data th[scope="row"] {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 13px;
   white-space: nowrap;
+  letter-spacing: -.01em;
+}
+
+table.data th[scope="row"] .faint {
+  font-weight: 400;
+  font-size: 10px;
+  letter-spacing: .04em;
+  margin-top: 1px;
 }
 
 .row-label {
@@ -771,12 +984,20 @@ table.data th[scope="row"] {
   color: var(--orq-text-muted);
 }
 
+/* Estado vazio compacto: informa a ausência sem abrir um vão na página. Um
+   bloco vazio deve parecer um slot pronto para receber dado, não um buraco. */
 .empty {
-  padding: 16px 11px;
+  padding: 9px 11px;
   color: var(--orq-text-subtle);
-  font-size: 12px;
-  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  text-align: left;
 }
+
+td.empty,
+.table-wrap .empty { text-align: center; }
 
 .counts {
   display: inline-flex;
@@ -1016,7 +1237,7 @@ table.data th[scope="row"] {
   padding: 0;
   display: flex;
   flex-direction: column;
-  max-height: 380px;
+  max-height: 260px;
   overflow-y: auto;
 }
 
