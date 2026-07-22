@@ -4,57 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Guia visual offline do OrqPEG: instalacao, cadastro de projetos, prompts, execucao, painel, consenso de duas IAs e solucao de problemas.">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>OrqPEG 1.0.0 — Comece aqui</title>
 <style>
   :root {
-    --bg: #f5f6f8;
+    --bg: #eeeeeb;
     --surface: #ffffff;
-    --surface-alt: #eef0f4;
-    --border: #d8dce4;
-    --text: #1b1f26;
-    --text-muted: #5a6272;
-    --accent: #1b4fd8;
-    --accent-soft: #e7edfd;
-    --code-bg: #14181f;
-    --code-text: #e8ecf3;
-    --ok-bg: #e7f5ec;
-    --ok-border: #7fbf95;
-    --ok-text: #1c5c33;
-    --warn-bg: #fdf3e2;
-    --warn-border: #dda851;
-    --warn-text: #7a5310;
-    --stop-bg: #fdeaea;
-    --stop-border: #dd7f7f;
-    --stop-text: #8a2323;
-    --radius: 10px;
+    --surface-alt: #f7f8f5;
+    --border: #d4d8d1;
+    --text: #1c221d;
+    --text-muted: #4e574e;
+    --accent: #4b6841;
+    --accent-soft: #edf2eb;
+    --code-bg: #f7f8f5;
+    --code-text: #1c221d;
+    --ok-bg: #edf6ec;
+    --ok-border: #3f7140;
+    --ok-text: #3f7140;
+    --warn-bg: #fbf6e7;
+    --warn-border: #8d671c;
+    --warn-text: #8d671c;
+    --stop-bg: #fff0ed;
+    --stop-border: #99483f;
+    --stop-text: #99483f;
+    --radius: 3px;
     --sidebar-width: 280px;
     --font: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
     --mono: "Cascadia Mono", Consolas, "Courier New", ui-monospace, monospace;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #10131a;
-      --surface: #171b23;
-      --surface-alt: #1f2430;
-      --border: #2c3341;
-      --text: #e6e9ef;
-      --text-muted: #9aa3b4;
-      --accent: #7fa4ff;
-      --accent-soft: #1d2740;
-      --code-bg: #0b0e14;
-      --code-text: #e2e7f0;
-      --ok-bg: #14291c;
-      --ok-border: #2f6b45;
-      --ok-text: #9fdcb4;
-      --warn-bg: #2c2313;
-      --warn-border: #7d6224;
-      --warn-text: #e8c583;
-      --stop-bg: #2d1717;
-      --stop-border: #7c3535;
-      --stop-text: #f0a5a5;
-    }
   }
 
   * { box-sizing: border-box; }
@@ -280,24 +256,24 @@
     font-family: var(--font);
     font-size: 13px;
     font-weight: 600;
-    color: var(--code-text);
-    background: rgba(255, 255, 255, 0.09);
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    border-radius: 6px;
+    color: var(--text-muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     padding: 5px 12px;
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease;
   }
-  .copy-button:hover { background: rgba(255, 255, 255, 0.2); }
+  .copy-button:hover { background: var(--accent-soft); color: var(--accent); }
   .copy-button[data-state="done"] {
     background: var(--ok-border);
     border-color: var(--ok-border);
-    color: #08210f;
+    color: #ffffff;
   }
   .copy-button[data-state="error"] {
     background: var(--stop-border);
     border-color: var(--stop-border);
-    color: #2b0b0b;
+    color: #ffffff;
   }
 
   .note {

@@ -658,6 +658,34 @@
     return '<dt>' + esc(label) + '</dt><dd>' + valueHtml + '</dd>';
   }
 
+  /** Linha compacta de especificação: rótulo curto à esquerda, valor à direita. */
+  function specRow(label, valueHtml) {
+    return '<div><dt>' + esc(label) + '</dt><dd>' + valueHtml + '</dd></div>';
+  }
+
+  /** Valor técnico em uma única linha; o texto integral fica no atributo title. */
+  function monoLine(value) {
+    var full = text(value);
+    return '<span class="mono truncate" title="' + esc(full) + '">' + esc(full) + '</span>';
+  }
+
+  /** Nomes de variáveis lado a lado, em vez de uma coluna alta de texto. */
+  function tagList(values, tone) {
+    if (!isNonEmptyArray(values)) {
+      return '<span class="taglist"><span class="tag tag--none">Nenhuma</span></span>';
+    }
+    var suffix = tone ? ' tag--' + tone : '';
+    return (
+      '<span class="taglist">' +
+      values
+        .map(function (value) {
+          return '<span class="tag' + suffix + '">' + esc(text(value)) + '</span>';
+        })
+        .join('') +
+      '</span>'
+    );
+  }
+
   function metric(value, label, tone) {
     return (
       '<div class="metric metric--' +
@@ -684,22 +712,24 @@
       '<div class="card-head"><h3>' +
       esc(text(tool.name)) +
       '</h3>' +
-      availability +
+      '<span class="chipset">' + availability + auth + '</span>' +
       '</div>' +
-      '<dl class="kv">' +
-      kvRow('Comando', '<span class="mono">' + esc(text(tool.command)) + '</span>') +
-      kvRow('Versão', '<span class="mono">' + esc(text(tool.version)) + '</span>') +
-      kvRow('Caminho', '<span class="mono">' + esc(text(tool.path)) + '</span>') +
-      kvRow('Autenticação', auth) +
-      kvRow('Detalhe', esc(text(tool.detail))) +
+      '<dl class="speclist">' +
+      specRow('Comando', monoLine(tool.command)) +
+      specRow('Versão', monoLine(tool.version)) +
+      specRow('Caminho', monoLine(tool.path)) +
       '</dl>' +
+      '<p class="faint">' + esc(text(tool.detail)) + '</p>' +
       '</article>'
     );
   }
 
   function apiGuardCard(guard) {
     if (!guard || typeof guard !== 'object') {
-      return '<article class="card"><h3>Variáveis de API</h3><p class="empty">Sem dados</p></article>';
+      return (
+        '<article class="card"><div class="card-head"><h3>Variáveis de API</h3></div>' +
+        '<p class="empty">Sem dados</p></article>'
+      );
     }
     var blocked = guard.blocked === true;
     return (
@@ -707,25 +737,10 @@
       '<div class="card-head"><h3>Variáveis de API</h3>' +
       (blocked ? chip('EXECUÇÃO BLOQUEADA', 'failed') : chip('AMBIENTE LIMPO', 'approved')) +
       '</div>' +
-      '<dl class="kv">' +
-      kvRow(
-        'Detectadas',
-        isNonEmptyArray(guard.presentKeys)
-          ? '<span class="mono">' + esc(guard.presentKeys.join(', ')) + '</span>'
-          : esc('Nenhuma')
-      ) +
-      kvRow(
-        'Somente aviso',
-        isNonEmptyArray(guard.warnKeys)
-          ? '<span class="mono">' + esc(guard.warnKeys.join(', ')) + '</span>'
-          : esc('Nenhuma')
-      ) +
-      kvRow(
-        'Removidas dos processos filhos',
-        isNonEmptyArray(guard.strippedForChildren)
-          ? '<span class="mono">' + esc(guard.strippedForChildren.join(', ')) + '</span>'
-          : esc('Nenhuma')
-      ) +
+      '<dl class="speclist">' +
+      specRow('Detectadas', tagList(guard.presentKeys, blocked ? 'danger' : 'warn')) +
+      specRow('Aviso', tagList(guard.warnKeys, 'warn')) +
+      specRow('Removidas', tagList(guard.strippedForChildren, '')) +
       '</dl>' +
       '<p class="faint">O OrqPEG nunca lê o valor dessas variáveis: apenas os nomes são inspecionados.</p>' +
       '</article>'
@@ -2448,7 +2463,7 @@
                 '<td class="mono">' + esc(text(tool.command)) + '</td>' +
                 '<td>' + boolChip(tool.available === true, 'DISPONÍVEL', 'AUSENTE') + '</td>' +
                 '<td class="mono">' + esc(text(tool.version)) + '</td>' +
-                '<td class="mono">' + esc(text(tool.path)) + '</td>' +
+                '<td>' + monoLine(tool.path) + '</td>' +
                 '<td>' +
                 (tool.authenticated === true
                   ? chip('AUTENTICADO', 'approved')
@@ -2471,22 +2486,10 @@
       ) +
         kvRow(
           'Variáveis detectadas',
-          isNonEmptyArray(guard.presentKeys)
-            ? '<span class="mono">' + esc(guard.presentKeys.join(', ')) + '</span>'
-            : esc('Nenhuma')
+          tagList(guard.presentKeys, guard.blocked === true ? 'danger' : 'warn')
         ) +
-        kvRow(
-          'Variáveis apenas com aviso',
-          isNonEmptyArray(guard.warnKeys)
-            ? '<span class="mono">' + esc(guard.warnKeys.join(', ')) + '</span>'
-            : esc('Nenhuma')
-        ) +
-        kvRow(
-          'Removidas dos processos de IA',
-          isNonEmptyArray(guard.strippedForChildren)
-            ? '<span class="mono">' + esc(guard.strippedForChildren.join(', ')) + '</span>'
-            : esc('Nenhuma')
-        ) +
+        kvRow('Variáveis apenas com aviso', tagList(guard.warnKeys, 'warn')) +
+        kvRow('Removidas dos processos de IA', tagList(guard.strippedForChildren, '')) +
         kvRow('Force push', chip('SEMPRE PROIBIDO', 'approved'))
     );
   }
