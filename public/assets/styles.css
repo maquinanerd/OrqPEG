@@ -1360,13 +1360,33 @@ dialog::backdrop { background: rgba(28, 34, 29, .35); }
 }
 
 .warn-box {
-  border: 1px solid var(--orq-danger);
+  border: 1px solid var(--orq-warning);
   border-left-width: 3px;
-  background: var(--orq-danger-soft);
+  background: var(--orq-warning-soft);
   padding: 9px 11px;
   border-radius: var(--radius-sm);
   font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
+
+/* Parada dura: a causa precisa ser corrigida fora do laço, então o aviso usa
+   o tom de falha para não ser confundido com uma pendência contornável. */
+.warn-box--hard {
+  border-color: var(--orq-danger);
+  background: var(--orq-danger-soft);
+}
+
+.warn-box__title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--orq-danger);
+}
+
+.warn-box .list-plain { margin: 0; }
 
 /* --------------------------------------------------------------------------
    15. Conteúdo de prompt

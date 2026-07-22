@@ -133,6 +133,42 @@
       </div>
     </section>
 
+    <section class="section" aria-labelledby="h-loopguard">
+      <div class="section-head">
+        <h2 id="h-loopguard">Proteção contra looping</h2>
+        <p class="section-note">
+          Orçamento consumido pelo prompt em execução e motivo de uma eventual parada.
+          Nenhuma repetição do OrqPEG é ilimitada.
+        </p>
+      </div>
+
+      <div id="loopguard-alert" hidden></div>
+
+      <div class="grid grid--metrics" id="loopguard-metrics" aria-live="polite">
+        <p class="empty">Sem dados</p>
+      </div>
+
+      <div class="grid grid--2" id="loopguard-detail">
+        <section class="card" aria-labelledby="h-loopguard-signatures">
+          <h3 id="h-loopguard-signatures">Assinaturas registradas</h3>
+          <dl class="speclist" id="loopguard-fingerprints">
+            <div><dt>Diff</dt><dd class="faint">Sem dados</dd></div>
+          </dl>
+          <p class="faint">
+            Assinaturas normalizadas de diff, revisão e falha de teste. Repetição da mesma
+            assinatura indica ausência de progresso; o padrão A → B → A indica oscilação.
+          </p>
+        </section>
+
+        <section class="card" aria-labelledby="h-loopguard-decision">
+          <h3 id="h-loopguard-decision">Última decisão</h3>
+          <dl class="kv" id="loopguard-decision">
+            <dt>Situação</dt><dd class="faint">Sem parada registrada</dd>
+          </dl>
+        </section>
+      </div>
+    </section>
+
     <div class="grid grid--2">
       <section class="card" aria-labelledby="h-consensus">
         <h2 id="h-consensus">Tela de consenso</h2>

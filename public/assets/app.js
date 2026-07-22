@@ -1770,9 +1770,248 @@
 
     renderSteps(run, prompts);
     renderIntegration(run);
+    renderLoopGuard(run);
     renderConsensus(run, consensusPayload);
     renderGates(run.gateReport);
     renderRunEvents(run.events);
+  }
+
+  /* ----------------------------------------------------------------------
+   * Proteção contra looping — somente leitura.
+   *
+   * Mostra o orçamento consumido pelo prompt corrente e, quando houve parada,
+   * o gatilho com suas evidências. Esta tela não oferece nenhuma ação: o
+   * objetivo é conferir que o backend entrega os números certos antes de
+   * qualquer intervenção pela interface.
+   * -------------------------------------------------------------------- */
+
+  var LOOP_TRIGGER_LABEL = {
+    MAX_ATTEMPTS_REACHED: 'Limite de tentativas atingido',
+    CLAUDE_CALL_BUDGET_EXHAUSTED: 'Orçamento de chamadas do Claude esgotado',
+    CODEX_CALL_BUDGET_EXHAUSTED: 'Orçamento de chamadas do Codex esgotado',
+    AGENT_CALL_BUDGET_EXHAUSTED: 'Orçamento total de chamadas de IA esgotado',
+    PROMPT_TIME_BUDGET_EXHAUSTED: 'Tempo máximo do prompt esgotado',
+    RUN_TIME_BUDGET_EXHAUSTED: 'Tempo máximo da execução esgotado',
+    NO_PROGRESS: 'A correção não alterou o código',
+    REPEATED_REVIEW_ISSUES: 'O revisor apontou os mesmos problemas',
+    REPEATED_TEST_FAILURE: 'A mesma falha de teste se repetiu',
+    OSCILLATION_DETECTED: 'O código está oscilando entre duas soluções',
+    REVIEW_OSCILLATION_DETECTED: 'Os problemas apontados estão oscilando',
+    PROMPT_CHANGED_DURING_RUN: 'O prompt foi editado durante a execução',
+    PROJECT_CONTEXT_CHANGED: 'O contexto do projeto mudou durante a execução',
+    SCOPE_VIOLATION: 'Alteração fora das áreas permitidas',
+    FORBIDDEN_AREA_CHANGED: 'Alteração em área proibida',
+    DIFF_BUDGET_EXCEEDED: 'Diff acima do limite configurado',
+    INCOMPLETE_REVIEW_EVIDENCE: 'Pacote de revisão incompleto',
+    REVIEW_FORMAT_RETRIES_EXHAUSTED: 'Revisor não devolveu JSON válido',
+    INVALID_CHANGES_REQUEST: 'Pedido de mudança sem ação concreta',
+    AUTH_REQUIRED: 'Autenticação necessária',
+    USAGE_LIMIT_REACHED: 'Limite da assinatura atingido',
+    TOOL_MISSING: 'Ferramenta ausente',
+    PROCESS_TIMEOUT: 'Tempo limite do processo',
+    REPEATED_CI_FAILURE: 'A mesma falha de CI se repetiu',
+    CI_WAIT_TIMEOUT: 'Espera do CI esgotada',
+    MERGE_CORRECTION_BUDGET_EXHAUSTED: 'Ciclos de correção após auditoria esgotados',
+    USER_PAUSED: 'Pausa solicitada',
+    USER_CANCELLED: 'Cancelamento solicitado',
+  };
+
+  var LOOP_ACTION_LABEL = {
+    OPEN_REPORT: 'Abrir relatório',
+    OPEN_DIFF: 'Inspecionar o diff',
+    OPEN_TESTS: 'Inspecionar os testes',
+    OPEN_REVIEW: 'Ler a revisão',
+    EDIT_PROMPT: 'Editar o prompt e iniciar nova execução',
+    AUTHORIZE_EXTRA_ATTEMPT: 'Autorizar uma tentativa adicional',
+    MARK_FOR_MANUAL_REVIEW: 'Marcar para revisão manual',
+    SKIP_PROMPT: 'Pular este prompt',
+    CANCEL_RUN: 'Cancelar a execução',
+    FIX_AUTH: 'Refazer o login do CLI',
+    WAIT_QUOTA: 'Aguardar renovação da cota',
+    INSTALL_TOOL: 'Instalar a ferramenta ausente',
+    SPLIT_PROMPT: 'Dividir em prompts menores',
+    START_NEW_RUN: 'Iniciar uma nova execução',
+  };
+
+  function renderLoopGuard(run) {
+    var budget = currentBudget(run);
+    var limits = loopLimits(run);
+    var decision = run.lastLoopGuard || null;
+
+    renderLoopGuardAlert(decision);
+
+    if (!budget) {
+      setHtml('loopguard-metrics', '<p class="empty">Sem orçamento registrado</p>');
+      setHtml(
+        'loopguard-fingerprints',
+        specRow('Diff', '<span class="faint">Sem dados</span>')
+      );
+      setHtml(
+        'loopguard-decision',
+        kvRow('Situação', '<span class="faint">Sem parada registrada</span>')
+      );
+      return;
+    }
+
+    var totalCalls = num(budget.claudeCalls) + num(budget.codexCalls);
+    setHtml(
+      'loopguard-metrics',
+      budgetMetric(budget.attempts, limits.attempts, 'Tentativas') +
+        budgetMetric(budget.claudeCalls, limits.claude, 'Chamadas Claude') +
+        budgetMetric(budget.codexCalls, limits.codex, 'Chamadas Codex') +
+        budgetMetric(totalCalls, limits.total, 'Total de chamadas') +
+        budgetMetric(
+          Math.round(num(budget.consumedMs) / 60000),
+          limits.promptMinutes,
+          'Minutos no prompt'
+        ) +
+        budgetMetric(budget.manualOverridesUsed, limits.overrides, 'Overrides usados')
+    );
+
+    setHtml(
+      'loopguard-fingerprints',
+      specRow('Diff', fingerprintTrail(budget.diffFingerprints)) +
+        specRow('Revisão', fingerprintTrail(budget.reviewFingerprints)) +
+        specRow('Falha de teste', fingerprintTrail(budget.testFailureFingerprints)) +
+        specRow('Retentativas de formato', esc(text(budget.reviewFormatRetries)))
+    );
+
+    setHtml('loopguard-decision', loopDecisionRows(budget, decision));
+  }
+
+  function renderLoopGuardAlert(decision) {
+    var box = $('loopguard-alert');
+    if (!box) return;
+
+    if (!decision || decision.allowed === true || !decision.trigger) {
+      box.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+
+    var hard = decision.severity === 'hard_stop';
+    box.hidden = false;
+    box.className = hard ? 'warn-box warn-box--hard' : 'warn-box';
+    box.innerHTML =
+      '<p class="warn-box__title">' +
+      esc(hard ? 'Execução interrompida — parada dura' : 'Execução interrompida pelo Loop Guard') +
+      '</p>' +
+      '<p><strong>' +
+      esc(text(decision.trigger)) +
+      '</strong> — ' +
+      esc(LOOP_TRIGGER_LABEL[decision.trigger] || 'Motivo não catalogado') +
+      '</p>' +
+      '<p>' +
+      esc(text(decision.reason)) +
+      '</p>' +
+      (hard
+        ? '<p class="faint">Parada dura não admite tentativa adicional: a causa precisa ser ' +
+          'corrigida fora do laço antes de uma nova execução.</p>'
+        : '<p class="faint">Parada branda: uma única tentativa adicional pode ser autorizada ' +
+          'por uma pessoa, com justificativa registrada.</p>') +
+      loopActionsList(decision.nextActions);
+  }
+
+  function loopActionsList(actions) {
+    if (!isNonEmptyArray(actions)) return '';
+    return (
+      '<p class="faint">Próximas ações possíveis:</p><ul class="list-plain">' +
+      actions
+        .map(function (action) {
+          return '<li>' + esc(LOOP_ACTION_LABEL[action] || action) + '</li>';
+        })
+        .join('') +
+      '</ul>'
+    );
+  }
+
+  function loopDecisionRows(budget, decision) {
+    if (!decision || !decision.trigger) {
+      return (
+        kvRow('Situação', chip('SEM PARADA', 'approved')) +
+        kvRow('Último gatilho', '<span class="faint">' + esc(DASH) + '</span>') +
+        kvRow(
+          'Prompt',
+          '<span class="mono">' + esc(text(budget.promptId)) + '</span>'
+        )
+      );
+    }
+
+    var tone = decision.severity === 'hard_stop' ? 'failed' : 'waiting';
+    return (
+      kvRow('Situação', chip(decision.severity === 'hard_stop' ? 'PARADA DURA' : 'PARADA BRANDA', tone)) +
+      kvRow('Gatilho', '<span class="mono">' + esc(text(decision.trigger)) + '</span>') +
+      kvRow('Descrição', esc(LOOP_TRIGGER_LABEL[decision.trigger] || DASH)) +
+      kvRow('Prompt', '<span class="mono">' + esc(text(budget.promptId)) + '</span>') +
+      kvRow('Registrada em', esc(fmtDateTime(budget.lastDecisionAt))) +
+      kvRow('Motivo', esc(text(decision.reason)))
+    );
+  }
+
+  function budgetMetric(used, limit, label) {
+    var u = num(used);
+    var l = num(limit);
+    var tone = 'approved';
+    if (l > 0) {
+      if (u >= l) tone = 'failed';
+      else if (u / l >= 0.67) tone = 'waiting';
+    }
+    var value = l > 0 ? u + ' / ' + l : String(u);
+    return metric(value, label, tone);
+  }
+
+  function fingerprintTrail(list) {
+    if (!isNonEmptyArray(list)) return '<span class="faint">Nenhuma registrada</span>';
+    return list
+      .map(function (value, index) {
+        var repeated = list.indexOf(value) !== index;
+        return (
+          '<span class="tag' +
+          (repeated ? ' tag--warn' : '') +
+          '" title="' +
+          esc(repeated ? 'Assinatura repetida' : 'Assinatura distinta') +
+          '">' +
+          esc(text(value)) +
+          '</span>'
+        );
+      })
+      .join('');
+  }
+
+  /** Orçamento do prompt corrente; na ausência dele, o último registrado. */
+  function currentBudget(run) {
+    if (!isNonEmptyArray(run.budgets)) return null;
+    if (run.currentPromptId) {
+      var match = run.budgets.filter(function (entry) {
+        return entry && entry.promptId === run.currentPromptId;
+      });
+      if (match.length > 0) return match[0];
+    }
+    var used = run.budgets.filter(function (entry) {
+      return entry && (num(entry.attempts) > 0 || entry.lastTrigger);
+    });
+    return used.length > 0 ? used[used.length - 1] : run.budgets[0];
+  }
+
+  /**
+   * Limites vindos da configuração do projeto quando disponível. O painel da
+   * execução não carrega o projeto, então os padrões do produto são usados como
+   * referência — e ficam explícitos no título de cada célula.
+   */
+  function loopLimits(run) {
+    var guard = (run.project && run.project.execution && run.project.execution.loopGuard) || {};
+    return {
+      attempts: num(guard.maxAttemptsPerPrompt) || 3,
+      claude: num(guard.maxClaudeCallsPerPrompt) || 3,
+      codex: num(guard.maxCodexCallsPerPrompt) || 5,
+      total: num(guard.maxTotalAgentCallsPerPrompt) || 8,
+      promptMinutes: num(guard.maxPromptDurationMinutes) || 90,
+      overrides: num(guard.maxManualOverridesPerPrompt) || 1,
+    };
+  }
+
+  function num(value) {
+    return typeof value === 'number' && isFinite(value) ? value : 0;
   }
 
   function renderSteps(run, prompts) {
