@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <title>Execução — OrqPEG</title>
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body data-page="run">
+  <a class="skip-link" href="#main">Ir para o conteúdo</a>
+
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#logo"></use></svg>
+      <span>
+        <span class="brand-name">OrqPEG</span>
+        <span class="brand-sub">Painel local</span>
+      </span>
+    </a>
+
+    <nav class="mainnav" aria-label="Navegação principal">
+      <a href="index.html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#project"></use></svg>Painel
+      </a>
+      <a href="settings.html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#settings"></use></svg>Configuração
+      </a>
+    </nav>
+
+    <p class="conn" id="conn">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="conn-label">Iniciando…</span>
+    </p>
+  </header>
+
+  <div class="banner" id="banner" role="status" aria-live="polite" hidden>
+    <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#alert"></use></svg>
+    <span class="banner__text" id="banner-text"></span>
+    <button type="button" class="banner__close" id="banner-close" aria-label="Fechar mensagem">&times;</button>
+  </div>
+
+  <main class="page" id="main">
+    <nav class="crumbs" aria-label="Trilha de navegação">
+      <a href="index.html">
+        <svg class="ic" aria-hidden="true" focusable="false"><use href="assets/icons.svg#back"></use></svg>Painel
+      </a>
+      <span class="sep" aria-hidden="true">/</span>
+      <a id="crumb-project-link" href="index.html">Projeto</a>
+      <span class="sep" aria-hidden="true">/</span>
+      <span id="crumb-run">Execução</span>
+    </nav>
+
+    <section class="page-head">
+      <div class="titles">
+        <span class="eyebrow">Execução orquestrada</span>
+        <h1>Execução <span class="mono" id="run-id">—</span></h1>
+        <p class="sub" id="run-sub">Carregando dados da execução.</p>
+        <p id="run-state-chip" aria-live="polite"></p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn" id="btn-pause">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#pause"></use></svg>Pausar
+        </button>
+        <button type="button" class="btn" id="btn-resume">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#resume"></use></svg>Retomar
+        </button>
+        <button type="button" class="btn" id="btn-cancel">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#cancel"></use></svg>Cancelar
+        </button>
+        <button type="button" class="btn" id="btn-audit">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#audit"></use></svg>Disparar auditorias
+        </button>
+        <button type="button" class="btn" id="btn-refresh">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#refresh"></use></svg>Atualizar
+        </button>
+      </div>
+    </section>
+
+    <section class="toolbar" aria-label="Ações da execução">
+      <span class="toolbar-label">Abrir</span>
+      <button type="button" class="btn btn--sm" id="btn-open-pr">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#pr"></use></svg>Pull request
+      </button>
+      <button type="button" class="btn btn--sm" id="btn-open-logs">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#logs"></use></svg>Logs
+      </button>
+      <span class="toolbar-label">Relatório</span>
+      <button type="button" class="btn btn--sm" id="btn-report-html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#report"></use></svg>HTML
+      </button>
+      <button type="button" class="btn btn--sm" id="btn-report-md">Markdown</button>
+      <button type="button" class="btn btn--sm" id="btn-report-json">JSON</button>
+      <span class="spacer"></span>
+      <span class="toolbar-label">Último evento</span>
+      <span class="faint" id="live-last-event" aria-live="polite">Sem eventos recebidos nesta sessão.</span>
+    </section>
+
+    <section class="section" aria-labelledby="h-steps">
+      <div class="section-head">
+        <h2 id="h-steps">Etapas</h2>
+        <p class="legend">
+          <span class="chip chip--approved">Aprovado</span>
+          <span class="chip chip--running">Executando</span>
+          <span class="chip chip--waiting">Aguardando</span>
+          <span class="chip chip--failed">Falha</span>
+          <span class="chip chip--pending">Pendente</span>
+          <span class="chip chip--audit">Auditoria</span>
+        </p>
+      </div>
+      <ol class="steps" id="steps" aria-live="polite">
+        <li class="empty">Sem dados</li>
+      </ol>
+    </section>
+
+    <section class="section" aria-labelledby="h-integration">
+      <h2 id="h-integration">Integração</h2>
+      <div class="table-wrap">
+        <table class="data">
+          <caption>Situação da pull request, da CI, das auditorias finais e do merge.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Etapa</th>
+              <th scope="col">Status</th>
+              <th scope="col">Detalhe</th>
+            </tr>
+          </thead>
+          <tbody id="integration-body" aria-live="polite">
+            <tr><td class="empty" colspan="3">Sem dados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-loopguard">
+      <div class="section-head">
+        <h2 id="h-loopguard">Proteção contra looping</h2>
+        <p class="section-note">
+          Orçamento consumido pelo prompt em execução e motivo de uma eventual parada.
+          Nenhuma repetição do OrqPEG é ilimitada.
+        </p>
+      </div>
+
+      <div id="loopguard-alert" hidden></div>
+
+      <!-- Situação da política congelada: indisponível (execução legada) ou
+           divergente do cadastro atual. Os limites exibidos abaixo são sempre
+           os da execução, nunca os do projeto de hoje. -->
+      <div id="loopguard-policy" hidden></div>
+
+      <div class="grid grid--metrics" id="loopguard-metrics" aria-live="polite">
+        <p class="empty">Sem dados</p>
+      </div>
+
+      <div class="grid grid--2" id="loopguard-detail">
+        <section class="card" aria-labelledby="h-loopguard-signatures">
+          <h3 id="h-loopguard-signatures">Assinaturas registradas</h3>
+          <dl class="speclist" id="loopguard-fingerprints">
+            <div><dt>Diff</dt><dd class="faint">Sem dados</dd></div>
+          </dl>
+          <p class="faint">
+            Assinaturas normalizadas de diff, revisão e falha de teste. Repetição da mesma
+            assinatura indica ausência de progresso; o padrão A → B → A indica oscilação.
+          </p>
+        </section>
+
+        <section class="card" aria-labelledby="h-loopguard-decision">
+          <h3 id="h-loopguard-decision">Última decisão</h3>
+          <dl class="kv" id="loopguard-decision">
+            <dt>Situação</dt><dd class="faint">Sem parada registrada</dd>
+          </dl>
+          <div id="loopguard-override-area">
+            <p class="faint" id="loopguard-override-note"></p>
+          </div>
+        </section>
+      </div>
+
+      <section class="card" id="loopguard-history-card" aria-labelledby="h-loopguard-history" hidden>
+        <h3 id="h-loopguard-history">Autorizações manuais concedidas</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead>
+              <tr>
+                <th scope="col">Prompt</th>
+                <th scope="col">Gatilho suprimido</th>
+                <th scope="col">Autorizado por</th>
+                <th scope="col">Quando</th>
+                <th scope="col">Situação</th>
+                <th scope="col">Justificativa</th>
+              </tr>
+            </thead>
+            <tbody id="loopguard-history"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <dialog id="dlg-override" aria-labelledby="h-override">
+      <form id="form-override" method="dialog">
+        <div class="dialog-head">
+          <h2 id="h-override">Autorizar uma tentativa adicional</h2>
+        </div>
+        <div class="dialog-body">
+          <div class="warn-box">
+            <p class="warn-box__title">Leia antes de autorizar</p>
+            <p>
+              A execução parou porque o OrqPEG detectou que continuar automaticamente consumiria
+              sua assinatura sem produzir progresso. Autorizar libera <strong>uma única</strong>
+              tentativa, que será consumida ao ser usada e não poderá ser repetida.
+            </p>
+          </div>
+
+          <dl class="kv kv--wide" id="override-evidence">
+            <dt>Gatilho</dt><dd class="faint">—</dd>
+          </dl>
+
+          <div class="warn-box" id="override-error-box" hidden>
+            <span id="override-error"></span>
+          </div>
+
+          <p class="field">
+            <label for="override-justification">Justificativa (obrigatória)</label>
+            <textarea id="override-justification" name="justification" rows="4" required
+              minlength="20" maxlength="2000"
+              placeholder="Explique por que outra tentativa deve resolver o que as anteriores não resolveram."></textarea>
+            <span class="hint">
+              Mínimo de 20 caracteres. Fica registrada no estado da execução e no relatório.
+            </span>
+          </p>
+
+          <p class="field">
+            <label for="override-author">Autorizado por (opcional)</label>
+            <input type="text" id="override-author" name="authorizedBy" autocomplete="off"
+              placeholder="operador local">
+          </p>
+        </div>
+        <div class="dialog-foot">
+          <button type="button" class="btn" id="btn-override-cancel">Cancelar</button>
+          <button type="submit" class="btn btn--primary" id="btn-override-submit">
+            Autorizar uma tentativa
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="grid grid--2">
+      <section class="card" aria-labelledby="h-consensus">
+        <h2 id="h-consensus">Tela de consenso</h2>
+        <dl class="kv kv--wide" id="consensus-kv" aria-live="polite">
+          <dt>Estado</dt><dd>Sem dados</dd>
+        </dl>
+        <h3>Motivos registrados</h3>
+        <ul class="list-plain" id="consensus-reasons">
+          <li class="faint">Sem dados</li>
+        </ul>
+      </section>
+
+      <section class="card" aria-labelledby="h-run-data">
+        <h2 id="h-run-data">Dados da execução</h2>
+        <dl class="kv" id="kv-run"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+    </div>
+
+    <section class="section" aria-labelledby="h-gates">
+      <div class="section-head">
+        <h2 id="h-gates">Gates de merge (20)</h2>
+        <p class="faint" id="gates-summary">Sem dados</p>
+      </div>
+      <div class="gates" id="gates" aria-live="polite"></div>
+    </section>
+
+    <section class="card" aria-labelledby="h-events">
+      <h2 id="h-events">Eventos da execução</h2>
+      <ol class="activity" id="run-events" aria-live="polite">
+        <li class="empty">Sem dados</li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Atualização em tempo real por Server-Sent Events, com queda automática para consulta a cada 5 segundos.</span>
+  </footer>
+
+  <script src="assets/event-stream.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://orqpeg.local/schemas/prompt-review.schema.json",
+  "title": "Revisão de prompt do OrqPEG",
+  "description": "Contrato do JSON que o revisor de prompt deve devolver após analisar a implementação de um único prompt. A saída precisa conter apenas este objeto, sem texto antes ou depois.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "summary",
+    "confidence",
+    "meetsPromptRequirements",
+    "blockingIssues",
+    "nonBlockingIssues",
+    "requiredActions",
+    "scopeAssessment",
+    "testsAssessment",
+    "riskAssessment"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "description": "Veredito da revisão: aprovado, mudanças solicitadas ou bloqueado.",
+      "enum": ["APPROVED", "CHANGES_REQUESTED", "BLOCKED"]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Resumo objetivo do parecer, em português.",
+      "minLength": 1
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Confiança do revisor no parecer, entre 0 e 1.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "meetsPromptRequirements": {
+      "type": "boolean",
+      "description": "Verdadeiro quando a implementação atende a todos os requisitos do prompt."
+    },
+    "blockingIssues": {
+      "type": "array",
+      "description": "Problemas que impedem a aprovação do prompt.",
+      "items": { "$ref": "#/definitions/ReviewIssue" }
+    },
+    "nonBlockingIssues": {
+      "type": "array",
+      "description": "Observações que não impedem a aprovação do prompt.",
+      "items": { "$ref": "#/definitions/ReviewIssue" }
+    },
+    "requiredActions": {
+      "type": "array",
+      "description": "Ações concretas exigidas antes de uma nova revisão.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "scopeAssessment": {
+      "type": "object",
+      "description": "Avaliação de aderência ao escopo definido pelo prompt.",
+      "additionalProperties": false,
+      "required": ["withinScope", "unexpectedChanges"],
+      "properties": {
+        "withinScope": {
+          "type": "boolean",
+          "description": "Verdadeiro quando as alterações ficam dentro do escopo pedido."
+        },
+        "unexpectedChanges": {
+          "type": "array",
+          "description": "Alterações identificadas fora do escopo do prompt.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "testsAssessment": {
+      "type": "object",
+      "description": "Avaliação dos testes locais e da cobertura entregue.",
+      "additionalProperties": false,
+      "required": ["localTestsPassed", "coverageAcceptable"],
+      "properties": {
+        "localTestsPassed": {
+          "type": "boolean",
+          "description": "Verdadeiro quando a suíte de testes local passou."
+        },
+        "coverageAcceptable": {
+          "type": "boolean",
+          "description": "Verdadeiro quando a cobertura de testes é considerada suficiente."
+        }
+      }
+    },
+    "riskAssessment": {
+      "type": "object",
+      "description": "Avaliação de risco das alterações revisadas.",
+      "additionalProperties": false,
+      "required": ["level", "summary"],
+      "properties": {
+        "level": {
+          "type": "string",
+          "description": "Nível de risco atribuído às alterações.",
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "summary": {
+          "type": "string",
+          "description": "Justificativa do nível de risco, em português."
+        }
+      }
+    }
+  },
+  "definitions": {
+    "ReviewIssue": {
+      "type": "object",
+      "description": "Problema apontado pela revisão.",
+      "additionalProperties": false,
+      "required": ["severity", "title", "description"],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "description": "Gravidade do problema.",
+          "enum": ["blocking", "major", "minor", "info"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Título curto do problema.",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "description": "Descrição objetiva do problema e do seu impacto.",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string",
+          "description": "Arquivo afetado, relativo à raiz do repositório."
+        },
+        "line": {
+          "type": "integer",
+          "description": "Linha aproximada onde o problema aparece.",
+          "minimum": 0
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "Sugestão concreta de correção."
+        }
+      }
+    }
+  }
+}

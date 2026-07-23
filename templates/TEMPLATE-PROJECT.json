@@ -1,0 +1,64 @@
+{
+  "id": "screen",
+  "name": "Screen",
+  "repositoryPath": "E:\\Projetos\\Screen",
+  "githubRepository": "maquinanerd/screen",
+  "remote": "origin",
+  "baseBranch": "main",
+  "branchStrategy": "per_run",
+  "worktree": {
+    "enabled": true,
+    "rootPath": "E:\\AI-Worktrees",
+    "reuseWhenSafe": true
+  },
+  "commands": {
+    "install": [
+      "npm ci"
+    ],
+    "tests": [
+      "npm run lint",
+      "npm run typecheck",
+      "npm test",
+      "npm run build"
+    ],
+    "timeoutSeconds": 1800
+  },
+  "execution": {
+    "maxAttemptsPerPrompt": 3,
+    "maxReviewerRetries": 2,
+    "continueAfterApproval": true,
+    "stopOnBlocked": true
+  },
+  "git": {
+    "commitAfterApproval": true,
+    "pushAfterRun": true,
+    "commitMessagePrefix": "orqpeg"
+  },
+  "pullRequest": {
+    "enabled": true,
+    "draftDuringExecution": true,
+    "markReadyBeforeMerge": true,
+    "waitForChecks": true
+  },
+  "merge": {
+    "enabled": true,
+    "mode": "dual_ai_consensus",
+    "strategy": "squash",
+    "deleteBranchAfterMerge": true,
+    "requireClaudeApproval": true,
+    "requireCodexApproval": true,
+    "requireLocalTests": true,
+    "requireCiSuccess": true,
+    "requireNoConflicts": true,
+    "requireNoUnresolvedThreads": true,
+    "invalidateApprovalOnHeadChange": true,
+    "minimumConfidence": 0.9
+  },
+  "agents": {
+    "claudeModel": null,
+    "codexModel": null
+  },
+  "editor": null,
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

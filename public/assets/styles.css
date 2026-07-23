@@ -1,0 +1,1484 @@
+/* ==========================================================================
+   OrqPEG — folha de estilo das páginas de detalhe do painel.
+   Sem dependência externa: nenhuma fonte, nenhum CDN, nenhum framework.
+
+   Estrutura própria, identidade compartilhada: esta folha define o layout das
+   páginas anteriores ao console, mas TODA a cor, a tipografia e a geometria
+   vêm de assets/tokens.css. Não existe paleta paralela — havia uma, e ela
+   fazia o painel ter duas caras dependendo da página em que se estava.
+
+   Exige assets/tokens.css carregado antes. As páginas que usam esta folha
+   seguem o mesmo par de temas do console, claro e escuro.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Ponte de tokens
+
+   Os nomes `--orq-*` continuam existindo porque 229 declarações abaixo os
+   usam; o que mudou é que nenhum deles carrega mais um valor próprio. Cada um
+   é um apelido para o token do sistema que cumpre aquele papel.
+   -------------------------------------------------------------------------- */
+
+:root {
+  /* Papel e superfícies. */
+  --orq-page: var(--op-canvas);
+  --orq-page-secondary: var(--op-sunken);
+
+  --orq-surface: var(--op-surface);
+  --orq-surface-soft: var(--op-raised);
+  --orq-surface-green: var(--op-accent-soft);
+
+  /* Texto. */
+  --orq-text: var(--op-fg);
+  --orq-text-secondary: var(--op-fg-secondary);
+  --orq-text-muted: var(--op-fg-muted);
+  --orq-text-subtle: var(--op-fg-muted);
+
+  /* O que era "verde institucional" agora é o acento único do sistema: azul de
+     interação. Uma cor de marca a mais é uma cor de estado a menos. */
+  --orq-green: var(--op-accent);
+  /* Seis dos oito usos de `green-dark` são cor de TEXTO — link, título de
+     cartão, rótulo forte. O estado de pressão não serve para isso: é escuro
+     por definição e some sobre fundo escuro. O acento é o valor calibrado
+     para texto nos dois temas; quem precisa mesmo do press o chama direto. */
+  --orq-green-dark: var(--op-accent);
+  --orq-green-light: var(--op-accent-soft);
+  --orq-green-border: var(--op-accent-line);
+
+  /* Traços. */
+  --orq-border: var(--op-line-strong);
+  --orq-border-soft: var(--op-line);
+  --orq-border-strong: var(--op-line-loud);
+
+  /* Semântica de estado. */
+  --orq-success: var(--op-ok);
+  --orq-success-soft: var(--op-ok-soft);
+
+  --orq-warning: var(--op-warn);
+  --orq-warning-soft: var(--op-warn-soft);
+
+  --orq-danger: var(--op-danger);
+  --orq-danger-soft: var(--op-danger-soft);
+
+  --orq-info: var(--op-info);
+  --orq-info-soft: var(--op-info-soft);
+
+  /* Estados de execução — os mesmos nomes que o console usa. */
+  --status-approved: var(--op-state-approved);
+  --status-running: var(--op-state-execution);
+  --status-waiting: var(--op-state-waiting);
+  --status-failed: var(--op-state-blocked);
+  --status-pending: var(--op-neutral);
+  --status-audit: var(--op-accent-alt);
+
+  --status-approved-bg: var(--op-state-approved-soft);
+  --status-running-bg: var(--op-state-execution-soft);
+  --status-waiting-bg: var(--op-state-waiting-soft);
+  --status-failed-bg: var(--op-state-blocked-soft);
+  --status-pending-bg: var(--op-neutral-soft);
+  --status-audit-bg: var(--op-accent-alt-soft);
+
+  --focus: var(--op-focus-color);
+
+  --font-ui: var(--op-font);
+  --font-mono: var(--op-font-mono);
+
+  --radius: var(--op-radius-sm);
+  --radius-sm: var(--op-radius-xs);
+  --gap: var(--op-space-4);
+  --maxw: 1560px;
+}
+
+/* --------------------------------------------------------------------------
+   2. Base
+   -------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--orq-page);
+  color: var(--orq-text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  margin: 0;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 19px;
+  letter-spacing: -.015em;
+}
+
+h2 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--orq-text-secondary);
+}
+
+/* Rótulo técnico: a menor unidade tipográfica do sistema. Usado em eyebrows,
+   legendas de célula e microdados. Nunca compete com o título da seção. */
+.eyebrow {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .2em;
+  color: var(--orq-text-subtle);
+  line-height: 1.4;
+}
+
+h3 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--orq-text-secondary);
+}
+
+p { margin: 0; }
+
+a {
+  color: var(--orq-green-dark);
+  text-decoration: none;
+}
+
+a:hover { text-decoration: underline; }
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-radius: 1px;
+}
+
+.icon-sprite { display: none; }
+
+.ic {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  vertical-align: -2px;
+}
+
+.ic--inline {
+  width: 11px;
+  height: 11px;
+  margin-left: 4px;
+  opacity: .75;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: .93em;
+  letter-spacing: -.01em;
+}
+
+.muted { color: var(--orq-text-secondary); }
+.faint { color: var(--orq-text-muted); font-size: 11.5px; }
+.nowrap { white-space: nowrap; }
+
+.truncate {
+  display: inline-block;
+  max-width: 38ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -60px;
+  z-index: 30;
+  padding: 7px 14px;
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border-strong);
+  border-radius: var(--radius-sm);
+  transition: top .12s ease-in-out;
+}
+
+.skip-link:focus { top: 8px; }
+
+/* --------------------------------------------------------------------------
+   3. Barra superior
+   -------------------------------------------------------------------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 0 22px;
+  min-height: 38px;
+  background: var(--orq-surface);
+  border-bottom: 1px solid var(--orq-border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0;
+  color: var(--orq-text);
+}
+
+.brand:hover { text-decoration: none; }
+
+.brand svg {
+  width: 16px;
+  height: 16px;
+  color: var(--orq-green);
+  flex: none;
+}
+
+/* A marca na barra é deliberadamente pequena: o peso institucional pertence ao
+   masthead da página, não ao topo. Aqui basta identificar o sistema. */
+.brand-name {
+  display: inline;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  line-height: 1.15;
+}
+
+.brand-sub {
+  display: inline;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--orq-border);
+  font-size: 9px;
+  color: var(--orq-text-subtle);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.mainnav {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  align-self: stretch;
+}
+
+.mainnav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border-bottom: 2px solid transparent;
+  color: var(--orq-text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+
+.mainnav svg { display: none; }
+
+.mainnav a:hover {
+  background: var(--orq-surface-soft);
+  color: var(--orq-text);
+  text-decoration: none;
+}
+
+.mainnav a[aria-current="page"] {
+  color: var(--orq-green-dark);
+  border-bottom-color: var(--orq-green);
+  font-weight: 600;
+}
+
+.mainnav svg { width: 14px; height: 14px; }
+
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color: var(--orq-text-subtle);
+}
+
+.conn .dot {
+  width: 6px;
+  height: 6px;
+  background: var(--status-pending);
+  flex: none;
+}
+
+.conn.is-live .dot { background: var(--status-approved); }
+.conn.is-poll .dot { background: var(--status-waiting); }
+.conn.is-down .dot { background: var(--status-failed); }
+
+/* --------------------------------------------------------------------------
+   4. Layout
+   -------------------------------------------------------------------------- */
+
+/* Ritmo vertical mais apertado: o objetivo é densidade organizada, com mais
+   informação por viewport, sem encostar os blocos uns nos outros. */
+.page {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 14px 22px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--orq-text-muted);
+  flex-wrap: wrap;
+}
+
+.crumbs a { color: var(--orq-text-secondary); }
+.crumbs svg { width: 12px; height: 12px; }
+/* Traço de borda como cor de texto não alcança contraste de leitura — e a
+   barra da trilha é lida, não é ornamento. */
+.crumbs .sep { color: var(--orq-text-muted); }
+
+/* --------------------------------------------------------------------------
+   Masthead editorial
+   --------------------------------------------------------------------------
+   A abertura da página é institucional, não um cabeçalho de aplicativo: um
+   rótulo técnico pequeno, a marca em corpo grande, uma linha curta que explica
+   o produto e, ao pé, uma faixa monoespaçada com os dados da sessão. É o único
+   ponto da interface onde a tipografia cresce de verdade. */
+
+.masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding: 6px 0 0;
+  border-bottom: 3px solid var(--orq-text);
+}
+
+.masthead__block { min-width: 300px; flex: 1 1 460px; }
+
+.masthead__title {
+  margin: 6px 0 0;
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -.035em;
+  line-height: .95;
+  color: var(--orq-text);
+}
+
+.masthead__title .dot { color: var(--orq-green); }
+
+.masthead__lede {
+  margin: 9px 0 12px;
+  max-width: 62ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--orq-text-secondary);
+}
+
+.masthead .actions { padding-bottom: 12px; }
+
+/* Faixa de dados da sessão, colada ao filete inferior do masthead. */
+.masthead__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 10px;
+  width: 100%;
+  padding: 6px 0 7px;
+  border-top: 1px solid var(--orq-border);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: -.01em;
+  color: var(--orq-text-muted);
+}
+
+.masthead__meta > * + *::before {
+  content: "·";
+  margin-right: 10px;
+  color: var(--orq-border-strong);
+}
+
+/* Cabeçalho das páginas internas: mesma família do masthead, em escala menor.
+   A marca grande pertence só à home; aqui o peso vai para o nome do recurso. */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  border-bottom: 3px solid var(--orq-text);
+}
+
+.page-head .titles { min-width: 240px; }
+
+.page-head h1 {
+  margin-top: 3px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  line-height: 1.05;
+}
+
+.page-head .sub {
+  margin-top: 5px;
+  max-width: 74ch;
+  color: var(--orq-text-muted);
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.toolbar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border);
+  border-radius: var(--radius);
+}
+
+.toolbar .toolbar-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .13em;
+  color: var(--orq-text-subtle);
+  padding: 0 4px 0 6px;
+}
+
+.toolbar .toolbar-label:first-child { padding-left: 2px; }
+.toolbar .spacer { flex: 1 1 12px; }
+.toolbar select { width: auto; min-width: 180px; }
+
+/* Seções: cabeçalho editorial com filete horizontal. */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.section > h2,
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-bottom: 5px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--orq-border-strong);
+}
+
+.section-head h2 {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+/* Marcador da seção: um traço verde curto antes do título, repetido em todas
+   as seções para dar ritmo vertical constante à página. */
+.section > h2::before,
+.section-head h2::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  margin-right: 8px;
+  vertical-align: middle;
+  background: var(--orq-green);
+}
+
+/* Linha de descrição curta sob o título, dentro do mesmo cabeçalho. */
+.section-head .section-note {
+  flex: 1 1 100%;
+  order: 3;
+  margin-top: -2px;
+  font-size: 11.5px;
+  color: var(--orq-text-muted);
+}
+
+.grid {
+  display: grid;
+  gap: var(--gap);
+}
+
+.grid--cards { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.grid--2 { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+.grid--3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+/* --------------------------------------------------------------------------
+   5. Cartões
+   -------------------------------------------------------------------------- */
+
+.card {
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* Primeiro título vira faixa de cabeçalho verde-clara, colada às bordas do
+   cartão. O verde identifica o bloco como técnico-operacional e amarra os
+   cards à mesma família visual das seções. */
+.card > h2:first-child,
+.card > h3:first-child,
+.card > .card-head:first-child {
+  margin: -9px -11px 0;
+  padding: 6px 11px;
+  background: var(--orq-green-light);
+  border-bottom: 1px solid var(--orq-green-border);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.card > h2:first-child,
+.card > h3:first-child,
+.card > .card-head:first-child h3 {
+  color: var(--orq-green-dark);
+}
+
+.card--note {
+  background: var(--orq-surface-green);
+  border-color: var(--orq-green-border);
+}
+
+.card--note > .card-head:first-child {
+  background: transparent;
+  border-bottom-color: var(--orq-green-border);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 20px;
+}
+
+.card-head svg {
+  width: 14px;
+  height: 14px;
+  color: var(--orq-text-subtle);
+}
+
+.card > h3 { margin-top: 2px; }
+
+/* --------------------------------------------------------------------------
+   Bloco de parâmetros operacionais
+   --------------------------------------------------------------------------
+   Faixa branca horizontal para exibir um estado do sistema com seus parâmetros
+   em linhas rotuladas. É o formato usado pela guarda de API: parece um painel
+   de controle, não um formulário. */
+
+.opstrip {
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.opstrip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 7px 12px;
+  background: var(--orq-green-light);
+  border-bottom: 1px solid var(--orq-green-border);
+}
+
+.opstrip__title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--orq-green-dark);
+}
+
+.opstrip__rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0;
+}
+
+.opstrip__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 12px;
+  min-width: 0;
+  box-shadow: 1px 0 0 var(--orq-border-soft), 0 1px 0 var(--orq-border-soft);
+}
+
+.opstrip__label {
+  flex: none;
+  width: 92px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--orq-text-subtle);
+}
+
+.opstrip__value {
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--orq-text-secondary);
+}
+
+.opstrip__note {
+  padding: 6px 12px 8px;
+  font-size: 11px;
+  color: var(--orq-text-muted);
+  border-top: 1px solid var(--orq-border-soft);
+}
+
+/* --------------------------------------------------------------------------
+   6. Faixa de métricas
+   -------------------------------------------------------------------------- */
+
+/* Container único com divisões internas: lido como uma faixa de instrumentos,
+   não como seis cartões soltos. */
+.grid--metrics {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 0;
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.metric {
+  padding: 9px 13px 10px;
+  box-shadow: 1px 0 0 var(--orq-border-soft), 0 1px 0 var(--orq-border-soft);
+}
+
+.metric__value {
+  font-size: 27px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.035em;
+  line-height: 1.05;
+  color: var(--orq-text);
+}
+
+.metric__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .11em;
+  color: var(--orq-text-muted);
+  margin-top: 3px;
+}
+
+.metric__label::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: none;
+  background: var(--orq-border-strong);
+}
+
+.metric--approved .metric__label::before { background: var(--status-approved); }
+.metric--running .metric__label::before { background: var(--status-running); }
+.metric--waiting .metric__label::before { background: var(--status-waiting); }
+.metric--failed .metric__label::before { background: var(--status-failed); }
+.metric--pending .metric__label::before { background: var(--status-pending); }
+.metric--audit .metric__label::before { background: var(--status-audit); }
+
+/* Só o que exige atenção recebe cor no número. */
+.metric--failed .metric__value { color: var(--status-failed); }
+.metric--waiting .metric__value { color: var(--status-waiting); }
+
+/* --------------------------------------------------------------------------
+   7. Botões e campos
+   -------------------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  height: 28px;
+  font: inherit;
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--orq-text);
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--orq-surface-soft);
+  border-color: var(--orq-text-subtle);
+}
+
+.btn:active:not(:disabled) { background: var(--orq-page-secondary); }
+
+.btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.btn svg { width: 14px; height: 14px; flex: none; }
+
+.btn--primary {
+  background: var(--orq-green);
+  border-color: var(--orq-green);
+  color: var(--op-accent-fg);
+  font-weight: 600;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--op-accent-hover);
+  border-color: var(--op-accent-hover);
+}
+
+.btn--primary:active:not(:disabled) {
+  background: var(--op-accent-press);
+  border-color: var(--op-accent-press);
+}
+
+.btn--danger {
+  color: var(--orq-danger);
+  border-color: var(--orq-danger);
+  background: var(--orq-surface);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: var(--orq-danger-soft);
+  border-color: var(--orq-danger);
+}
+
+.btn--sm {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.btn--sm svg { width: 12px; height: 12px; }
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.field label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--orq-text-secondary);
+}
+
+.field .hint {
+  font-size: 11px;
+  color: var(--orq-text-muted);
+}
+
+input[type="text"],
+input[type="number"],
+select,
+textarea {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--orq-text);
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border-strong);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+input[type="text"]:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--orq-green);
+}
+
+select { cursor: pointer; height: 26px; padding: 0 6px; }
+
+/* --------------------------------------------------------------------------
+   8. Indicadores de estado
+   -------------------------------------------------------------------------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border: 1px solid var(--orq-border);
+  background: var(--orq-surface-soft);
+  color: var(--orq-text-secondary);
+}
+
+.chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+  flex: none;
+}
+
+.chip--approved { color: var(--status-approved); background: var(--status-approved-bg); border-color: var(--status-approved); }
+.chip--running { color: var(--status-running); background: var(--status-running-bg); border-color: var(--status-running); }
+.chip--waiting { color: var(--status-waiting); background: var(--status-waiting-bg); border-color: var(--status-waiting); }
+.chip--failed { color: var(--status-failed); background: var(--status-failed-bg); border-color: var(--status-failed); }
+.chip--pending { color: var(--status-pending); background: var(--status-pending-bg); border-color: var(--orq-border); }
+.chip--audit { color: var(--status-audit); background: var(--status-audit-bg); border-color: var(--orq-green-border); }
+
+.chipset {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.legend {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--orq-text-subtle);
+}
+
+/* --------------------------------------------------------------------------
+   9. Tabelas
+   -------------------------------------------------------------------------- */
+
+.table-wrap {
+  overflow-x: auto;
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border);
+  border-radius: var(--radius);
+}
+
+.card .table-wrap { border-radius: var(--radius-sm); }
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+table.data caption {
+  text-align: left;
+  padding: 7px 11px;
+  font-size: 11px;
+  color: var(--orq-text-muted);
+  background: var(--orq-surface-soft);
+  border-bottom: 1px solid var(--orq-border-soft);
+}
+
+table.data th,
+table.data td {
+  padding: 5px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--orq-border-soft);
+}
+
+/* Cabeçalho de tabela em verde-claro: mesma família dos cabeçalhos de cartão,
+   para que listagem e cartão sejam lidos como o mesmo tipo de bloco. */
+table.data thead th {
+  position: sticky;
+  top: 0;
+  background: var(--orq-green-light);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: .11em;
+  color: var(--orq-green-dark);
+  font-weight: 700;
+  white-space: nowrap;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--orq-green-border);
+  z-index: 1;
+}
+
+table.data tbody tr:hover { background: var(--orq-surface-soft); }
+table.data tbody tr:last-child td,
+table.data tbody tr:last-child th { border-bottom: 0; }
+
+table.data td.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* A primeira coluna carrega a identidade da linha: nome com peso real e, logo
+   abaixo, o slug em monoespaçada. É o ponto de entrada visual da listagem. */
+table.data th[scope="row"] {
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+  letter-spacing: -.01em;
+}
+
+table.data th[scope="row"] .faint {
+  font-weight: 400;
+  font-size: 10px;
+  letter-spacing: .04em;
+  margin-top: 1px;
+}
+
+.row-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--orq-text-muted);
+}
+
+/* Estado vazio compacto: informa a ausência sem abrir um vão na página. Um
+   bloco vazio deve parecer um slot pronto para receber dado, não um buraco. */
+.empty {
+  padding: 9px 11px;
+  color: var(--orq-text-subtle);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  text-align: left;
+}
+
+td.empty,
+.table-wrap .empty { text-align: center; }
+
+.counts {
+  display: inline-flex;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--orq-text-subtle);
+}
+
+.counts b { font-weight: 700; }
+.counts .c-total { color: var(--orq-text); }
+.counts .c-ok { color: var(--status-approved); }
+.counts .c-pend { color: var(--orq-text-muted); }
+
+/* --------------------------------------------------------------------------
+   10. Listas de chave/valor
+   -------------------------------------------------------------------------- */
+
+.kv {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(104px, auto) minmax(0, 1fr);
+  gap: 0;
+  font-size: 12.5px;
+}
+
+.kv > dt,
+.kv > dd {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--orq-border-soft);
+  min-width: 0;
+}
+
+.kv > dt {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--orq-text-muted);
+  padding-right: 12px;
+  padding-top: 6px;
+}
+
+.kv > dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Caminhos e comandos ocupam uma linha só; o texto completo fica no title. */
+.kv > dd > .mono.truncate { max-width: 100%; }
+
+.kv > dt:last-of-type,
+.kv > dd:last-of-type { border-bottom: 0; }
+
+.kv--wide { grid-template-columns: minmax(160px, auto) minmax(0, 1fr); }
+
+/* Lista compacta de ferramenta: rótulo curto + valor monoespaçado. */
+.speclist {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.speclist > div {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--orq-border-soft);
+}
+
+.speclist > div:last-child { border-bottom: 0; }
+
+.speclist dt {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--orq-text-subtle);
+}
+
+.speclist dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.speclist dd .truncate { max-width: 100%; }
+
+/* Tira horizontal de nomes de variáveis. */
+.taglist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag {
+  display: inline-block;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--orq-text-secondary);
+  background: var(--orq-surface-soft);
+  border: 1px solid var(--orq-border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.tag--warn { color: var(--orq-warning); background: var(--orq-warning-soft); border-color: var(--orq-warning); }
+.tag--danger { color: var(--orq-danger); background: var(--orq-danger-soft); border-color: var(--orq-danger); }
+.tag--none { font-family: var(--font-ui); color: var(--orq-text-subtle); background: transparent; border-style: dashed; }
+
+/* --------------------------------------------------------------------------
+   11. Etapas da execução
+   -------------------------------------------------------------------------- */
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--orq-border-soft);
+  border-left: 3px solid var(--orq-border);
+}
+
+.step:last-child { border-bottom: 0; }
+
+.step__order {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--orq-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.step__body { min-width: 0; }
+
+.step__name {
+  display: block;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.step__meta {
+  display: block;
+  font-size: 11px;
+  color: var(--orq-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.step--approved { border-left-color: var(--status-approved); }
+.step--running { border-left-color: var(--status-running); background: var(--orq-info-soft); }
+.step--waiting { border-left-color: var(--status-waiting); }
+.step--failed { border-left-color: var(--status-failed); }
+.step--pending { border-left-color: var(--orq-border-strong); }
+.step--audit { border-left-color: var(--status-audit); }
+
+.step[aria-current="step"] .step__name::after {
+  content: " ← etapa atual";
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--status-running);
+}
+
+/* --------------------------------------------------------------------------
+   12. Gates de merge
+   -------------------------------------------------------------------------- */
+
+.gates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 6px;
+}
+
+.gate {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border);
+  border-left: 3px solid var(--orq-border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.gate__index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--orq-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.gate__title { font-weight: 600; font-size: 12.5px; }
+
+.gate__reason {
+  font-size: 11px;
+  color: var(--orq-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.gate__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.gate--passed { border-left-color: var(--status-approved); }
+.gate--failed { border-left-color: var(--status-failed); background: var(--orq-danger-soft); }
+.gate--skipped { border-left-color: var(--status-waiting); }
+.gate--pending { border-left-color: var(--orq-border-strong); }
+
+/* --------------------------------------------------------------------------
+   13. Atividades e eventos
+   -------------------------------------------------------------------------- */
+
+.activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.activity li {
+  display: grid;
+  grid-template-columns: 118px auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--orq-border-soft);
+  font-size: 12px;
+}
+
+.activity li:last-child { border-bottom: 0; }
+
+.activity time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--orq-text-subtle);
+  white-space: nowrap;
+}
+
+.activity .msg { overflow-wrap: anywhere; }
+
+/* --------------------------------------------------------------------------
+   14. Banner e diálogos
+   -------------------------------------------------------------------------- */
+
+.banner {
+  margin: 0 auto;
+  max-width: var(--maxw);
+  padding: 9px 22px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border-bottom: 1px solid var(--orq-danger);
+  border-left: 3px solid var(--orq-danger);
+  background: var(--orq-danger-soft);
+  color: var(--orq-text);
+  font-size: 12.5px;
+}
+
+.banner[hidden] { display: none; }
+
+.banner svg {
+  width: 16px;
+  height: 16px;
+  color: var(--orq-danger);
+  flex: none;
+  margin-top: 1px;
+}
+
+.banner .banner__text { overflow-wrap: anywhere; flex: 1 1 auto; }
+
+.banner--ok {
+  border-color: var(--orq-success);
+  background: var(--orq-success-soft);
+}
+
+.banner--ok svg { color: var(--orq-success); }
+
+.banner--info {
+  border-color: var(--orq-info);
+  background: var(--orq-info-soft);
+}
+
+.banner--info svg { color: var(--orq-info); }
+
+.banner__close {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+dialog {
+  border: 1px solid var(--orq-border-strong);
+  border-radius: var(--radius);
+  background: var(--orq-surface);
+  color: var(--orq-text);
+  padding: 0;
+  width: min(640px, 94vw);
+  box-shadow: var(--op-shadow-overlay);
+}
+
+dialog::backdrop { background: var(--op-scrim); }
+
+.dialog-head,
+.dialog-foot {
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.dialog-head {
+  background: var(--orq-surface-soft);
+  border-bottom: 1px solid var(--orq-border);
+}
+
+.dialog-head h2 { font-size: 11.5px; }
+
+.dialog-foot {
+  border-top: 1px solid var(--orq-border);
+  justify-content: flex-end;
+}
+
+.dialog-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  max-height: 66vh;
+  overflow-y: auto;
+}
+
+.warn-box {
+  border: 1px solid var(--orq-warning);
+  border-left-width: 3px;
+  background: var(--orq-warning-soft);
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Parada dura: a causa precisa ser corrigida fora do laço, então o aviso usa
+   o tom de falha para não ser confundido com uma pendência contornável. */
+.warn-box--hard {
+  border-color: var(--orq-danger);
+  background: var(--orq-danger-soft);
+}
+
+.warn-box__title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--orq-danger);
+}
+
+.warn-box .list-plain { margin: 0; }
+
+/* --------------------------------------------------------------------------
+   15. Conteúdo de prompt
+   -------------------------------------------------------------------------- */
+
+pre.raw {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--orq-surface);
+  border: 1px solid var(--orq-border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.list-plain {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+}
+
+.list-plain li { overflow-wrap: anywhere; }
+
+/* --------------------------------------------------------------------------
+   16. Rodapé
+   -------------------------------------------------------------------------- */
+
+.footer {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 12px 22px 28px;
+  border-top: 1px solid var(--orq-border);
+  font-size: 11px;
+  color: var(--orq-text-subtle);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+/* --------------------------------------------------------------------------
+   17. Responsivo
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .page { padding: 14px; gap: 16px; }
+  .topbar { padding: 6px 14px; gap: 10px; }
+  .conn { margin-left: 0; }
+  .banner { padding: 9px 14px; }
+  .footer { padding: 12px 14px 24px; }
+  .kv { grid-template-columns: minmax(0, 1fr); }
+  .kv > dt { padding-bottom: 0; border-bottom: 0; padding-top: 6px; }
+  .kv > dd { padding-top: 1px; }
+  .speclist > div { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .activity li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .step { grid-template-columns: 38px minmax(0, 1fr); }
+  .step .chip { grid-column: 2; justify-self: start; }
+  .metric__value { font-size: 20px; }
+  .truncate { max-width: 24ch; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+
+@media print {
+  .topbar, .actions, .toolbar, .conn, .skip-link { display: none !important; }
+  body { background: #fff; color: #000; }
+  .card, .table-wrap { break-inside: avoid; }
+}

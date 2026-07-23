@@ -1,0 +1,43 @@
+name: Security
+
+# Verificações de segurança do próprio repositório do OrqPEG.
+# Qualquer violação reprova o build. Não há exceção configurável.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Nome estável: este job é usado como check obrigatório na proteção da branch.
+  security-windows:
+    name: security-windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # As seis verificações obrigatórias:
+      #   (a) nenhum arquivo chama endpoints de API de IA;
+      #   (b) nenhum import de SDK de provedor de IA;
+      #   (c) "dependencies" do package.json está vazio;
+      #   (d) nenhum uso de shell, exec síncrono ou git destrutivo em src/;
+      #   (e) nenhum segredo aparente commitado;
+      #   (f) o painel não escuta em endereço público.
+      # O script sai com código 1 quando qualquer uma delas falha.
+      - name: Verificações de segurança
+        run: node scripts/security-check.js

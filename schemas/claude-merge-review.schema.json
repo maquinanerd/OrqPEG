@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://orqpeg.local/schemas/claude-merge-review.schema.json",
+  "title": "Auditoria final de merge do Claude",
+  "description": "Contrato do JSON que o Claude deve devolver na auditoria final, antes do merge do pull request. A saída precisa conter apenas este objeto, sem texto antes ou depois, e o campo reviewedHeadSha deve repetir exatamente o head SHA auditado.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "reviewedHeadSha",
+    "summary",
+    "confidence",
+    "blockingIssues",
+    "nonBlockingIssues",
+    "requiredActions",
+    "riskAssessment",
+    "testsAssessment",
+    "scopeAssessment"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "description": "Veredito da auditoria final de merge.",
+      "enum": ["APPROVED_FOR_MERGE", "CHANGES_REQUIRED", "BLOCKED"]
+    },
+    "reviewedHeadSha": {
+      "type": "string",
+      "description": "Head SHA do commit efetivamente auditado, com 7 a 40 dígitos hexadecimais.",
+      "pattern": "^[0-9a-fA-F]{7,40}$"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Resumo objetivo do parecer, em português.",
+      "minLength": 1
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Confiança do auditor no parecer, entre 0 e 1.",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "blockingIssues": {
+      "type": "array",
+      "description": "Problemas que impedem o merge do pull request.",
+      "items": { "$ref": "#/definitions/ReviewIssue" }
+    },
+    "nonBlockingIssues": {
+      "type": "array",
+      "description": "Observações que não impedem o merge.",
+      "items": { "$ref": "#/definitions/ReviewIssue" }
+    },
+    "requiredActions": {
+      "type": "array",
+      "description": "Ações exigidas antes de uma nova auditoria.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "riskAssessment": {
+      "type": "object",
+      "description": "Avaliação de risco da integração na branch base.",
+      "additionalProperties": false,
+      "required": ["level", "summary"],
+      "properties": {
+        "level": {
+          "type": "string",
+          "description": "Nível de risco atribuído à integração.",
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "summary": {
+          "type": "string",
+          "description": "Justificativa do nível de risco, em português."
+        }
+      }
+    },
+    "testsAssessment": {
+      "type": "object",
+      "description": "Avaliação dos testes locais, da integração contínua e da cobertura.",
+      "additionalProperties": false,
+      "required": ["localTestsPassed", "ciPassed", "coverageAcceptable"],
+      "properties": {
+        "localTestsPassed": {
+          "type": "boolean",
+          "description": "Verdadeiro quando a suíte de testes local passou."
+        },
+        "ciPassed": {
+          "type": "boolean",
+          "description": "Verdadeiro quando todos os checks obrigatórios do GitHub passaram."
+        },
+        "coverageAcceptable": {
+          "type": "boolean",
+          "description": "Verdadeiro quando a cobertura de testes é considerada suficiente."
+        }
+      }
+    },
+    "scopeAssessment": {
+      "type": "object",
+      "description": "Avaliação de aderência do conjunto de alterações ao escopo dos prompts.",
+      "additionalProperties": false,
+      "required": ["withinScope", "unexpectedChanges"],
+      "properties": {
+        "withinScope": {
+          "type": "boolean",
+          "description": "Verdadeiro quando todas as alterações estão dentro do escopo previsto."
+        },
+        "unexpectedChanges": {
+          "type": "array",
+          "description": "Alterações identificadas fora do escopo previsto.",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "ReviewIssue": {
+      "type": "object",
+      "description": "Problema apontado pela auditoria de merge.",
+      "additionalProperties": false,
+      "required": ["severity", "title", "description"],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "description": "Gravidade do problema.",
+          "enum": ["blocking", "major", "minor", "info"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Título curto do problema.",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "description": "Descrição objetiva do problema e do seu impacto.",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string",
+          "description": "Arquivo afetado, relativo à raiz do repositório."
+        },
+        "line": {
+          "type": "integer",
+          "description": "Linha aproximada onde o problema aparece.",
+          "minimum": 0
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "Sugestão concreta de correção."
+        }
+      }
+    }
+  }
+}

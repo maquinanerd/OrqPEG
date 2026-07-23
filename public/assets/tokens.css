@@ -1,0 +1,274 @@
+/* ==========================================================================
+   OrqPEG — camada de tokens do painel.
+
+   Esta folha é a única fonte de verdade de cor, tipografia, espaço, raio e
+   movimento. Nenhuma outra folha do painel declara valor cru que exista aqui.
+
+   ---------------------------------------------------------------------------
+   PRINCÍPIOS
+
+   1. O painel é claro. Só claro.
+      Não existe tema escuro nem inversão por `prefers-color-scheme`. Um
+      console de operação que muda de fundo conforme a configuração do sistema
+      operacional é um console que ninguém reconhece de relance.
+
+   2. Cromatismo é informação, não decoração.
+      Fundo, borda e texto são acromáticos. Matiz só aparece onde significa
+      alguma coisa: estado da execução, resultado de gate, prioridade,
+      transporte. Uma tela sem incidente é uma tela cinza.
+
+   3. Um acento só.
+      Azul é interação — seleção, foco, ação primária. Nada mais é azul.
+
+   4. Sinal na borda, não no preenchimento.
+      Estado se mostra por régua lateral, ponto ou etiqueta discreta. Cartão
+      inteiro tingido de vermelho ou verde destrói hierarquia: quando tudo
+      grita, nada informa.
+
+   5. Geometria apertada.
+      Raio de 3 a 10 px, fio de 1 px, grade de 4 px. É instrumento de
+      operação, não cartão de aplicativo.
+
+   6. Tamanho de leitura de verdade.
+      Corpo em 13 px. Densidade se ganha com espaço e régua, não encolhendo
+      a letra até o limite da legibilidade.
+   ---------------------------------------------------------------------------
+   ========================================================================== */
+
+:root {
+  /* Fixo, não `light dark`: o painel não acompanha o tema do sistema. Isto
+     também faz o navegador desenhar campo, seletor e barra de rolagem nativos
+     na variante clara. */
+  color-scheme: light;
+
+  /* ------------------------------------------------------------------------
+     1. Superfícies
+
+     Escada de elevação. No claro ela sobe ficando mais branca: o fundo da
+     aplicação é o tom mais acinzentado e o cartão é o branco puro.
+     ---------------------------------------------------------------------- */
+  --op-canvas: #eef1f5;        /* fundo da aplicação, workspace              */
+  --op-sunken: #f4f6f9;        /* poço: log do console, trilhos              */
+  --op-surface: #ffffff;       /* painéis                                    */
+  --op-raised: #ffffff;        /* cartões sobre painel                       */
+  --op-overlay: #ffffff;       /* diálogo, menu, tooltip                     */
+
+  /* Estados de superfície aplicados por cima, não como cor nova. */
+  --op-hover: rgba(15, 24, 36, 0.045);
+  --op-active: rgba(15, 24, 36, 0.08);
+  --op-scrim: rgba(15, 24, 36, 0.4);
+
+  /* ------------------------------------------------------------------------
+     2. Traço
+     ---------------------------------------------------------------------- */
+  --op-line: #e4e9ef;          /* divisor interno, quase invisível           */
+  --op-line-strong: #d2dae3;   /* borda de cartão e campo                    */
+  --op-line-loud: #b3bfcc;     /* borda em foco/hover                        */
+
+  /* ------------------------------------------------------------------------
+     3. Texto
+
+     Três níveis. Mais que isso vira ruído e ninguém acerta qual usar.
+     ---------------------------------------------------------------------- */
+  --op-fg: #10161d;            /* título, valor, conteúdo                    */
+  --op-fg-secondary: #4c5a68;  /* rótulo, metadado                           */
+  /* Calibrado para 4.6:1 contra as 21 superfícies que o painel produz: as três
+     opacas (branco, --op-canvas, --op-sunken) e cada uma delas coberta por
+     cada tinta semântica a 12%. O pior caso é legenda dentro de caixa de
+     aviso, e é ele que fixa este valor. */
+  --op-fg-muted: #56606c;      /* legenda, placeholder, desabilitado         */
+  --op-fg-inverse: #ffffff;    /* texto sobre acento sólido                  */
+
+  /* ------------------------------------------------------------------------
+     4. Acento
+
+     Azul é interação. `soft` e `line` são o mesmo azul rebaixado para uso em
+     fundo e borda sem virar bloco chapado.
+     ---------------------------------------------------------------------- */
+  --op-accent: #1959bd;
+  --op-accent-hover: #1f6feb;
+  --op-accent-press: #144da3;
+  --op-accent-fg: #ffffff;     /* texto sobre acento sólido                  */
+  --op-accent-soft: rgba(25, 89, 189, 0.12);
+  --op-accent-line: rgba(25, 89, 189, 0.35);
+
+  /* ------------------------------------------------------------------------
+     5. Semântica de estado
+
+     Seis matizes, todos rebaixados o bastante para conviver na mesma tela.
+     Cada um tem par sólido/suave: o sólido é para ponto, régua e TEXTO; o
+     suave é para o fundo da etiqueta.
+
+     O sólido é a cor do texto sobre o próprio suave — é assim que a etiqueta
+     funciona. Por isso cada par foi calibrado junto: alpha de 0,12 e matiz
+     escuro o bastante para o par bater 4.5:1 sobre qualquer superfície clara,
+     inclusive o cartão selecionado (#e4ebf8, que é --op-accent-soft resolvido
+     sobre branco) — o pior caso. Aumentar o alpha escurece o fundo e derruba
+     o contraste.
+     ---------------------------------------------------------------------- */
+  --op-ok: #166c2e;
+  --op-ok-soft: rgba(22, 108, 46, 0.12);
+
+  --op-warn: #7f5500;
+  --op-warn-soft: rgba(127, 85, 0, 0.12);
+
+  --op-danger: #ad2c29;
+  --op-danger-soft: rgba(173, 44, 41, 0.12);
+
+  --op-info: #1959bd;          /* deliberadamente igual ao acento: "em curso"
+                                  é a mesma ideia de "ativo"                  */
+  --op-info-soft: rgba(25, 89, 189, 0.12);
+
+  --op-neutral: #535f6c;
+  --op-neutral-soft: rgba(83, 95, 108, 0.12);
+
+  --op-accent-alt: #0c6964;    /* descoberta / enfileirado                   */
+  --op-accent-alt-soft: rgba(12, 105, 100, 0.12);
+
+  /* ------------------------------------------------------------------------
+     6. Estados de execução
+
+     Mapeados sobre a paleta acima. O painel não introduz cor nova: se um
+     estado novo aparecer, ele reusa um destes ou o sistema está errado.
+     ---------------------------------------------------------------------- */
+  --op-state-discovery: var(--op-accent-alt);
+  --op-state-discovery-soft: var(--op-accent-alt-soft);
+  --op-state-execution: var(--op-info);
+  --op-state-execution-soft: var(--op-info-soft);
+  --op-state-approved: var(--op-ok);
+  --op-state-approved-soft: var(--op-ok-soft);
+  --op-state-blocked: var(--op-danger);
+  --op-state-blocked-soft: var(--op-danger-soft);
+  --op-state-waiting: var(--op-warn);
+  --op-state-waiting-soft: var(--op-warn-soft);
+  --op-state-idle: var(--op-neutral);
+  --op-state-idle-soft: var(--op-neutral-soft);
+
+  /* ------------------------------------------------------------------------
+     7. Tipografia
+
+     Sem arquivo de fonte embarcado: a CSP do painel é default-src 'self' e o
+     projeto não versiona binários. A pilha começa em Inter, cai para as
+     variáveis do Windows e termina em system-ui.
+     ---------------------------------------------------------------------- */
+  --op-font: Inter, 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system,
+    'Helvetica Neue', Arial, sans-serif;
+  --op-font-mono: ui-monospace, 'Cascadia Code', 'Cascadia Mono', Consolas,
+    'SF Mono', 'Liberation Mono', Menlo, monospace;
+
+  --op-weight-regular: 400;
+  --op-weight-medium: 500;
+  --op-weight-semibold: 600;
+  --op-weight-bold: 700;
+
+  /* Sete tamanhos. A escala anterior tinha dezesseis, o que garantia que
+     ninguém soubesse qual escolher. */
+  --op-text-micro: 11px;       /* etiqueta, contador                         */
+  --op-text-caption: 12px;     /* metadado, legenda                          */
+  --op-text-body: 13px;        /* corpo — o tamanho padrão do painel         */
+  --op-text-body-lg: 14px;     /* corpo em área de leitura                   */
+  --op-text-title: 16px;       /* título de painel                           */
+  --op-text-heading: 20px;     /* título de seção                            */
+  --op-text-display: 26px;     /* nome do projeto                            */
+  --op-text-metric: 30px;      /* número de estatística                      */
+
+  --op-leading-tight: 1.2;
+  --op-leading-snug: 1.35;
+  --op-leading-body: 1.55;
+
+  --op-tracking-wide: 0.04em;  /* só em caixa-alta pequena                   */
+
+  /* ------------------------------------------------------------------------
+     8. Espaço — grade de 4 px
+     ---------------------------------------------------------------------- */
+  --op-space-1: 4px;
+  --op-space-2: 6px;
+  --op-space-3: 8px;
+  --op-space-4: 12px;
+  --op-space-5: 16px;
+  --op-space-6: 20px;
+  --op-space-7: 24px;
+  --op-space-8: 32px;
+  --op-space-9: 40px;
+  --op-space-10: 48px;
+
+  /* ------------------------------------------------------------------------
+     9. Raio e traço
+     ---------------------------------------------------------------------- */
+  --op-radius-xs: 3px;
+  --op-radius-sm: 5px;
+  --op-radius-md: 7px;
+  --op-radius-lg: 10px;
+  --op-radius-full: 999px;
+
+  --op-border-width: 1px;
+  --op-border: var(--op-border-width) solid var(--op-line-strong);
+  --op-border-subtle: var(--op-border-width) solid var(--op-line);
+
+  /* Sombra só para o que flutua de verdade. Painel ancorado não tem sombra. */
+  --op-shadow-overlay: 0 16px 48px rgba(15, 24, 36, 0.16), 0 2px 8px rgba(15, 24, 36, 0.08);
+  --op-shadow-popover: 0 6px 20px rgba(15, 24, 36, 0.12);
+
+  /* ------------------------------------------------------------------------
+     10. Dimensões estruturais
+     ---------------------------------------------------------------------- */
+  --op-rail-w: 52px;
+  --op-sidebar-w: 300px;
+  --op-context-w: 336px;
+  --op-workspace-min: 520px;
+  --op-topbar-h: 44px;
+
+  --op-control-h: 28px;        /* botão de ícone, etiqueta                   */
+  --op-control-h-md: 32px;     /* botão de texto, campo, seletor             */
+
+  /* ------------------------------------------------------------------------
+     11. Movimento
+
+     Curto o bastante para não fazer esperar, longo o bastante para não
+     piscar. Tudo é zerado sob prefers-reduced-motion (§14).
+     ---------------------------------------------------------------------- */
+  --op-duration-instant: 80ms;
+  --op-duration-fast: 130ms;
+  --op-duration-base: 200ms;
+  --op-duration-slow: 320ms;
+  --op-ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --op-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --op-transition: var(--op-duration-fast) var(--op-ease);
+
+  /* ------------------------------------------------------------------------
+     12. Camadas — faixa reservada e contígua
+     ---------------------------------------------------------------------- */
+  --op-z-base: 0;
+  --op-z-sticky: 10;
+  --op-z-rail: 20;
+  --op-z-dropdown: 30;
+  --op-z-banner: 40;
+  --op-z-dialog: 50;
+  --op-z-toast: 60;
+
+  /* ------------------------------------------------------------------------
+     13. Foco
+
+     Anel único no acento, com halo branco para permanecer visível também
+     sobre superfície tingida.
+     ---------------------------------------------------------------------- */
+  --op-focus-width: 2px;
+  --op-focus-offset: 2px;
+  --op-focus-color: var(--op-accent);
+  --op-focus-halo: #ffffff;
+}
+
+/* --------------------------------------------------------------------------
+   14. Movimento reduzido.
+
+   Zera a duração em vez de remover a transição: as regras que dependem de
+   transitionend continuam disparando, e nada anima.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --op-duration-instant: 0ms;
+    --op-duration-fast: 0ms;
+    --op-duration-base: 0ms;
+    --op-duration-slow: 0ms;
+  }
+}

@@ -1,0 +1,2167 @@
+/* ==========================================================================
+   OrqPEG — console de orquestração.
+
+   Depende de assets/tokens.css e não declara nenhum valor cru que exista lá.
+   Sem estilo inline: a CSP do painel é default-src 'self'.
+
+   ---------------------------------------------------------------------------
+   ANATOMIA
+
+     topbar   44px, largura total — identidade, contexto da sessão, transporte
+     shell    grade de quatro colunas ocupando o resto da altura
+       rail       52px   navegação global, só glifo
+       sidebar   292px   estatísticas + lista de execuções
+       workspace  1fr    cabeçalho, abas, linha do tempo, console
+       context   336px   etapa atual e decisão pendente
+
+   O aplicativo ocupa a janela inteira. Não há moldura, cartão flutuante nem
+   fundo de apresentação: isto é ferramenta aberta, não peça exposta.
+   ---------------------------------------------------------------------------
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* O `display: none` que o navegador dá a [hidden] vem da folha do agente e
+   perde para qualquer regra de classe que declare display. Como o dashboard
+   liga e desliga elementos pelo atributo hidden, a regra precisa ser
+   reafirmada — senão o elemento continua visível com o atributo marcado. */
+[hidden] {
+  display: none !important;
+}
+
+html {
+  height: 100%;
+}
+
+body.app {
+  display: grid;
+  grid-template-rows: var(--op-topbar-h) minmax(0, 1fr);
+  /* dvh, não vh: no navegador móvel a barra de endereço entra na conta de vh
+     e o rodapé do aplicativo fica sob ela. */
+  height: 100dvh;
+  margin: 0;
+  font-family: var(--op-font);
+  font-size: var(--op-text-body);
+  font-weight: var(--op-weight-regular);
+  line-height: var(--op-leading-body);
+  color: var(--op-fg);
+  background: var(--op-canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Barra de rolagem discreta: no escuro a barra clara padrão é o elemento mais
+   brilhante da tela, o que é exatamente o oposto do que deveria ser. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--op-line-loud) transparent;
+}
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--op-line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--op-radius-full);
+}
+*::-webkit-scrollbar-thumb:hover { background-color: var(--op-line-loud); }
+
+.icon {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+/* --------------------------------------------------------------------------
+   Acessibilidade
+   -------------------------------------------------------------------------- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--op-space-4);
+  top: calc(var(--op-space-10) * -1);
+  z-index: var(--op-z-toast);
+  padding: var(--op-space-3) var(--op-space-5);
+  border-radius: var(--op-radius-md);
+  background: var(--op-accent);
+  color: var(--op-accent-fg);
+  font-size: var(--op-text-body);
+  font-weight: var(--op-weight-semibold);
+  text-decoration: none;
+  transition: top var(--op-transition);
+}
+
+.skip-link:focus {
+  top: var(--op-space-4);
+}
+
+/* Foco visível único para todo o painel. Halo da cor do fundo para o anel
+   continuar legível sobre rail escuro e sobre cartão claro. */
+:where(a, button, select, input, textarea, [tabindex]):focus-visible {
+  outline: var(--op-focus-width) solid var(--op-focus-color);
+  outline-offset: var(--op-focus-offset);
+  box-shadow: 0 0 0 calc(var(--op-focus-width) + var(--op-focus-offset)) var(--op-focus-halo);
+}
+
+/* --------------------------------------------------------------------------
+   Topbar
+
+   Substitui o cabeçalho de apresentação anterior ("ORQPEG DESIGN SYSTEM" +
+   título de artboard). Aquilo anunciava o arquivo de desenho; isto diz em que
+   instalação o operador está e se o painel está recebendo evento.
+   -------------------------------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-4);
+  padding: 0 var(--op-space-5);
+  background: var(--op-canvas);
+  border-bottom: var(--op-border-subtle);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--op-space-3);
+  color: var(--op-fg);
+  font-size: var(--op-text-body);
+  font-weight: var(--op-weight-semibold);
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.wordmark .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--op-accent);
+}
+
+.wordmark:hover { color: var(--op-fg); }
+
+.topbar-sep {
+  width: var(--op-border-width);
+  height: 16px;
+  background: var(--op-line-strong);
+}
+
+.topbar-title {
+  margin: 0;
+  font-size: var(--op-text-body);
+  font-weight: var(--op-weight-regular);
+  color: var(--op-fg-secondary);
+}
+
+.topbar-meta {
+  margin: 0 0 0 auto;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-link {
+  flex: none;
+  color: var(--op-fg-secondary);
+  font-size: var(--op-text-caption);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.topbar-link:hover {
+  color: var(--op-fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   Shell
+   -------------------------------------------------------------------------- */
+
+.shell {
+  display: grid;
+  grid-template-columns:
+    var(--op-rail-w)
+    var(--op-sidebar-w)
+    minmax(var(--op-workspace-min), 1fr)
+    var(--op-context-w);
+  min-height: 0;
+  background: var(--op-canvas);
+}
+
+/* Contenção das colunas que rolam por dentro.
+
+   O console é uma janela de altura fixa e cada coluna rola no próprio eixo.
+   `overflow-y: auto` recorta o desenho, mas NÃO impede que a altura de layout
+   do conteúdo suba pela árvore: o documento reportava scrollHeight de 2534
+   com viewport de 950, e a página ganhava mil e quinhentos pixels de vazio
+   abaixo do aplicativo — que é o que aparecia em captura de tela inteira.
+
+   `contain: paint` corta essa propagação na raiz do problema. Recortar a
+   rolagem da janela em vez disso só escondia o sintoma, e ainda escondia
+   qualquer transbordamento legítimo que aparecesse depois.
+
+   Nenhuma destas colunas contém descendente `position: fixed` — os diálogos
+   são filhos diretos do body —, então virar bloco de contenção não move nada. */
+.sidebar,
+.workspace,
+.context {
+  contain: paint;
+}
+
+/* --------------------------------------------------------------------------
+   Rail
+
+   Só glifo. O rótulo existe no DOM para leitor de tela e aparece como tooltip
+   ao passar o ponteiro ou ao chegar pelo teclado.
+   -------------------------------------------------------------------------- */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--op-space-1);
+  padding: var(--op-space-3) 0;
+  min-height: 0;
+  background: var(--op-canvas);
+  border-right: var(--op-border-subtle);
+  z-index: var(--op-z-rail);
+}
+
+.rail-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--op-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rail-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--op-space-3);
+  margin-top: auto;
+}
+
+.rail-item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--op-radius-md);
+  background: transparent;
+  color: var(--op-fg-muted);
+  cursor: pointer;
+  transition: background-color var(--op-transition), color var(--op-transition);
+}
+
+.rail-item:hover {
+  background: var(--op-hover);
+  color: var(--op-fg);
+}
+
+.rail-item[aria-current='page'] {
+  background: var(--op-accent-soft);
+  color: var(--op-accent);
+}
+
+/* Marca de seleção na borda do rail: o item ativo se ancora à estrutura em vez
+   de virar um botão colorido solto. */
+.rail-item[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--op-space-3) * -1);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 18px;
+  border-radius: var(--op-radius-full);
+  background: var(--op-accent);
+}
+
+.rail-item .icon {
+  width: 17px;
+  height: 17px;
+}
+
+.rail-label {
+  position: absolute;
+  left: calc(100% + var(--op-space-3));
+  padding: var(--op-space-1) var(--op-space-3);
+  border: var(--op-border);
+  border-radius: var(--op-radius-sm);
+  background: var(--op-overlay);
+  box-shadow: var(--op-shadow-popover);
+  color: var(--op-fg);
+  font-size: var(--op-text-caption);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--op-transition);
+  z-index: var(--op-z-dropdown);
+}
+
+.rail-item:hover .rail-label,
+.rail-item:focus-visible .rail-label {
+  opacity: 1;
+}
+
+.rail-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  padding: 0 3px;
+  border-radius: var(--op-radius-full);
+  background: var(--op-danger);
+  color: var(--op-canvas);
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  line-height: 1;
+}
+
+.rail-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  border: var(--op-border);
+  border-radius: var(--op-radius-full);
+  background: var(--op-raised);
+  color: var(--op-fg-secondary);
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  line-height: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Sidebar
+   -------------------------------------------------------------------------- */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--op-space-5);
+  padding: var(--op-space-5);
+  min-height: 0;
+  background: var(--op-surface);
+  border-right: var(--op-border-subtle);
+  overflow-y: auto;
+}
+
+/* StatGrid — quatro células iguais. Rótulo em cima, número embaixo, ponto de
+   estado à esquerda do rótulo. Sem cartão colorido: o número é o conteúdo. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--op-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stat {
+  display: grid;
+  grid-template-areas:
+    'dot label'
+    'value value';
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0 var(--op-space-2);
+  padding: var(--op-space-3) var(--op-space-4);
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-raised);
+}
+
+.stat-dot {
+  grid-area: dot;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--op-radius-full);
+  background: var(--op-neutral);
+}
+
+/* O ponto herda o significado da métrica, não uma cor decorativa. */
+.stat[data-stat='active'] .stat-dot { background: var(--op-state-execution); }
+.stat[data-stat='pending'] .stat-dot { background: var(--op-state-waiting); }
+.stat[data-stat='agents'] .stat-dot { background: var(--op-state-approved); }
+
+.stat-label {
+  grid-area: label;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stat-value {
+  grid-area: value;
+  margin-top: var(--op-space-1);
+  font-size: var(--op-text-heading);
+  font-weight: var(--op-weight-semibold);
+  line-height: var(--op-leading-tight);
+  color: var(--op-fg);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.sidebar-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--op-space-3);
+}
+
+.section-title {
+  margin: 0;
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--op-tracking-wide);
+  color: var(--op-fg-muted);
+}
+
+.sidebar-tools {
+  display: flex;
+  gap: var(--op-space-1);
+}
+
+.chevron {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--op-radius-sm);
+  background: transparent;
+  color: var(--op-fg-muted);
+  cursor: pointer;
+  transition: background-color var(--op-transition), color var(--op-transition);
+}
+
+.chevron:hover {
+  background: var(--op-hover);
+  color: var(--op-fg);
+}
+
+.chevron .icon { width: 14px; height: 14px; }
+
+/* Botão que age como link dentro de texto corrido. Precisa ser <button>: o
+   destino é um diálogo, não uma URL, e um <a href> mentiria sobre isso. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--op-accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.project-list-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 calc(var(--op-space-2) * -1);
+  padding: 0 var(--op-space-2);
+}
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--op-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Linha de execução, não cartão. Densidade importa: a lista precisa mostrar
+   oito projetos sem rolagem, não três. */
+.project-card {
+  position: relative;
+  display: grid;
+  grid-template-areas:
+    'avatar name'
+    'avatar status'
+    'strip strip';
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 var(--op-space-3);
+  width: 100%;
+  padding: var(--op-space-3) var(--op-space-4);
+  border: var(--op-border-width) solid transparent;
+  border-radius: var(--op-radius-md);
+  background: transparent;
+  color: var(--op-fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--op-transition), border-color var(--op-transition);
+}
+
+.project-card:hover {
+  background: var(--op-hover);
+}
+
+.project-card[aria-current='true'] {
+  background: var(--op-accent-soft);
+  border-color: var(--op-accent-line);
+}
+
+.project-avatar {
+  grid-area: avatar;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  border: var(--op-border);
+  border-radius: var(--op-radius-sm);
+  background: var(--op-raised);
+  color: var(--op-fg-secondary);
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  line-height: 1;
+}
+
+.project-card[aria-current='true'] .project-avatar {
+  border-color: var(--op-accent-line);
+  background: var(--op-accent);
+  color: var(--op-accent-fg);
+}
+
+.project-card-name {
+  grid-area: name;
+  align-self: end;
+  margin: 0;
+  font-size: var(--op-text-body);
+  font-weight: var(--op-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-card-status {
+  grid-area: status;
+  align-self: start;
+  margin: 0;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Faixa de tarefa: aparece só quando há tarefa corrente. Fica alinhada ao
+   texto, não à borda do cartão, porque pertence à linha do projeto. */
+.task-strip {
+  grid-area: strip;
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-2);
+  margin-top: var(--op-space-2);
+  padding-top: var(--op-space-2);
+  border-top: var(--op-border-subtle);
+}
+
+.task-strip .icon {
+  width: 12px;
+  height: 12px;
+  color: var(--op-fg-muted);
+}
+
+.task-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   Etiquetas
+
+   Fundo rebaixado + texto e borda na cor do estado. Nunca bloco chapado: a
+   etiqueta identifica, o conteúdo continua sendo o texto ao lado dela.
+   -------------------------------------------------------------------------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--op-space-2);
+  height: 20px;
+  padding: 0 var(--op-space-3);
+  border: var(--op-border-width) solid transparent;
+  border-radius: var(--op-radius-sm);
+  background: var(--op-neutral-soft);
+  color: var(--op-fg-secondary);
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pill--stage-discovery {
+  background: var(--op-state-discovery-soft);
+  border-color: var(--op-state-discovery);
+  color: var(--op-state-discovery);
+}
+
+.pill--stage-execution {
+  background: var(--op-state-execution-soft);
+  border-color: var(--op-state-execution);
+  color: var(--op-state-execution);
+}
+
+.pill--stage-approved {
+  background: var(--op-state-approved-soft);
+  border-color: var(--op-state-approved);
+  color: var(--op-state-approved);
+}
+
+.pill--stage-blocked {
+  background: var(--op-state-blocked-soft);
+  border-color: var(--op-state-blocked);
+  color: var(--op-state-blocked);
+}
+
+.pill--stage-idle {
+  background: var(--op-state-idle-soft);
+  border-color: var(--op-line-strong);
+  color: var(--op-fg-muted);
+}
+
+.pill--priority-high {
+  background: var(--op-danger-soft);
+  border-color: var(--op-danger);
+  color: var(--op-danger);
+}
+
+.pill--priority-medium {
+  background: var(--op-warn-soft);
+  border-color: var(--op-warn);
+  color: var(--op-warn);
+}
+
+.pill--priority-low {
+  background: var(--op-neutral-soft);
+  border-color: var(--op-line-strong);
+  color: var(--op-fg-muted);
+}
+
+/* Ambiente e prontidão: fatos do projeto, não estados de execução. Ficam
+   neutros e só ganham cor quando o fato é "não pronto". */
+.pill--env {
+  background: var(--op-neutral-soft);
+  border-color: var(--op-line-strong);
+  color: var(--op-fg-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--op-tracking-wide);
+}
+
+.pill--ready {
+  background: var(--op-ok-soft);
+  border-color: var(--op-ok);
+  color: var(--op-ok);
+}
+
+.pill--ready[data-ready='false'] {
+  background: var(--op-danger-soft);
+  border-color: var(--op-danger);
+  color: var(--op-danger);
+}
+
+/* --------------------------------------------------------------------------
+   Workspace
+   -------------------------------------------------------------------------- */
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--op-space-6) var(--op-space-7) var(--op-space-8);
+  background: var(--op-canvas);
+  overflow-y: auto;
+}
+
+.workspace:focus { outline: none; }
+
+/* O workspace é uma coluna que rola. Sem isto o flex encolhe os filhos para
+   caber na altura da coluna — e quem tem overflow:hidden (o console) perde a
+   proteção do min-height automático e colapsa até a borda. */
+.workspace > * { flex: none; }
+
+.project-header {
+  display: grid;
+  grid-template-areas: 'mono identity badges owner';
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--op-space-4);
+}
+
+/* Monograma de 36px. O anterior tinha 108px de diâmetro em amarelo neon: uma
+   inicial não é o elemento mais importante da tela. */
+.project-monogram {
+  grid-area: mono;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-raised);
+  color: var(--op-fg-secondary);
+  font-size: var(--op-text-caption);
+  font-weight: var(--op-weight-semibold);
+  line-height: 1;
+}
+
+.project-identity {
+  grid-area: identity;
+  min-width: 0;
+}
+
+.project-title {
+  margin: 0;
+  font-size: var(--op-text-display);
+  font-weight: var(--op-weight-semibold);
+  line-height: var(--op-leading-tight);
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-meta {
+  margin: var(--op-space-1) 0 0;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-secondary);
+}
+
+/* O caminho do repositório é dado de máquina: monoespaçado, discreto e em uma
+   linha só. No desenho anterior ele quebrava em quatro linhas e dominava o
+   cabeçalho. */
+.project-path {
+  margin: 2px 0 0;
+  font-family: var(--op-font-mono);
+  font-size: var(--op-text-micro);
+  color: var(--op-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-badges {
+  grid-area: badges;
+  display: flex;
+  gap: var(--op-space-2);
+}
+
+.owner {
+  grid-area: owner;
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-3);
+  padding-left: var(--op-space-4);
+  border-left: var(--op-border-subtle);
+}
+
+.owner-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: var(--op-border);
+  border-radius: var(--op-radius-full);
+  background: var(--op-raised);
+  color: var(--op-fg-secondary);
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  line-height: 1;
+}
+
+.owner-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.owner-label {
+  font-size: var(--op-text-micro);
+  color: var(--op-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--op-tracking-wide);
+  line-height: 1.4;
+}
+
+.owner-name {
+  font-size: var(--op-text-caption);
+  font-weight: var(--op-weight-medium);
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ações + seletor de execução + abas */
+.workspace-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-4);
+  margin-top: var(--op-space-5);
+  flex-wrap: wrap;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0;
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-surface);
+  overflow: hidden;
+}
+
+/* Grupo segmentado: cinco ações da mesma execução pertencem a um controle só,
+   não a cinco botões redondos soltos. */
+.header-action {
+  display: grid;
+  place-items: center;
+  width: var(--op-control-h-md);
+  height: calc(var(--op-control-h-md) - 2px);
+  padding: 0;
+  border: 0;
+  border-left: var(--op-border-subtle);
+  background: transparent;
+  color: var(--op-fg-secondary);
+  cursor: pointer;
+  transition: background-color var(--op-transition), color var(--op-transition);
+}
+
+.header-action:first-child { border-left: 0; }
+
+.header-action:hover:not(:disabled) {
+  background: var(--op-hover);
+  color: var(--op-fg);
+}
+
+.header-action:disabled {
+  color: var(--op-fg-muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.header-action .icon { width: 15px; height: 15px; }
+
+.run-selector-wrap { margin: 0; }
+
+.run-selector {
+  height: var(--op-control-h-md);
+  min-width: 240px;
+  max-width: 420px;
+  padding: 0 var(--op-space-3);
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-surface);
+  color: var(--op-fg);
+  font-family: inherit;
+  font-size: var(--op-text-caption);
+  cursor: pointer;
+  transition: border-color var(--op-transition);
+}
+
+.run-selector:hover:not(:disabled) { border-color: var(--op-line-loud); }
+
+.run-selector:disabled {
+  color: var(--op-fg-muted);
+  cursor: not-allowed;
+}
+
+/* Controles do PROJETO, à direita da barra — separados dos controles da
+   EXECUÇÃO, que ficam à esquerda. São escopos diferentes: um age sobre o
+   cadastro, o outro sobre a execução corrente, e misturá-los foi o que deixou
+   o painel sem lugar para editar ou remover um projeto. */
+.project-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-2);
+  margin-left: auto;
+}
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--op-space-2);
+  height: var(--op-control-h-md);
+  padding: 0 var(--op-space-3);
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-surface);
+  color: var(--op-fg-secondary);
+  font-family: inherit;
+  font-size: var(--op-text-caption);
+  font-weight: var(--op-weight-medium);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--op-transition), border-color var(--op-transition),
+    color var(--op-transition);
+}
+
+.tool-btn:hover:not(:disabled) {
+  border-color: var(--op-line-loud);
+  background: var(--op-hover);
+  color: var(--op-fg);
+}
+
+.tool-btn:disabled {
+  color: var(--op-fg-muted);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.tool-btn .icon { width: 13px; height: 13px; }
+
+/* Remover é destrutivo e se anuncia como tal — mas só na intenção (hover),
+   não em repouso: um botão vermelho parado na barra vira ruído permanente. */
+.tool-btn--danger:hover:not(:disabled) {
+  border-color: var(--op-danger);
+  background: var(--op-danger-soft);
+  color: var(--op-danger);
+}
+
+/* As abas ocupam a própria linha, encostadas no divisor. Quando dividiam a
+   linha com as ações e o seletor de execução, três controles de largura
+   variável disputavam a mesma faixa e a barra quebrava sozinha. */
+.tabs {
+  display: flex;
+  gap: var(--op-space-5);
+  margin-top: var(--op-space-5);
+}
+
+.tab {
+  position: relative;
+  padding: 0 0 var(--op-space-3);
+  border: 0;
+  background: transparent;
+  color: var(--op-fg-muted);
+  font-family: inherit;
+  font-size: var(--op-text-body);
+  font-weight: var(--op-weight-medium);
+  cursor: pointer;
+  transition: color var(--op-transition);
+}
+
+.tab:hover { color: var(--op-fg); }
+
+.tab[aria-selected='true'] { color: var(--op-fg); }
+
+/* O sublinhado da aba cobre o divisor logo abaixo: a aba selecionada e a régua
+   formam uma peça só, em vez de duas linhas paralelas. */
+.tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--op-border-width) * -1);
+  height: 2px;
+  border-radius: var(--op-radius-full);
+  background: var(--op-accent);
+}
+
+.workspace-divider {
+  width: 100%;
+  height: var(--op-border-width);
+  margin: 0;
+  border: 0;
+  background: var(--op-line);
+}
+
+/* --------------------------------------------------------------------------
+   Linha do tempo
+   -------------------------------------------------------------------------- */
+
+.timeline-section { padding-top: var(--op-space-6); }
+.timeline-section:focus { outline: none; }
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--op-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--op-space-4);
+  align-items: start;
+}
+
+/* Fio que liga um evento ao seguinte. Nasce no centro do marcador (22 / 2) e
+   morre no marcador do próximo, atravessando o vão da lista. */
+.event:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 26px;
+  bottom: calc((var(--op-space-4) + var(--op-space-1)) * -1);
+  width: var(--op-border-width);
+  background: var(--op-line-strong);
+}
+
+.event-marker {
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-3);
+  height: 22px;
+}
+
+.event-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: var(--op-border-width) solid var(--op-line-strong);
+  border-radius: var(--op-radius-full);
+  background: var(--op-canvas);
+  color: var(--op-fg-muted);
+}
+
+.event-icon .icon { width: 12px; height: 12px; }
+
+.event-icon[data-stage='discovery'] {
+  border-color: var(--op-state-discovery);
+  background: var(--op-state-discovery-soft);
+  color: var(--op-state-discovery);
+}
+
+.event-icon[data-stage='execution'] {
+  border-color: var(--op-state-execution);
+  background: var(--op-state-execution-soft);
+  color: var(--op-state-execution);
+}
+
+.event-icon[data-stage='approved'] {
+  border-color: var(--op-state-approved);
+  background: var(--op-state-approved-soft);
+  color: var(--op-state-approved);
+}
+
+.event-icon[data-stage='blocked'] {
+  border-color: var(--op-state-blocked);
+  background: var(--op-state-blocked-soft);
+  color: var(--op-state-blocked);
+}
+
+.event-time {
+  font-size: var(--op-text-micro);
+  color: var(--op-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--op-space-4);
+  padding: var(--op-space-3) var(--op-space-4);
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-surface);
+}
+
+.event-title {
+  margin: 0;
+  font-size: var(--op-text-body);
+  font-weight: var(--op-weight-medium);
+}
+
+.event-detail {
+  margin: 2px 0 0;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-secondary);
+  line-height: var(--op-leading-snug);
+  overflow-wrap: anywhere;
+}
+
+.event-detail:empty { display: none; }
+
+.event-side {
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-3);
+}
+
+.event-agent {
+  display: grid;
+  place-items: center;
+  height: 20px;
+  padding: 0 var(--op-space-2);
+  border: var(--op-border);
+  border-radius: var(--op-radius-sm);
+  background: var(--op-raised);
+  color: var(--op-fg-muted);
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  line-height: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Console do agente
+   -------------------------------------------------------------------------- */
+
+.console {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--op-space-8);
+  border: var(--op-border);
+  border-radius: var(--op-radius-lg);
+  background: var(--op-surface);
+  overflow: hidden;
+}
+
+.console-head {
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-3);
+  padding: var(--op-space-3) var(--op-space-4);
+  border-bottom: var(--op-border-subtle);
+}
+
+.console-title {
+  margin: 0;
+  font-size: var(--op-text-body);
+  font-weight: var(--op-weight-semibold);
+}
+
+.console-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--op-radius-full);
+  background: var(--op-fg-muted);
+  transition: background-color var(--op-transition);
+}
+
+.console-dot[data-live='true'] { background: var(--op-ok); }
+.console-dot[data-live='degraded'] { background: var(--op-warn); }
+.console-dot[data-live='false'] { background: var(--op-danger); }
+
+.console-status {
+  font-size: var(--op-text-micro);
+  color: var(--op-fg-muted);
+}
+
+/* Os atalhos ficam à direita do cabeçalho do console, não numa fileira própria
+   acima do título — eram seis ícones sem rótulo pairando sobre o painel. */
+.console-actions {
+  display: flex;
+  gap: 0;
+  margin-left: auto;
+  border: var(--op-border);
+  border-radius: var(--op-radius-sm);
+  overflow: hidden;
+}
+
+.console-action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-left: var(--op-border-subtle);
+  background: transparent;
+  color: var(--op-fg-secondary);
+  cursor: pointer;
+  transition: background-color var(--op-transition), color var(--op-transition);
+}
+
+.console-action:first-child { border-left: 0; }
+
+.console-action:hover:not(:disabled) {
+  background: var(--op-hover);
+  color: var(--op-fg);
+}
+
+.console-action:disabled {
+  color: var(--op-fg-muted);
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.console-action .icon { width: 14px; height: 14px; }
+
+.console-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--op-space-3);
+  min-height: 140px;
+  max-height: 300px;
+  padding: var(--op-space-4);
+  background: var(--op-sunken);
+  overflow-y: auto;
+}
+
+.bubble {
+  max-width: 72%;
+  margin: 0;
+  padding: var(--op-space-3) var(--op-space-4);
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  font-size: var(--op-text-caption);
+  line-height: var(--op-leading-snug);
+  overflow-wrap: anywhere;
+}
+
+.bubble--operator {
+  align-self: flex-end;
+  border-color: var(--op-accent-line);
+  background: var(--op-accent-soft);
+  color: var(--op-fg);
+  border-bottom-right-radius: var(--op-radius-xs);
+}
+
+.bubble--agent {
+  align-self: flex-start;
+  background: var(--op-raised);
+  color: var(--op-fg-secondary);
+  border-bottom-left-radius: var(--op-radius-xs);
+}
+
+.bubble-time {
+  display: block;
+  margin-top: var(--op-space-1);
+  font-size: var(--op-text-micro);
+  color: var(--op-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.console-form {
+  display: flex;
+  gap: var(--op-space-3);
+  align-items: center;
+  padding: var(--op-space-3) var(--op-space-4);
+  border-top: var(--op-border-subtle);
+}
+
+.console-input {
+  flex: 1;
+  min-width: 0;
+  height: var(--op-control-h-md);
+  padding: 0 var(--op-space-4);
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-sunken);
+  color: var(--op-fg);
+  font-family: inherit;
+  font-size: var(--op-text-body);
+  transition: border-color var(--op-transition);
+}
+
+.console-input:hover:not(:disabled) { border-color: var(--op-line-loud); }
+.console-input::placeholder { color: var(--op-fg-muted); }
+.console-input:disabled { cursor: not-allowed; opacity: 0.6; }
+
+.console-send {
+  display: grid;
+  place-items: center;
+  width: var(--op-control-h-md);
+  height: var(--op-control-h-md);
+  padding: 0;
+  border: 0;
+  border-radius: var(--op-radius-md);
+  background: var(--op-accent);
+  color: var(--op-accent-fg);
+  cursor: pointer;
+  transition: background-color var(--op-transition), opacity var(--op-transition);
+}
+
+.console-send:hover:not(:disabled) { background: var(--op-accent-hover); }
+
+.console-send:disabled {
+  background: var(--op-raised);
+  color: var(--op-fg-muted);
+  cursor: not-allowed;
+}
+
+.console-send .icon { width: 14px; height: 14px; }
+
+/* Estado de governança do campo — o texto explica por que está bloqueado. */
+.console-governance {
+  margin: 0;
+  padding: 0 var(--op-space-4) var(--op-space-3);
+  font-size: var(--op-text-micro);
+  color: var(--op-fg-muted);
+}
+
+.console-governance[data-mode='blocked'] { color: var(--op-danger); }
+
+/* --------------------------------------------------------------------------
+   Painéis de aba
+   -------------------------------------------------------------------------- */
+
+.tab-panel { padding-top: var(--op-space-6); }
+.tab-panel:focus { outline: none; }
+
+.panel-title {
+  margin: 0 0 var(--op-space-4);
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--op-tracking-wide);
+  color: var(--op-fg-muted);
+}
+
+.panel-title--spaced { margin-top: var(--op-space-8); }
+
+/* Listas de chave/valor: fileiras coladas dentro de uma moldura só, com fio
+   entre elas. Antes eram cartões soltos com vão de 8px, o que triplicava a
+   altura sem acrescentar informação. */
+.agent-list,
+.prompt-list,
+.history-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-surface);
+  list-style: none;
+  overflow: hidden;
+}
+
+.agent-list:empty,
+.prompt-list:empty,
+.history-list:empty { display: none; }
+
+.list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--op-space-4);
+  padding: var(--op-space-3) var(--op-space-4);
+  border-top: var(--op-border-subtle);
+  font-size: var(--op-text-caption);
+}
+
+.list-row:first-child { border-top: 0; }
+
+/* Fileira que leva a algum lugar. Prompt, execução anterior e merge têm
+   página própria; antes eram texto morto e o operador não tinha como chegar
+   nelas a partir do console. */
+a.list-row {
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--op-transition);
+}
+
+a.list-row:hover {
+  background: var(--op-hover);
+}
+
+a.list-row:hover .list-row-label {
+  color: var(--op-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Seta indicando que a fileira é um destino, não um dado. */
+a.list-row::after {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: calc(var(--op-space-2) * -1);
+  border-right: 1.5px solid var(--op-fg-muted);
+  border-bottom: 1.5px solid var(--op-fg-muted);
+  transform: rotate(-45deg);
+}
+
+a.list-row:hover::after {
+  border-color: var(--op-accent);
+}
+
+.list-row-label {
+  font-weight: var(--op-weight-medium);
+  color: var(--op-fg);
+  overflow-wrap: anywhere;
+}
+
+.list-row-value {
+  color: var(--op-fg-muted);
+  font-family: var(--op-font-mono);
+  font-size: var(--op-text-micro);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.artifact-list {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-surface);
+  font-size: var(--op-text-caption);
+  overflow: hidden;
+}
+
+.artifact-list dt,
+.artifact-list dd {
+  padding: var(--op-space-3) var(--op-space-4);
+  border-top: var(--op-border-subtle);
+}
+
+.artifact-list dt:first-of-type,
+.artifact-list dt:first-of-type + dd {
+  border-top: 0;
+}
+
+.artifact-list dt {
+  font-weight: var(--op-weight-medium);
+  color: var(--op-fg-muted);
+}
+
+.artifact-list dd {
+  margin: 0;
+  font-family: var(--op-font-mono);
+  font-size: var(--op-text-micro);
+  color: var(--op-fg);
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   Painel de contexto
+   -------------------------------------------------------------------------- */
+
+.context {
+  display: flex;
+  flex-direction: column;
+  gap: var(--op-space-4);
+  min-height: 0;
+  padding: var(--op-space-6) var(--op-space-5);
+  background: var(--op-surface);
+  border-left: var(--op-border-subtle);
+  overflow-y: auto;
+}
+
+/* Cartão de etapa: superfície neutra com uma régua superior na cor do estado.
+   O estado se lê pela régua e pela etiqueta; o cartão continua legível. */
+.stage-card {
+  position: relative;
+  padding: var(--op-space-5);
+  border: var(--op-border);
+  border-radius: var(--op-radius-lg);
+  background: var(--op-raised);
+  overflow: hidden;
+}
+
+.stage-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--op-state-idle);
+}
+
+.stage-card[data-stage='discovery']::before { background: var(--op-state-discovery); }
+.stage-card[data-stage='execution']::before { background: var(--op-state-execution); }
+.stage-card[data-stage='approved']::before { background: var(--op-state-approved); }
+.stage-card[data-stage='blocked']::before { background: var(--op-state-blocked); }
+
+.card-eyebrow {
+  margin: 0;
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--op-tracking-wide);
+  color: var(--op-fg-muted);
+}
+
+.stage-title {
+  margin: var(--op-space-2) 0 0;
+  font-size: var(--op-text-title);
+  font-weight: var(--op-weight-semibold);
+  line-height: var(--op-leading-tight);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.stage-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--op-space-2);
+  margin: var(--op-space-4) 0 0;
+}
+
+/* O rótulo e o valor do progresso vivem na mesma linha: rótulo à esquerda,
+   percentual à direita, régua embaixo. */
+.stage-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--op-space-3);
+  margin-top: var(--op-space-5);
+}
+
+.stage-progress-label {
+  margin: 0;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-muted);
+}
+
+.stage-progress-value {
+  margin: 0;
+  font-size: var(--op-text-body-lg);
+  font-weight: var(--op-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.progress-track {
+  height: 4px;
+  margin-top: var(--op-space-2);
+  border-radius: var(--op-radius-full);
+  background: var(--op-line-strong);
+  overflow: hidden;
+}
+
+.progress-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--op-accent);
+  transform: scaleX(var(--op-progress, 0));
+  transform-origin: left center;
+  transition: transform var(--op-duration-slow) var(--op-ease-out);
+}
+
+.stage-card[data-stage='blocked'] .progress-fill { background: var(--op-danger); }
+.stage-card[data-stage='approved'] .progress-fill { background: var(--op-ok); }
+
+.checklist-title {
+  margin: var(--op-space-5) 0 var(--op-space-3);
+  padding-top: var(--op-space-4);
+  border-top: var(--op-border-subtle);
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--op-tracking-wide);
+  color: var(--op-fg-muted);
+}
+
+.checklist,
+.approval-checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--op-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.check-item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--op-space-3);
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-secondary);
+  line-height: var(--op-leading-snug);
+}
+
+.check-mark {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border: var(--op-border-width) solid var(--op-ok);
+  border-radius: var(--op-radius-full);
+  background: var(--op-ok-soft);
+  color: var(--op-ok);
+  font-size: 9px;
+  font-weight: var(--op-weight-bold);
+  line-height: 1;
+}
+
+.check-item[data-status='failed'] .check-mark {
+  border-color: var(--op-danger);
+  background: var(--op-danger-soft);
+  color: var(--op-danger);
+}
+
+.check-item[data-status='pending'] .check-mark {
+  border-color: var(--op-line-loud);
+  background: transparent;
+  color: var(--op-fg-muted);
+}
+
+.check-item[data-status='skipped'] .check-mark {
+  border-color: var(--op-line-strong);
+  background: transparent;
+  color: var(--op-fg-muted);
+  opacity: 0.6;
+}
+
+/* Cartão de decisão. Em repouso é neutro; com decisão pendente ganha borda e
+   régua de acento, porque aí ele é a única coisa que exige o operador. */
+.approval {
+  padding: var(--op-space-5);
+  border: var(--op-border);
+  border-radius: var(--op-radius-lg);
+  background: var(--op-raised);
+}
+
+.approval[data-pending='true'] {
+  border-color: var(--op-warn);
+  box-shadow: inset 0 2px 0 0 var(--op-warn);
+}
+
+.approval-title {
+  margin: 0;
+  font-size: var(--op-text-body-lg);
+  font-weight: var(--op-weight-semibold);
+}
+
+.approval-subtitle {
+  margin: var(--op-space-2) 0 0;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-secondary);
+  line-height: var(--op-leading-snug);
+}
+
+.file-rows {
+  display: flex;
+  flex-direction: column;
+  margin: var(--op-space-4) 0 0;
+  padding: 0;
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-surface);
+  list-style: none;
+  overflow: hidden;
+}
+
+.file-rows:empty { display: none; }
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-3);
+  padding: var(--op-space-2) var(--op-space-3);
+  border-top: var(--op-border-subtle);
+  font-size: var(--op-text-caption);
+}
+
+.file-row:first-child { border-top: 0; }
+
+.file-row .icon {
+  width: 13px;
+  height: 13px;
+  color: var(--op-fg-muted);
+}
+
+.file-row-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--op-font-mono);
+  font-size: var(--op-text-micro);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;      /* o fim do caminho importa mais que o começo */
+  text-align: left;
+}
+
+.file-row-action {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--op-radius-sm);
+  background: transparent;
+  color: var(--op-fg-muted);
+  cursor: pointer;
+  transition: background-color var(--op-transition), color var(--op-transition);
+}
+
+.file-row-action:hover {
+  background: var(--op-hover);
+  color: var(--op-fg);
+}
+
+.decision-label {
+  margin: var(--op-space-5) 0 var(--op-space-3);
+  padding-top: var(--op-space-4);
+  border-top: var(--op-border-subtle);
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--op-tracking-wide);
+  color: var(--op-fg-muted);
+}
+
+.approval-buttons {
+  display: flex;
+  gap: var(--op-space-3);
+  margin-top: var(--op-space-5);
+}
+
+/* --------------------------------------------------------------------------
+   Botões
+   -------------------------------------------------------------------------- */
+
+.btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--op-control-h-md);
+  padding: 0 var(--op-space-4);
+  border: var(--op-border-width) solid transparent;
+  border-radius: var(--op-radius-md);
+  font-family: inherit;
+  font-size: var(--op-text-caption);
+  font-weight: var(--op-weight-medium);
+  cursor: pointer;
+  transition: background-color var(--op-transition), border-color var(--op-transition),
+    color var(--op-transition);
+}
+
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Autorizar é a ação primária: sólida, no acento. */
+.btn--approve {
+  background: var(--op-accent);
+  color: var(--op-accent-fg);
+}
+
+.btn--approve:hover:not(:disabled) { background: var(--op-accent-hover); }
+.btn--approve:active:not(:disabled) { background: var(--op-accent-press); }
+
+/* Solicitar ajuste é alternativa legítima, não recusa destrutiva: secundária
+   com moldura, não bloco escuro competindo com a primária. */
+.btn--reject {
+  border-color: var(--op-line-strong);
+  background: var(--op-surface);
+  color: var(--op-fg);
+}
+
+.btn--reject:hover:not(:disabled) {
+  border-color: var(--op-line-loud);
+  background: var(--op-hover);
+}
+
+.btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--op-fg-secondary);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--op-hover);
+  color: var(--op-fg);
+}
+
+/* Confirmação de ação destrutiva. Só existe dentro de diálogo, depois de o
+   operador já ter dito o que quer fazer — nunca como botão de partida. */
+.btn--danger {
+  background: var(--op-danger);
+  color: #ffffff;
+}
+
+.btn--danger:hover:not(:disabled) { background: #9a2724; }
+
+/* --------------------------------------------------------------------------
+   Carregamento, vazio, erro
+   -------------------------------------------------------------------------- */
+
+.state-note {
+  margin: var(--op-space-4) 0 0;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-muted);
+  line-height: var(--op-leading-snug);
+}
+
+.state-note--error { color: var(--op-danger); }
+.state-note--onaccent { color: var(--op-fg-muted); }
+.state-note a { color: var(--op-accent); }
+
+.console-log .state-note { margin: auto; text-align: center; }
+
+/* Faixa de estado da execução: régua lateral na cor do estado sobre superfície
+   neutra. É aviso, não alarme. */
+.run-status {
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-3);
+  margin: 0 0 var(--op-space-5);
+  padding: var(--op-space-3) var(--op-space-4);
+  border: var(--op-border);
+  border-left-width: 2px;
+  border-left-color: var(--op-neutral);
+  border-radius: var(--op-radius-md);
+  background: var(--op-surface);
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-secondary);
+}
+
+.run-status[data-kind='paused'] { border-left-color: var(--op-state-discovery); }
+.run-status[data-kind='waiting'] { border-left-color: var(--op-state-waiting); }
+.run-status[data-kind='completed'] { border-left-color: var(--op-state-approved); }
+.run-status[data-kind='failed'] { border-left-color: var(--op-state-blocked); }
+.run-status[data-kind='disconnected'] { border-left-color: var(--op-state-blocked); }
+
+/* Esqueleto de carregamento. A animação some sob prefers-reduced-motion porque
+   a duração vai a zero; o bloco permanece como marcador de espaço. */
+.skeleton {
+  border-radius: var(--op-radius-md);
+  background: linear-gradient(
+    90deg,
+    var(--op-raised) 25%,
+    var(--op-overlay) 37%,
+    var(--op-raised) 63%
+  );
+  background-size: 400% 100%;
+  animation: op-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton--card { height: 46px; }
+.skeleton--event { height: 44px; }
+
+@keyframes op-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
+[aria-busy='true'] { cursor: progress; }
+
+/* --------------------------------------------------------------------------
+   Transporte — vive na topbar, junto do resto do estado da sessão
+   -------------------------------------------------------------------------- */
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: var(--op-space-2);
+  flex: none;
+  padding: 0 var(--op-space-3);
+  height: 22px;
+  border: var(--op-border);
+  border-radius: var(--op-radius-full);
+  font-size: var(--op-text-micro);
+  color: var(--op-fg-secondary);
+  white-space: nowrap;
+}
+
+.transport-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--op-radius-full);
+  background: var(--op-neutral);
+  transition: background-color var(--op-transition);
+}
+
+.transport[data-status='live'] .transport-dot { background: var(--op-ok); }
+.transport[data-status='polling'] .transport-dot { background: var(--op-warn); }
+.transport[data-status='reconnecting'] .transport-dot { background: var(--op-state-discovery); }
+.transport[data-status='down'] .transport-dot { background: var(--op-danger); }
+
+.transport[data-status='down'] { border-color: var(--op-danger); color: var(--op-danger); }
+
+/* --------------------------------------------------------------------------
+   Diálogos
+   -------------------------------------------------------------------------- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--op-scrim);
+  z-index: var(--op-z-dialog);
+}
+
+.dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - var(--op-space-8)));
+  padding: var(--op-space-6);
+  border: var(--op-border);
+  border-radius: var(--op-radius-lg);
+  background: var(--op-overlay);
+  box-shadow: var(--op-shadow-overlay);
+  z-index: calc(var(--op-z-dialog) + 1);
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: var(--op-text-title);
+  font-weight: var(--op-weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+.dialog-body {
+  margin: var(--op-space-3) 0 0;
+  font-size: var(--op-text-caption);
+  color: var(--op-fg-secondary);
+  line-height: var(--op-leading-snug);
+}
+
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--op-space-2);
+  margin-top: var(--op-space-5);
+  font-size: var(--op-text-caption);
+  font-weight: var(--op-weight-medium);
+  color: var(--op-fg-secondary);
+}
+
+.dialog-field input {
+  height: var(--op-control-h-md);
+  padding: 0 var(--op-space-3);
+  border: var(--op-border);
+  border-radius: var(--op-radius-md);
+  background: var(--op-sunken);
+  color: var(--op-fg);
+  font-family: inherit;
+  font-size: var(--op-text-body);
+  font-weight: var(--op-weight-regular);
+  transition: border-color var(--op-transition);
+}
+
+.dialog-field input:hover { border-color: var(--op-line-loud); }
+
+.dialog-error {
+  margin: var(--op-space-3) 0 0;
+  padding: var(--op-space-2) var(--op-space-3);
+  border: var(--op-border-width) solid var(--op-danger);
+  border-radius: var(--op-radius-sm);
+  background: var(--op-danger-soft);
+  font-size: var(--op-text-caption);
+  color: var(--op-danger);
+}
+
+.dialog--wide {
+  width: min(640px, calc(100vw - var(--op-space-8)));
+  max-height: calc(100vh - var(--op-space-8));
+  overflow-y: auto;
+}
+
+.dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--op-space-4);
+}
+
+.dialog-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.dialog-hint {
+  margin: var(--op-space-1) 0 0;
+  font-size: var(--op-text-micro);
+  font-weight: var(--op-weight-regular);
+  color: var(--op-fg-muted);
+}
+
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--op-space-3);
+  margin-top: var(--op-space-6);
+}
+
+/* No rodapé do diálogo os botões dimensionam pelo texto; só na coluna de
+   decisão eles dividem a largura. */
+.dialog-foot .btn { flex: 0 0 auto; min-width: 96px; }
+
+@media (max-width: 599px) {
+  .dialog-grid,
+  .dialog-grid--3 { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* --------------------------------------------------------------------------
+   Responsivo
+
+   Três quebras, cada uma com um motivo: some a quarta coluna, some a segunda,
+   o rail vira barra.
+   -------------------------------------------------------------------------- */
+
+/* O painel de contexto desce para o workspace quando a quarta coluna deixaria
+   o workspace abaixo do mínimo. */
+@media (max-width: 1379px) {
+  .shell {
+    grid-template-columns:
+      var(--op-rail-w)
+      var(--op-sidebar-w)
+      minmax(var(--op-workspace-min), 1fr);
+  }
+
+  .context {
+    grid-column: 2 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    padding: 0 var(--op-space-7) var(--op-space-7);
+    border-left: 0;
+    background: var(--op-canvas);
+  }
+}
+
+/* A sidebar colapsa: as estatísticas viram faixa e a lista vira trilho
+   horizontal. */
+@media (max-width: 1099px) {
+  .shell { grid-template-columns: var(--op-rail-w) minmax(0, 1fr); }
+
+  .sidebar {
+    grid-column: 2;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--op-space-4);
+    border-right: 0;
+    border-bottom: var(--op-border-subtle);
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    flex: 1;
+  }
+
+  .sidebar-section-head { width: 100%; }
+  .project-list-wrap { width: 100%; overflow: visible; }
+
+  .project-list {
+    flex-direction: row;
+    overflow-x: auto;
+    padding-bottom: var(--op-space-2);
+  }
+
+  .project-card {
+    min-width: 240px;
+    border-color: var(--op-line);
+  }
+
+  .workspace,
+  .context { grid-column: 2; }
+}
+
+/* Coluna única: o rail vira barra horizontal no topo do shell. */
+@media (max-width: 899px) {
+  /* Empilhado, a página inteira rola e as colunas deixam de ter altura
+     própria: a contenção precisa sair junto, senão o conteúdo de cada coluna
+     fica recortado na altura do bloco em vez de empurrar a página. */
+  html { height: auto; }
+  body.app { height: auto; min-height: 100dvh; }
+
+  .sidebar,
+  .workspace,
+  .context { contain: none; overflow: visible; }
+
+  .topbar { flex-wrap: wrap; height: auto; padding: var(--op-space-3) var(--op-space-4); }
+  .topbar-title { display: none; }
+  .topbar-meta { margin-left: auto; }
+
+  .shell { grid-template-columns: minmax(0, 1fr); }
+
+  .rail {
+    flex-direction: row;
+    padding: var(--op-space-2) var(--op-space-3);
+    border-right: 0;
+    border-bottom: var(--op-border-subtle);
+    overflow-x: auto;
+  }
+
+  .rail-items { flex-direction: row; }
+  .rail-foot { flex-direction: row; margin: 0 0 0 auto; }
+  .rail-label { display: none; }
+
+  .rail-item[aria-current='page']::before {
+    left: 50%;
+    top: auto;
+    bottom: calc(var(--op-space-2) * -1);
+    transform: translateX(-50%);
+    width: 18px;
+    height: 2px;
+  }
+
+  .sidebar,
+  .workspace,
+  .context { grid-column: 1; }
+
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .context {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0 var(--op-space-4) var(--op-space-6);
+  }
+
+  .workspace { padding: var(--op-space-5) var(--op-space-4); }
+
+  .project-header {
+    grid-template-areas:
+      'mono identity'
+      'badges badges'
+      'owner owner';
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--op-space-3);
+  }
+
+  .owner { padding-left: 0; border-left: 0; }
+  .project-title { font-size: var(--op-text-heading); white-space: normal; }
+
+  /* O padding compensa o recorte que o overflow faria no sublinhado da aba. */
+  .tabs { gap: var(--op-space-4); overflow-x: auto; padding-bottom: 2px; }
+  .bubble { max-width: 88%; }
+}

@@ -1,0 +1,1219 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Guia visual offline do OrqPEG: instalacao, cadastro de projetos, prompts, execucao, painel, consenso de duas IAs e solucao de problemas.">
+<meta name="color-scheme" content="light">
+<title>OrqPEG 1.0.0 — Comece aqui</title>
+<style>
+  :root {
+    --bg: #eeeeeb;
+    --surface: #ffffff;
+    --surface-alt: #f7f8f5;
+    --border: #d4d8d1;
+    --text: #1c221d;
+    --text-muted: #4e574e;
+    --accent: #4b6841;
+    --accent-soft: #edf2eb;
+    --code-bg: #f7f8f5;
+    --code-text: #1c221d;
+    --ok-bg: #edf6ec;
+    --ok-border: #3f7140;
+    --ok-text: #3f7140;
+    --warn-bg: #fbf6e7;
+    --warn-border: #8d671c;
+    --warn-text: #8d671c;
+    --stop-bg: #fff0ed;
+    --stop-border: #99483f;
+    --stop-text: #99483f;
+    --radius: 3px;
+    --sidebar-width: 280px;
+    --font: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+    --mono: "Cascadia Mono", Consolas, "Courier New", ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { transition: none !important; }
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.65;
+  }
+
+  a { color: var(--accent); }
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    background: var(--accent);
+    color: #fff;
+    padding: 10px 16px;
+    z-index: 100;
+  }
+  .skip-link:focus {
+    left: 8px;
+    top: 8px;
+  }
+
+  header.masthead {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 28px 24px;
+  }
+  .masthead-inner {
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+  .product-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .product-line h1 {
+    margin: 0;
+    font-size: 30px;
+    letter-spacing: -0.4px;
+  }
+  .version-chip {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 12px;
+  }
+  .tagline {
+    margin: 10px 0 18px;
+    color: var(--text-muted);
+    max-width: 74ch;
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 10px;
+    margin: 0;
+  }
+  .fact {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+  }
+  .fact dt {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+  }
+  .fact dd {
+    margin: 2px 0 0;
+    font-family: var(--mono);
+    font-size: 14px;
+    word-break: break-word;
+  }
+
+  .layout {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 24px;
+    display: grid;
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    gap: 32px;
+    align-items: start;
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+  }
+  nav.toc h2 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+  nav.toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: toc;
+  }
+  nav.toc li { margin: 1px 0; }
+  nav.toc a {
+    display: block;
+    padding: 7px 10px;
+    border-radius: 6px;
+    text-decoration: none;
+    color: var(--text);
+    font-size: 15px;
+    border-left: 3px solid transparent;
+  }
+  nav.toc a::before {
+    counter-increment: toc;
+    content: counter(toc) ". ";
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  nav.toc a:hover { background: var(--surface-alt); }
+  nav.toc a[aria-current="true"] {
+    background: var(--accent-soft);
+    border-left-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  main { min-width: 0; }
+
+  section.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 26px;
+    margin: 0 0 22px;
+    scroll-margin-top: 20px;
+  }
+  section.card > h2 {
+    margin: 0 0 4px;
+    font-size: 22px;
+    letter-spacing: -0.2px;
+  }
+  section.card > .section-lead {
+    margin: 0 0 18px;
+    color: var(--text-muted);
+  }
+  .small {
+    margin: 10px 0 0;
+    font-size: 0.9em;
+    color: var(--text-muted);
+  }
+  h3 {
+    margin: 24px 0 8px;
+    font-size: 17px;
+  }
+  p, ul, ol { margin: 0 0 14px; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  .code-block {
+    position: relative;
+    margin: 0 0 16px;
+  }
+  .code-block pre {
+    margin: 0;
+    background: var(--code-bg);
+    color: var(--code-text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 96px 16px 16px;
+    overflow-x: auto;
+  }
+  .code-block pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre;
+  }
+  .copy-button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .copy-button:hover { background: var(--accent-soft); color: var(--accent); }
+  .copy-button[data-state="done"] {
+    background: var(--ok-border);
+    border-color: var(--ok-border);
+    color: #ffffff;
+  }
+  .copy-button[data-state="error"] {
+    background: var(--stop-border);
+    border-color: var(--stop-border);
+    color: #ffffff;
+  }
+
+  .note {
+    border: 1px solid var(--border);
+    border-left-width: 5px;
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin: 0 0 16px;
+  }
+  .note p:last-child, .note ul:last-child { margin-bottom: 0; }
+  .note strong { display: block; margin-bottom: 4px; }
+  .note.ok { background: var(--ok-bg); border-color: var(--border); border-left-color: var(--ok-border); color: var(--ok-text); }
+  .note.warn { background: var(--warn-bg); border-color: var(--border); border-left-color: var(--warn-border); color: var(--warn-text); }
+  .note.stop { background: var(--stop-bg); border-color: var(--border); border-left-color: var(--stop-border); color: var(--stop-text); }
+  .note.ok a, .note.warn a, .note.stop a { color: inherit; }
+
+  .table-wrap { overflow-x: auto; margin: 0 0 16px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 480px;
+    font-size: 15px;
+  }
+  caption {
+    text-align: left;
+    color: var(--text-muted);
+    font-size: 14px;
+    padding-bottom: 6px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 9px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  thead th { background: var(--surface-alt); }
+  tbody tr:nth-child(even) td { background: var(--surface-alt); }
+
+  ol.steps {
+    counter-reset: step;
+    list-style: none;
+    padding: 0;
+  }
+  ol.steps > li {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 4px 44px;
+    margin: 0 0 18px;
+  }
+  ol.steps > li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 700;
+  }
+  ol.steps > li > h3 { margin: 2px 0 8px; }
+
+  .flow {
+    display: grid;
+    gap: 8px;
+    margin: 0 0 16px;
+  }
+  .flow-step {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+  }
+  .flow-step .n {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .flow-step .t { font-weight: 600; }
+  .flow-step .d {
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  details {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin: 0 0 12px;
+    background: var(--surface-alt);
+  }
+  details[open] { padding-bottom: 4px; }
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+  }
+  details > *:not(summary) { margin-top: 12px; }
+
+  footer.page-footer {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 8px 24px 40px;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  @media (max-width: 900px) {
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 18px;
+      padding: 16px;
+    }
+    nav.toc {
+      position: static;
+      max-height: none;
+    }
+    .code-block pre { padding-right: 16px; padding-top: 46px; }
+    .copy-button { top: 8px; right: 8px; }
+    header.masthead { padding: 20px 16px; }
+    .product-line h1 { font-size: 24px; }
+  }
+
+  @media print {
+    nav.toc, .copy-button, .skip-link { display: none; }
+    body { background: #fff; color: #000; }
+    section.card { break-inside: avoid; border-color: #999; }
+  }
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="product-line">
+      <h1>OrqPEG</h1>
+      <span class="version-chip">versão 1.0.0</span>
+    </div>
+    <p class="tagline">
+      Orquestrador local que coordena Claude Code e Codex CLI para executar, revisar, testar
+      e integrar trabalhos de desenvolvimento em repositórios Git que já existem no seu
+      computador. Este guia funciona offline: abra-o por duplo clique quando precisar.
+    </p>
+    <dl class="facts">
+      <div class="fact"><dt>Pasta de instalação</dt><dd>C:\OrqPEG</dd></div>
+      <div class="fact"><dt>Repositório</dt><dd>maquinanerd/OrqPEG</dd></div>
+      <div class="fact"><dt>Branch padrão</dt><dd>main</dd></div>
+      <div class="fact"><dt>Painel local</dt><dd>http://127.0.0.1:8765</dd></div>
+      <div class="fact"><dt>Dependências de runtime</dt><dd>nenhuma</dd></div>
+      <div class="fact"><dt>API de IA</dt><dd>nenhuma</dd></div>
+    </dl>
+  </div>
+</header>
+
+<div class="layout">
+
+  <nav class="toc" aria-label="Sumário do guia">
+    <h2 id="sumario-titulo">Sumário</h2>
+    <ol aria-labelledby="sumario-titulo">
+      <li><a href="#primeiros-passos">Primeiros passos</a></li>
+      <li><a href="#requisitos">Requisitos</a></li>
+      <li><a href="#instalacao">Instalação</a></li>
+      <li><a href="#cadastro">Cadastro de projeto</a></li>
+      <li><a href="#prompts">Prompts</a></li>
+      <li><a href="#execucao">Execução</a></li>
+      <li><a href="#painel">Painel</a></li>
+      <li><a href="#consenso">Consenso e merge</a></li>
+      <li><a href="#problemas">Solução de problemas</a></li>
+    </ol>
+  </nav>
+
+  <main id="conteudo">
+
+    <section class="card" id="primeiros-passos" tabindex="-1" aria-labelledby="h-primeiros">
+      <h2 id="h-primeiros">Primeiros passos</h2>
+      <p class="section-lead">O caminho mais curto entre abrir esta página e ver o OrqPEG trabalhando.</p>
+
+      <ol class="steps">
+        <li>
+          <h3>Confira o ambiente</h3>
+          <p>Abra a pasta <code>C:\OrqPEG</code> e execute o diagnóstico. Ele verifica sistema,
+          ferramentas, chaves de API no ambiente, schemas, wrappers, porta do painel e locks.</p>
+          <pre><code>DIAGNOSTICO.cmd</code></pre>
+        </li>
+        <li>
+          <h3>Cadastre um projeto que já existe</h3>
+          <p>O OrqPEG nunca copia o seu código: ele passa a orquestrar o repositório onde ele já está.</p>
+          <pre><code>CADASTRAR-PROJETO.cmd</code></pre>
+        </li>
+        <li>
+          <h3>Escreva os prompts</h3>
+          <p>Um arquivo Markdown por unidade de trabalho, em
+          <code>data\projects\&lt;projeto&gt;\prompts\</code>, seguindo o modelo
+          <code>templates\TEMPLATE-PROMPT.md</code>.</p>
+        </li>
+        <li>
+          <h3>Simule antes de executar</h3>
+          <p>O dry-run descreve o plano inteiro sem alterar absolutamente nada.</p>
+          <pre><code>EXECUTAR-DRY-RUN.cmd</code></pre>
+        </li>
+        <li>
+          <h3>Execute e acompanhe pelo painel</h3>
+          <pre><code>EXECUTAR.cmd
+INICIAR-PAINEL.cmd</code></pre>
+        </li>
+      </ol>
+
+      <div class="note ok">
+        <strong>O que o produto garante</strong>
+        <ul>
+          <li>Nenhuma API de IA: só os executáveis locais <code>claude</code> e <code>codex</code>.</li>
+          <li>Nenhuma operação destrutiva: não existe <code>push --force</code>, <code>reset --hard</code>,
+              <code>git clean</code> ou <code>branch -D</code> em nenhum caminho de execução.</li>
+          <li>Nenhum merge com uma IA só: são necessárias duas auditorias independentes sobre o mesmo commit.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="card" id="requisitos" tabindex="-1" aria-labelledby="h-requisitos">
+      <h2 id="h-requisitos">Requisitos</h2>
+      <p class="section-lead">O que precisa estar instalado e autenticado antes da primeira execução.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Ferramentas exigidas e situação detectada nesta instalação.</caption>
+          <thead>
+            <tr><th scope="col">Ferramenta</th><th scope="col">Mínimo</th><th scope="col">Nesta máquina</th><th scope="col">Para que serve</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Windows</th><td>10 / 11</td><td>Windows 11 Pro</td><td>Plataforma alvo do produto</td></tr>
+            <tr><th scope="row">Node.js</th><td>20.0.0</td><td>24.14.0</td><td>Runtime do OrqPEG</td></tr>
+            <tr><th scope="row">npm</th><td>9</td><td>11.9.0</td><td>Build e testes</td></tr>
+            <tr><th scope="row">Git</th><td>2.30</td><td>2.55.0</td><td>Branches, commits e worktrees</td></tr>
+            <tr><th scope="row">GitHub CLI</th><td>2.x autenticado</td><td>2.95.0</td><td>Pull Request, checks e merge</td></tr>
+            <tr><th scope="row">Claude Code</th><td>autenticado (Claude Max)</td><td>2.1.218</td><td>Executor, corretor e auditor</td></tr>
+            <tr><th scope="row">Codex CLI</th><td>autenticado (ChatGPT Plus)</td><td>0.145.0</td><td>Revisor de prompt e auditor de merge</td></tr>
+          </tbody>
+        </table>
+        <p class="small">A coluna “Detectado” é o retrato do ambiente em que esta versão foi
+        fechada. Quem manda é o <code>DIAGNOSTICO.cmd</code> da sua máquina, não esta tabela.</p>
+      </div>
+
+      <div class="note stop">
+        <strong>Os dois executáveis são obrigatórios para o merge automático</strong>
+        <p>Sem o Codex CLI instalado e autenticado, a auditoria dupla fica <em>bloqueada</em>, o gate
+        <code>CODEX_MERGE_APPROVED</code> reprova e nenhum merge automático acontece.
+        Isso é o comportamento correto — o OrqPEG jamais aprova merge com apenas uma IA.</p>
+        <p>Para habilitar, instale o Codex CLI e autentique com “Sign in with ChatGPT”.
+        Enquanto isso, use o dry-run ou configure <code>merge.mode</code> como <code>manual</code>
+        e faça o merge você mesmo pelo GitHub, depois de revisar.</p>
+      </div>
+
+      <h3>Zero API de IA</h3>
+      <p>O OrqPEG usa exclusivamente as suas assinaturas Claude Max e ChatGPT Plus, através dos
+      executáveis locais. Não existe SDK de provedor, requisição a endpoint de API de IA nem
+      leitura do valor de qualquer chave. O ambiente de todo processo filho é sanitizado —
+      apenas a cópia entregue ao processo, nunca o ambiente do seu Windows.</p>
+
+      <pre><code>ANTHROPIC_API_KEY      removida do ambiente do processo filho
+OPENAI_API_KEY         removida do ambiente do processo filho
+CODEX_API_KEY          removida do ambiente do processo filho
+ANTHROPIC_AUTH_TOKEN   removida do ambiente do processo filho
+OPENAI_API_KEY_PATH    removida do ambiente do processo filho
+ANTHROPIC_ADMIN_KEY    removida do ambiente do processo filho</code></pre>
+
+      <p>Se alguma dessas variáveis existir na sua sessão, o OrqPEG reporta apenas o
+      <em>nome</em> dela e bloqueia a execução por padrão. O valor nunca é lido, gravado ou impresso.</p>
+    </section>
+
+    <section class="card" id="instalacao" tabindex="-1" aria-labelledby="h-instalacao">
+      <h2 id="h-instalacao">Instalação</h2>
+      <p class="section-lead">Quatro comandos, executados dentro de <code>C:\OrqPEG</code>.</p>
+
+      <pre><code>cd /d C:\OrqPEG
+npm ci
+npm run build
+INSTALAR-E-CONFIGURAR.cmd
+DIAGNOSTICO.cmd</code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <caption>O que cada passo faz.</caption>
+          <thead><tr><th scope="col">Passo</th><th scope="col">Efeito</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">npm ci</th><td>Instala apenas as dependências de desenvolvimento (TypeScript e tipos do Node)</td></tr>
+            <tr><th scope="row">npm run build</th><td>Compila <code>src\</code> em <code>dist\</code> com TypeScript estrito</td></tr>
+            <tr><th scope="row">INSTALAR-E-CONFIGURAR.cmd</th><td>Cria <code>config\global.json</code> e a árvore <code>data\</code></td></tr>
+            <tr><th scope="row">DIAGNOSTICO.cmd</th><td>Verifica todo o ambiente e aponta o que corrigir</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Estrutura criada</h3>
+      <pre><code>C:\OrqPEG
+  config\      configuracao global
+  data\        projetos, estado, locks, logs, revisoes, relatorios, artefatos, worktrees
+  schemas\     6 schemas JSON de validacao
+  templates\   modelos de prompt, de projeto e de instrucao
+  public\      arquivos estaticos do painel
+  dist\        codigo compilado
+  *.cmd        16 wrappers de duplo clique</code></pre>
+
+      <h3>Os 16 comandos de duplo clique</h3>
+      <div class="table-wrap">
+        <table>
+          <caption>Todos ficam na raiz da pasta de instalação.</caption>
+          <thead><tr><th scope="col">Arquivo</th><th scope="col">O que faz</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">ORQPEG.cmd</th><td>Abre o menu interativo principal</td></tr>
+            <tr><th scope="row">INSTALAR-E-CONFIGURAR.cmd</th><td>Prepara configuração e diretórios de dados</td></tr>
+            <tr><th scope="row">ABRIR-PAINEL.cmd</th><td>Abre o navegador no painel local</td></tr>
+            <tr><th scope="row">INICIAR-PAINEL.cmd</th><td>Sobe o servidor do painel</td></tr>
+            <tr><th scope="row">PARAR-PAINEL.cmd</th><td>Encerra o servidor do painel</td></tr>
+            <tr><th scope="row">CADASTRAR-PROJETO.cmd</th><td>Assistente de cadastro</td></tr>
+            <tr><th scope="row">EDITAR-PROJETO.cmd</th><td>Edita um projeto cadastrado</td></tr>
+            <tr><th scope="row">REMOVER-PROJETO.cmd</th><td>Remove o cadastro, preservando o repositório</td></tr>
+            <tr><th scope="row">LISTAR-PROJETOS.cmd</th><td>Lista projetos e contagem de prompts</td></tr>
+            <tr><th scope="row">EXECUTAR-DRY-RUN.cmd</th><td>Simula a execução sem alterar nada</td></tr>
+            <tr><th scope="row">EXECUTAR.cmd</th><td>Executa o projeto</td></tr>
+            <tr><th scope="row">PAUSAR.cmd</th><td>Solicita pausa segura</td></tr>
+            <tr><th scope="row">RETOMAR.cmd</th><td>Retoma a execução preservada</td></tr>
+            <tr><th scope="row">STATUS.cmd</th><td>Situação de projetos e execuções</td></tr>
+            <tr><th scope="row">DIAGNOSTICO.cmd</th><td>Diagnóstico completo do ambiente</td></tr>
+            <tr><th scope="row">CANCELAR-ETAPA.cmd</th><td>Cancelamento seguro, sem apagar nada</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="cadastro" tabindex="-1" aria-labelledby="h-cadastro">
+      <h2 id="h-cadastro">Cadastro de projeto</h2>
+      <p class="section-lead">O repositório já precisa existir no computador, com um remoto no GitHub.</p>
+
+      <pre><code>CADASTRAR-PROJETO.cmd</code></pre>
+
+      <p>O assistente pergunta nome, identificador, caminho local, repositório
+      <code>owner/repo</code>, remoto, branch base, worktree, comandos de teste, timeout,
+      número máximo de tentativas e editor preferido. O resultado fica em
+      <code>data\projects\&lt;id&gt;\project.json</code>.</p>
+
+      <h3>Exemplo de configuração</h3>
+      <pre><code>{
+  "id": "screen",
+  "name": "Screen",
+  "repositoryPath": "E:\\Projetos\\Screen",
+  "githubRepository": "maquinanerd/screen",
+  "remote": "origin",
+  "baseBranch": "main",
+  "branchStrategy": "per_run",
+  "worktree": { "enabled": true, "rootPath": "E:\\AI-Worktrees", "reuseWhenSafe": true },
+  "commands": {
+    "install": ["npm ci"],
+    "tests": ["npm run lint", "npm run typecheck", "npm test", "npm run build"],
+    "timeoutSeconds": 1800
+  },
+  "execution": {
+    "maxAttemptsPerPrompt": 3,
+    "maxReviewerRetries": 2,
+    "continueAfterApproval": true,
+    "stopOnBlocked": true
+  },
+  "git": { "commitAfterApproval": true, "pushAfterRun": true, "commitMessagePrefix": "orqpeg" },
+  "pullRequest": {
+    "enabled": true,
+    "draftDuringExecution": true,
+    "markReadyBeforeMerge": true,
+    "waitForChecks": true
+  },
+  "merge": {
+    "enabled": true,
+    "mode": "dual_ai_consensus",
+    "strategy": "squash",
+    "deleteBranchAfterMerge": true,
+    "requireClaudeApproval": true,
+    "requireCodexApproval": true,
+    "requireLocalTests": true,
+    "requireCiSuccess": true,
+    "requireNoConflicts": true,
+    "requireNoUnresolvedThreads": true,
+    "invalidateApprovalOnHeadChange": true,
+    "minimumConfidence": 0.9
+  },
+  "agents": { "claudeModel": null, "codexModel": null },
+  "editor": null
+}</code></pre>
+
+      <div class="note ok">
+        <strong>Caminhos com espaços e acentos funcionam</strong>
+        <p>Um caminho como <code>E:\Meus Projetos\Ação</code> é suportado: todo caminho é composto
+        com as funções de caminho do Node e validado contra escape de diretório.</p>
+      </div>
+
+      <h3>Worktrees</h3>
+      <p>Com <code>worktree.enabled</code> ligado, cada execução acontece em um worktree dedicado,
+      criado a partir da branch base. Sua cópia principal continua livre e intocada.</p>
+      <pre><code>Worktree : E:\AI-Worktrees\&lt;projeto&gt;\orqpeg-&lt;projeto&gt;-run-&lt;stamp&gt;
+Branch   : orqpeg/&lt;projeto&gt;/run-&lt;stamp&gt;</code></pre>
+      <p><code>reuseWhenSafe</code> permite reaproveitar um worktree existente somente quando é
+      seguro. Se não for, a execução falha com mensagem explícita — nunca destruindo trabalho.</p>
+
+      <div class="note warn">
+        <strong>Remover o cadastro não apaga o seu código</strong>
+        <p><code>REMOVER-PROJETO.cmd</code> remove apenas os dados operacionais do OrqPEG
+        (prompts, estado, logs, relatórios). O repositório permanece exatamente como está.</p>
+      </div>
+    </section>
+
+    <section class="card" id="prompts" tabindex="-1" aria-labelledby="h-prompts">
+      <h2 id="h-prompts">Prompts</h2>
+      <p class="section-lead">Um arquivo Markdown por unidade de trabalho, executado em ordem natural.</p>
+
+      <pre><code>C:\OrqPEG\data\projects\&lt;projeto&gt;\prompts\
+  01-camada-de-configuracao.md
+  02-parser-de-prompts.md
+  10-painel-http.md</code></pre>
+
+      <p>A ordem vem da ordenação natural do nome do arquivo, então o prefixo numérico define a
+      sequência: <code>2-x.md</code> roda antes de <code>10-x.md</code>. O <code>ID</code> declarado
+      dentro do arquivo deve ser igual ao nome do arquivo sem a extensão.</p>
+
+      <h3>Seções do modelo</h3>
+      <div class="table-wrap">
+        <table>
+          <caption>Formato canônico, definido em <code>templates\TEMPLATE-PROMPT.md</code>.</caption>
+          <thead><tr><th scope="col">Seção</th><th scope="col">Para que serve</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Identificação</th><td>ID, nome legível e dependências de outros prompts</td></tr>
+            <tr><th scope="row">Objetivo</th><td>Uma frase com o resultado observável</td></tr>
+            <tr><th scope="row">Contexto</th><td>Estado atual do repositório e decisões já tomadas</td></tr>
+            <tr><th scope="row">Escopo obrigatório</th><td>Lista fechada e verificável do que fazer</td></tr>
+            <tr><th scope="row">Fora do escopo</th><td>O que não tocar, mesmo parecendo melhoria</td></tr>
+            <tr><th scope="row">Áreas permitidas</th><td>Caminhos que a IA pode criar ou alterar</td></tr>
+            <tr><th scope="row">Áreas proibidas</th><td>Caminhos intocáveis; violação é falha bloqueante</td></tr>
+            <tr><th scope="row">Requisitos funcionais</th><td>Comportamento observável, com erros e casos de borda</td></tr>
+            <tr><th scope="row">Requisitos técnicos</th><td>Como implementar: estilo, tipos, erros, processos</td></tr>
+            <tr><th scope="row">Critérios de aceitação</th><td>Checklist binário com evidência</td></tr>
+            <tr><th scope="row">Testes obrigatórios</th><td>Testes que precisam existir ao final</td></tr>
+            <tr><th scope="row">Restrições</th><td>Proibições invioláveis da rodada</td></tr>
+            <tr><th scope="row">Evidências finais exigidas</th><td>O que o relatório final da IA precisa conter</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Esqueleto mínimo</h3>
+      <pre><code># Identificação
+
+ID: 01-camada-de-configuracao
+Nome: Camada de configuração
+Dependências: nenhuma
+
+# Objetivo
+
+Implementar o carregador de configuração para que a execução recuse projetos
+com branch base inexistente antes de criar qualquer worktree.
+
+# Escopo obrigatório
+
+1. Criar o módulo de carregamento com validação e mensagens em português.
+2. Cobrir o caminho de erro com teste automatizado.
+
+# Áreas permitidas
+
+- src/config/loader.ts
+- tests/unit/config-loader.test.js
+
+# Áreas proibidas
+
+- src/types.ts
+- Qualquer caminho não listado acima
+
+# Critérios de aceitação
+
+- [ ] Todos os itens do escopo estão implementados.
+- [ ] Nenhum arquivo fora das áreas permitidas foi alterado.
+- [ ] Todos os comandos de teste do projeto passam.
+
+# Restrições
+
+- Não fazer commit, push, merge nem trocar de branch.
+- Não remover nem enfraquecer testes.</code></pre>
+
+      <div class="note warn">
+        <strong>Commit, push, PR e merge são responsabilidade exclusiva do OrqPEG</strong>
+        <p>O prompt deve proibir explicitamente que a IA faça qualquer uma dessas operações.
+        Se um teste falha, a correção é no código de produção — nunca no teste.</p>
+      </div>
+    </section>
+
+    <section class="card" id="execucao" tabindex="-1" aria-labelledby="h-execucao">
+      <h2 id="h-execucao">Execução</h2>
+      <p class="section-lead">O ciclo completo, do primeiro prompt até o merge.</p>
+
+      <pre><code>EXECUTAR-DRY-RUN.cmd    simula tudo, sem alterar nada
+EXECUTAR.cmd            executa de verdade</code></pre>
+
+      <div class="flow">
+        <div class="flow-step"><span class="n">01</span><span><span class="t">Validar</span><br><span class="d">Projeto, prompts, GitHub CLI autenticado e ambiente sem chave de API vazando.</span></span></div>
+        <div class="flow-step"><span class="n">02</span><span><span class="t">Preparar worktree</span><br><span class="d">Worktree e branch criados a partir da base, sem tocar na sua árvore principal.</span></span></div>
+        <div class="flow-step"><span class="n">03</span><span><span class="t">Executar</span><br><span class="d">O Claude recebe o prompt renderizado e trabalha apenas dentro do worktree.</span></span></div>
+        <div class="flow-step"><span class="n">04</span><span><span class="t">Testar</span><br><span class="d">Os comandos de teste do projeto rodam de verdade, com timeout e saída capturada.</span></span></div>
+        <div class="flow-step"><span class="n">05</span><span><span class="t">Revisar</span><br><span class="d">O Codex recebe diff, testes e prompt, e devolve um veredito JSON validado por schema.</span></span></div>
+        <div class="flow-step"><span class="n">06</span><span><span class="t">Corrigir</span><br><span class="d">Veredito de mudanças gera nova tentativa com as ações exigidas, até o máximo configurado.</span></span></div>
+        <div class="flow-step"><span class="n">07</span><span><span class="t">Commitar</span><br><span class="d">Somente após aprovação. Um commit por prompt, com prefixo configurável.</span></span></div>
+        <div class="flow-step"><span class="n">08</span><span><span class="t">Push</span><br><span class="d">Apenas para o remoto declarado no projeto. Force push é impossível por design.</span></span></div>
+        <div class="flow-step"><span class="n">09</span><span><span class="t">Pull Request</span><br><span class="d">Criada pelo GitHub CLI, opcionalmente como rascunho durante a execução.</span></span></div>
+        <div class="flow-step"><span class="n">10</span><span><span class="t">CI</span><br><span class="d">Espera os checks obrigatórios. Check pendente nunca é tratado como aprovação.</span></span></div>
+        <div class="flow-step"><span class="n">11</span><span><span class="t">Auditoria do Claude</span><br><span class="d">Somente leitura, sobre o head SHA observado, com saída validada por schema.</span></span></div>
+        <div class="flow-step"><span class="n">12</span><span><span class="t">Auditoria do Codex</span><br><span class="d">Somente leitura, sobre exatamente o mesmo commit.</span></span></div>
+        <div class="flow-step"><span class="n">13</span><span><span class="t">Consenso</span><br><span class="d">Só existe com as duas aprovações, mesmo SHA e confiança mínima atingida.</span></span></div>
+        <div class="flow-step"><span class="n">14</span><span><span class="t">Gates</span><br><span class="d">Os 20 gates são avaliados e registrados com evidência.</span></span></div>
+        <div class="flow-step"><span class="n">15</span><span><span class="t">Merge</span><br><span class="d">Squash com verificação do commit exato: o GitHub recusa se o head mudou.</span></span></div>
+      </div>
+
+      <h3>Pausar, retomar e cancelar</h3>
+      <pre><code>PAUSAR.cmd            solicita pausa; nada e apagado
+RETOMAR.cmd           continua de onde parou
+CANCELAR-ETAPA.cmd    cancelamento seguro</code></pre>
+
+      <div class="note ok">
+        <strong>Nada do seu trabalho é descartado</strong>
+        <ul>
+          <li>A pausa preserva código, worktree, branch, commits e logs.</li>
+          <li>A retomada não reexecuta prompts já aprovados.</li>
+          <li>O cancelamento não executa reset destrutivo, limpeza ou remoção.</li>
+          <li><code>Ctrl+C</code> encerra os processos filhos e grava o estado antes de sair.</li>
+        </ul>
+      </div>
+
+      <h3>Onde ficam os resultados</h3>
+      <div class="table-wrap">
+        <table>
+          <caption>Tudo é gravado dentro de <code>data\projects\&lt;projeto&gt;\</code>.</caption>
+          <thead><tr><th scope="col">Caminho</th><th scope="col">Conteúdo</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">state\&lt;runId&gt;.json</th><td>Estado completo, com a linha do tempo de eventos</td></tr>
+            <tr><th scope="row">artifacts\&lt;runId&gt;\...</th><td>Saída de cada invocação de IA e da suíte de testes</td></tr>
+            <tr><th scope="row">reviews\</th><td>Revisões em JSON validadas por schema</td></tr>
+            <tr><th scope="row">reports\</th><td>Relatório da execução em JSON, Markdown e HTML</td></tr>
+            <tr><th scope="row">logs\</th><td>Logs estruturados por execução</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Todo texto gravado passa por redação de segredos. O valor de uma variável de API nunca
+      chega ao disco — apenas o nome dela, quando é necessário avisar você.</p>
+    </section>
+
+    <section class="card" id="painel" tabindex="-1" aria-labelledby="h-painel">
+      <h2 id="h-painel">Painel</h2>
+      <p class="section-lead">Interface local para acompanhar projetos, execuções, consenso e diagnóstico.</p>
+
+      <pre><code>INICIAR-PAINEL.cmd
+ABRIR-PAINEL.cmd
+PARAR-PAINEL.cmd</code></pre>
+
+      <p>Endereço padrão: <code>http://127.0.0.1:8765</code>.</p>
+
+      <div class="note ok">
+        <strong>O painel é local por construção</strong>
+        <ul>
+          <li>Escuta exclusivamente em <code>127.0.0.1</code>; qualquer outro host faz o servidor recusar a inicialização.</li>
+          <li>Valida o cabeçalho <code>Host</code>, o que protege contra ataques de <em>DNS rebinding</em>.</li>
+          <li>Serve arquivos estáticos com resolução confinada à pasta pública.</li>
+        </ul>
+      </div>
+
+      <h3>Trocar a porta</h3>
+      <p>Edite <code>config\global.json</code>:</p>
+      <pre><code>{
+  "panel": {
+    "host": "127.0.0.1",
+    "port": 8790,
+    "openBrowserOnStart": true
+  }
+}</code></pre>
+    </section>
+
+    <section class="card" id="consenso" tabindex="-1" aria-labelledby="h-consenso">
+      <h2 id="h-consenso">Consenso e merge</h2>
+      <p class="section-lead">Vinte gates. Um único reprovado impede o merge. Não existe atalho.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Os 20 gates avaliados antes de qualquer merge automático.</caption>
+          <thead><tr><th scope="col">#</th><th scope="col">Gate</th><th scope="col">O que exige</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><th scope="row">ALL_PROMPTS_APPROVED</th><td>Todos os prompts aprovados pelo revisor</td></tr>
+            <tr><td>2</td><th scope="row">ALL_COMMITS_CREATED</th><td>Existe commit para cada prompt aprovado</td></tr>
+            <tr><td>3</td><th scope="row">BRANCH_PUSHED_TO_CORRECT_REMOTE</th><td>Branch enviada ao remoto declarado no projeto</td></tr>
+            <tr><td>4</td><th scope="row">PR_OPEN</th><td>A Pull Request está aberta</td></tr>
+            <tr><td>5</td><th scope="row">PR_BASE_CORRECT</th><td>A base da PR é a branch base do projeto</td></tr>
+            <tr><td>6</td><th scope="row">NO_CONFLICTS</th><td>O GitHub reporta a PR como mesclável</td></tr>
+            <tr><td>7</td><th scope="row">LOCAL_TESTS_PASSED</th><td>A suíte local final passou</td></tr>
+            <tr><td>8</td><th scope="row">REQUIRED_CHECKS_PASSED</th><td>Todos os checks obrigatórios concluíram com sucesso</td></tr>
+            <tr><td>9</td><th scope="row">NO_PENDING_REQUIRED_CHECKS</th><td>Nenhum check obrigatório em fila ou em execução</td></tr>
+            <tr><td>10</td><th scope="row">NO_SKIPPED_REQUIRED_CHECKS</th><td>Nenhum check obrigatório ignorado</td></tr>
+            <tr><td>11</td><th scope="row">NO_UNRESOLVED_THREADS</th><td>Nenhuma thread de revisão em aberto</td></tr>
+            <tr><td>12</td><th scope="row">NO_HUMAN_CHANGES_REQUESTED</th><td>Nenhum humano pediu mudanças na PR</td></tr>
+            <tr><td>13</td><th scope="row">CLAUDE_MERGE_APPROVED</th><td>Auditoria do Claude aprovada para merge</td></tr>
+            <tr><td>14</td><th scope="row">CODEX_MERGE_APPROVED</th><td>Auditoria do Codex aprovada para merge</td></tr>
+            <tr><td>15</td><th scope="row">AUDITORS_SAME_HEAD_SHA</th><td>As duas auditorias revisaram o mesmo commit</td></tr>
+            <tr><td>16</td><th scope="row">MINIMUM_CONFIDENCE_MET</th><td>As duas atingiram a confiança mínima do projeto</td></tr>
+            <tr><td>17</td><th scope="row">NO_BLOCKING_ISSUES</th><td>Nenhuma das duas registrou problema bloqueador</td></tr>
+            <tr><td>18</td><th scope="row">HEAD_SHA_UNCHANGED</th><td>O head não mudou entre a auditoria e o merge</td></tr>
+            <tr><td>19</td><th scope="row">BASE_NOT_INVALIDATED</th><td>A base não mudou de forma invalidante</td></tr>
+            <tr><td>20</td><th scope="row">PROJECT_ALLOWS_DUAL_AI_CONSENSUS</th><td>O projeto está em modo de consenso de duas IAs</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note stop">
+        <strong>Nesta máquina o gate 14 reprova</strong>
+        <p>Sem o Codex CLI instalado e autenticado, não existe auditoria do Codex, logo não existe
+        consenso e o merge automático não acontece. Instale o Codex CLI e autentique com
+        “Sign in with ChatGPT” para habilitar a auditoria dupla.</p>
+      </div>
+
+      <h3>Invalidação de aprovações</h3>
+      <p>Uma aprovação vale para um commit específico, não para a Pull Request. Qualquer commit
+      novo na branch invalida as auditorias existentes, com o motivo registrado no relatório —
+      e a auditoria precisa ser refeita. No momento do merge, o próprio GitHub recusa a operação
+      se o commit tiver mudado.</p>
+
+      <h3>Idempotência</h3>
+      <p>Uma Pull Request já mergeada nunca é mergeada de novo: o OrqPEG detecta a situação,
+      registra o desvio idempotente e segue em frente sem efeito colateral.</p>
+    </section>
+
+    <section class="card" id="problemas" tabindex="-1" aria-labelledby="h-problemas">
+      <h2 id="h-problemas">Solução de problemas</h2>
+      <p class="section-lead">Casos reais, com o comando que diagnostica e o que fazer em seguida.</p>
+
+      <details>
+        <summary>Node.js ausente ou versão antiga</summary>
+        <p>Sintoma: <code>'node' não é reconhecido como um comando</code>, ou o diagnóstico acusa
+        versão abaixo de 20.</p>
+        <pre><code>node --version</code></pre>
+        <p>Instale o Node.js 20 LTS ou superior, feche e reabra o terminal — o caminho das
+        variáveis de ambiente só é relido em uma sessão nova — e rode o diagnóstico de novo.</p>
+      </details>
+
+      <details>
+        <summary>GitHub CLI não autenticado</summary>
+        <p>Sintoma: falhas ao criar a Pull Request, ler os checks ou executar o merge.</p>
+        <pre><code>gh auth status
+gh auth login
+gh auth status --show-scopes</code></pre>
+        <p>O escopo <code>repo</code> é necessário. Sem isso, a execução roda mas para antes da
+        criação da Pull Request.</p>
+      </details>
+
+      <details>
+        <summary>Codex CLI ausente</summary>
+        <p>Sintoma: o diagnóstico marca o Codex como indisponível, o gate
+        <code>CODEX_MERGE_APPROVED</code> reprova e o merge não acontece.</p>
+        <p>Não é defeito: é a regra de nunca aprovar merge com uma IA só, funcionando.</p>
+        <pre><code>codex --version
+DIAGNOSTICO.cmd
+RETOMAR.cmd</code></pre>
+        <p>Enquanto o Codex não estiver disponível, configure <code>merge.mode</code> como
+        <code>manual</code>: o OrqPEG executa, testa, commita, faz push e abre a Pull Request,
+        e você faz o merge pelo GitHub depois de revisar.</p>
+      </details>
+
+      <details>
+        <summary>Porta 8765 ocupada</summary>
+        <p>Sintoma: o painel não sobe, ou o diagnóstico reporta a porta em uso.</p>
+        <pre><code>netstat -ano | findstr :8765
+tasklist /FI "PID eq 1234"</code></pre>
+        <p>Se for uma instância antiga do próprio painel, feche a janela dela. Se for outro
+        programa, troque a porta em <code>config\global.json</code>. O host só aceita
+        <code>127.0.0.1</code> ou <code>localhost</code>.</p>
+      </details>
+
+      <details>
+        <summary>Lock abandonado</summary>
+        <p>Sintoma: erro informando que outra execução está em andamento, quando não há nenhuma.</p>
+        <p>Os locks têm heartbeat. Um lock é considerado abandonado quando o processo dono não
+        existe mais, quando o host não bate, ou quando o heartbeat está parado há mais de 15
+        minutos — e nesse caso ele é retomado automaticamente.</p>
+        <pre><code>DIAGNOSTICO.cmd
+dir C:\OrqPEG\data\locks</code></pre>
+        <p>O diagnóstico lista cada lock com identificador de processo, escopo, operação e idade
+        do heartbeat. Confirme que o processo não está mais rodando antes de remover o arquivo
+        de lock correspondente.</p>
+      </details>
+
+      <details>
+        <summary>Limite de uso da assinatura atingido</summary>
+        <p>Sintoma: a execução para no estado de limite de uso, com a mensagem do CLI registrada
+        nos artefatos.</p>
+        <p>Nada foi perdido. Espere a janela de uso reabrir e retome. Prompts já aprovados não são
+        reexecutados, porque cada um virou um commit próprio.</p>
+        <pre><code>RETOMAR.cmd</code></pre>
+        <p>Se acontecer com frequência, divida o trabalho em prompts menores.</p>
+      </details>
+
+      <details>
+        <summary>Worktree sujo</summary>
+        <p>Sintoma: falha informando que já existe um worktree no caminho, que a branch já existe,
+        ou que há alterações não commitadas.</p>
+        <p>O OrqPEG não limpa e não descarta nada — essa é a garantia central do produto.
+        A decisão é sua, com plena consciência:</p>
+        <pre><code>cd /d E:\AI-Worktrees\meu-projeto\orqpeg-meu-projeto-run-20260721
+git status
+git stash list</code></pre>
+        <p>Depois de salvar ou commitar o que interessa, remova o worktree pelo Git, sem forçar,
+        ou habilite o reaproveitamento seguro na configuração do projeto. Nunca use limpeza ou
+        reset destrutivo “por precaução”: eles apagam trabalho de forma irreversível.</p>
+      </details>
+
+      <details>
+        <summary>Chave de API detectada no ambiente</summary>
+        <p>Sintoma: a execução é bloqueada e o OrqPEG lista os nomes das variáveis presentes.</p>
+        <p>É a guarda de zero API funcionando. Você pode confirmar a continuação — o processo
+        filho roda com ambiente sanitizado e a sua sessão do Windows permanece intacta — ou
+        remover a variável da sessão, se ela não for necessária. O valor nunca é lido, gravado
+        ou impresso.</p>
+      </details>
+
+      <details>
+        <summary>Testes do projeto falhando na execução</summary>
+        <p>Sintoma: o veredito do revisor volta pedindo mudanças por causa de teste vermelho.</p>
+        <p>Isso é o fluxo normal: uma nova tentativa é aberta com as ações exigidas, até o máximo
+        configurado em <code>execution.maxAttemptsPerPrompt</code>. A saída completa de cada
+        comando fica nos artefatos da tentativa. Se o limite for atingido, o prompt fica marcado
+        como não aprovado e nada é commitado.</p>
+      </details>
+    </section>
+
+  </main>
+</div>
+
+<footer class="page-footer">
+  <p>OrqPEG 1.0.0 — guia offline. Consulte também <code>README.md</code> e <code>CHANGELOG.md</code>
+  na pasta de instalação. Diagnóstico a qualquer momento: <code>DIAGNOSTICO.cmd</code>.</p>
+</footer>
+
+<div id="copy-status" class="visually-hidden" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var COPY_LABEL = 'Copiar';
+  var DONE_LABEL = 'Copiado';
+  var ERROR_LABEL = 'Falhou';
+
+  /* Copia usando a API moderna e, quando ela nao esta disponivel (por exemplo em
+     file:// em navegadores mais antigos), recorre ao comando de edicao legado. */
+  function copyText(text) {
+    if (window.navigator && window.navigator.clipboard && window.navigator.clipboard.writeText) {
+      return window.navigator.clipboard.writeText(text).catch(function () {
+        return legacyCopy(text);
+      });
+    }
+    return legacyCopy(text);
+  }
+
+  function legacyCopy(text) {
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', 'readonly');
+      area.setAttribute('aria-hidden', 'true');
+      area.style.position = 'fixed';
+      area.style.top = '0';
+      area.style.left = '-9999px';
+      document.body.appendChild(area);
+
+      var selection = document.getSelection();
+      var previousRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+      area.select();
+      area.setSelectionRange(0, area.value.length);
+
+      var succeeded = false;
+      try {
+        succeeded = document.execCommand('copy');
+      } catch (error) {
+        succeeded = false;
+      }
+
+      document.body.removeChild(area);
+
+      if (previousRange && selection) {
+        selection.removeAllRanges();
+        selection.addRange(previousRange);
+      }
+
+      if (succeeded) resolve();
+      else reject(new Error('Copia nao suportada pelo navegador.'));
+    });
+  }
+
+  function announce(message) {
+    var status = document.getElementById('copy-status');
+    if (status) status.textContent = message;
+  }
+
+  function feedback(button, state, label) {
+    button.setAttribute('data-state', state);
+    button.textContent = label;
+    window.setTimeout(function () {
+      button.removeAttribute('data-state');
+      button.textContent = COPY_LABEL;
+    }, 1800);
+  }
+
+  function enhance(pre, index) {
+    var code = pre.querySelector('code');
+    var source = code ? code.textContent : pre.textContent;
+    if (!source || source.length === 0) return;
+
+    var wrapper = document.createElement('div');
+    wrapper.className = 'code-block';
+    var parent = pre.parentNode;
+    if (!parent) return;
+    parent.insertBefore(wrapper, pre);
+    wrapper.appendChild(pre);
+
+    var labelId = 'code-label-' + index;
+    pre.setAttribute('id', labelId);
+    pre.setAttribute('tabindex', '0');
+    pre.setAttribute('role', 'group');
+    pre.setAttribute('aria-label', 'Bloco de codigo ' + (index + 1));
+
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'copy-button';
+    button.textContent = COPY_LABEL;
+    button.setAttribute('aria-label', 'Copiar o bloco de codigo ' + (index + 1));
+
+    button.addEventListener('click', function () {
+      copyText(source).then(
+        function () {
+          feedback(button, 'done', DONE_LABEL);
+          announce('Bloco de codigo copiado para a area de transferencia.');
+        },
+        function () {
+          feedback(button, 'error', ERROR_LABEL);
+          announce('Nao foi possivel copiar automaticamente. Selecione o texto e use Ctrl+C.');
+        }
+      );
+    });
+
+    wrapper.appendChild(button);
+  }
+
+  function setupCopyButtons() {
+    var blocks = document.querySelectorAll('main pre, .steps pre');
+    for (var i = 0; i < blocks.length; i += 1) enhance(blocks[i], i);
+  }
+
+  /* Marca no sumario a secao visivel, sem depender de biblioteca externa. */
+  function setupScrollSpy() {
+    var links = document.querySelectorAll('nav.toc a');
+    if (links.length === 0) return;
+
+    var map = {};
+    for (var i = 0; i < links.length; i += 1) {
+      var href = links[i].getAttribute('href');
+      if (href && href.charAt(0) === '#') map[href.slice(1)] = links[i];
+    }
+
+    function activate(id) {
+      for (var j = 0; j < links.length; j += 1) links[j].removeAttribute('aria-current');
+      if (map[id]) map[id].setAttribute('aria-current', 'true');
+    }
+
+    var sections = document.querySelectorAll('main section.card');
+    if (sections.length === 0) return;
+
+    if (typeof window.IntersectionObserver === 'function') {
+      var observer = new window.IntersectionObserver(
+        function (entries) {
+          var best = null;
+          for (var k = 0; k < entries.length; k += 1) {
+            if (!entries[k].isIntersecting) continue;
+            if (best === null || entries[k].intersectionRatio > best.intersectionRatio) {
+              best = entries[k];
+            }
+          }
+          if (best && best.target && best.target.id) activate(best.target.id);
+        },
+        { rootMargin: '-15% 0px -70% 0px', threshold: [0, 0.25, 0.5, 1] }
+      );
+      for (var m = 0; m < sections.length; m += 1) observer.observe(sections[m]);
+      return;
+    }
+
+    window.addEventListener('scroll', function () {
+      var current = sections[0];
+      for (var n = 0; n < sections.length; n += 1) {
+        if (sections[n].getBoundingClientRect().top <= 120) current = sections[n];
+      }
+      if (current && current.id) activate(current.id);
+    });
+  }
+
+  function start() {
+    setupCopyButtons();
+    setupScrollSpy();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+</script>
+
+</body>
+</html>

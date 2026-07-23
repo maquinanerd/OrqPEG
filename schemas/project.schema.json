@@ -1,0 +1,290 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://orqpeg.local/schemas/project.schema.json",
+  "title": "Configuração de projeto do OrqPEG",
+  "description": "Estrutura do arquivo de configuração de um projeto (ProjectConfig). Descreve o repositório alvo, a estratégia de branch, os comandos locais, os limites de execução e todas as exigências do portão de merge.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "repositoryPath",
+    "githubRepository",
+    "remote",
+    "baseBranch",
+    "branchStrategy",
+    "worktree",
+    "commands",
+    "execution",
+    "git",
+    "pullRequest",
+    "merge",
+    "agents"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Identificador estável do projeto, usado como nome de diretório em data/.",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Nome legível do projeto, exibido no painel.",
+      "minLength": 1
+    },
+    "repositoryPath": {
+      "type": "string",
+      "description": "Caminho absoluto do repositório git local.",
+      "minLength": 1
+    },
+    "githubRepository": {
+      "type": "string",
+      "description": "Repositório no GitHub no formato dono/repositorio.",
+      "minLength": 3,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "remote": {
+      "type": "string",
+      "description": "Nome do remoto git para onde a branch de execução será enviada.",
+      "minLength": 1
+    },
+    "baseBranch": {
+      "type": "string",
+      "description": "Branch base do pull request (por exemplo main).",
+      "minLength": 1
+    },
+    "branchStrategy": {
+      "type": "string",
+      "description": "Como a branch de trabalho é escolhida: uma por execução, uma fixa ou uma por prompt.",
+      "enum": ["per_run", "fixed", "per_prompt"]
+    },
+    "worktree": {
+      "type": "object",
+      "description": "Isolamento da execução em um git worktree separado.",
+      "additionalProperties": false,
+      "required": ["enabled", "rootPath", "reuseWhenSafe"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Quando verdadeiro, a execução acontece em um worktree dedicado."
+        },
+        "rootPath": {
+          "type": ["string", "null"],
+          "description": "Raiz absoluta onde os worktrees são criados; nulo usa a raiz padrão global."
+        },
+        "reuseWhenSafe": {
+          "type": "boolean",
+          "description": "Reaproveita um worktree existente quando ele estiver limpo e na branch correta."
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "description": "Comandos locais executados no repositório do projeto.",
+      "additionalProperties": false,
+      "required": ["install", "tests", "timeoutSeconds"],
+      "properties": {
+        "install": {
+          "type": "array",
+          "description": "Comandos de instalação de dependências, executados em ordem.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tests": {
+          "type": "array",
+          "description": "Comandos de teste, executados em ordem; qualquer falha reprova a suíte.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "timeoutSeconds": {
+          "type": "number",
+          "description": "Tempo máximo, em segundos, para cada comando local.",
+          "minimum": 1
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "description": "Limites do ciclo de execução e correção de cada prompt.",
+      "additionalProperties": false,
+      "required": [
+        "maxAttemptsPerPrompt",
+        "maxReviewerRetries",
+        "continueAfterApproval",
+        "stopOnBlocked"
+      ],
+      "properties": {
+        "maxAttemptsPerPrompt": {
+          "type": "integer",
+          "description": "Número máximo de tentativas de execução e correção por prompt.",
+          "minimum": 1
+        },
+        "maxReviewerRetries": {
+          "type": "integer",
+          "description": "Número máximo de novas chamadas ao revisor quando a saída dele é inválida.",
+          "minimum": 0
+        },
+        "continueAfterApproval": {
+          "type": "boolean",
+          "description": "Segue automaticamente para o próximo prompt após uma aprovação."
+        },
+        "stopOnBlocked": {
+          "type": "boolean",
+          "description": "Interrompe a execução inteira quando um prompt recebe veredito BLOCKED."
+        }
+      }
+    },
+    "git": {
+      "type": "object",
+      "description": "Comportamento de commit e push da execução.",
+      "additionalProperties": false,
+      "required": ["commitAfterApproval", "pushAfterRun", "commitMessagePrefix"],
+      "properties": {
+        "commitAfterApproval": {
+          "type": "boolean",
+          "description": "Cria um commit assim que o prompt é aprovado pelo revisor."
+        },
+        "pushAfterRun": {
+          "type": "boolean",
+          "description": "Envia a branch para o remoto ao final da execução."
+        },
+        "commitMessagePrefix": {
+          "type": "string",
+          "description": "Prefixo aplicado a toda mensagem de commit criada pelo OrqPEG."
+        }
+      }
+    },
+    "pullRequest": {
+      "type": "object",
+      "description": "Criação e acompanhamento do pull request no GitHub.",
+      "additionalProperties": false,
+      "required": ["enabled", "draftDuringExecution", "markReadyBeforeMerge", "waitForChecks"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Habilita a criação automática do pull request."
+        },
+        "draftDuringExecution": {
+          "type": "boolean",
+          "description": "Mantém o pull request como rascunho enquanto os prompts são executados."
+        },
+        "markReadyBeforeMerge": {
+          "type": "boolean",
+          "description": "Marca o pull request como pronto para revisão antes de avaliar o merge."
+        },
+        "waitForChecks": {
+          "type": "boolean",
+          "description": "Aguarda a conclusão dos checks obrigatórios antes de seguir."
+        }
+      }
+    },
+    "merge": {
+      "type": "object",
+      "description": "Regras do portão de merge por consenso das duas auditorias de IA.",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "mode",
+        "strategy",
+        "deleteBranchAfterMerge",
+        "requireClaudeApproval",
+        "requireCodexApproval",
+        "requireLocalTests",
+        "requireCiSuccess",
+        "requireNoConflicts",
+        "requireNoUnresolvedThreads",
+        "invalidateApprovalOnHeadChange",
+        "minimumConfidence"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Habilita a etapa de merge automatizado."
+        },
+        "mode": {
+          "type": "string",
+          "description": "Modo de decisão do merge.",
+          "enum": ["dual_ai_consensus", "manual", "disabled"]
+        },
+        "strategy": {
+          "type": "string",
+          "description": "Estratégia usada ao integrar o pull request.",
+          "enum": ["squash", "merge", "rebase"]
+        },
+        "deleteBranchAfterMerge": {
+          "type": "boolean",
+          "description": "Remove a branch de trabalho após um merge bem-sucedido."
+        },
+        "requireClaudeApproval": {
+          "type": "boolean",
+          "description": "Exige veredito APPROVED_FOR_MERGE da auditoria do Claude."
+        },
+        "requireCodexApproval": {
+          "type": "boolean",
+          "description": "Exige veredito APPROVED_FOR_MERGE da auditoria do Codex."
+        },
+        "requireLocalTests": {
+          "type": "boolean",
+          "description": "Exige suíte de testes local aprovada antes do merge."
+        },
+        "requireCiSuccess": {
+          "type": "boolean",
+          "description": "Exige que todos os checks obrigatórios do GitHub tenham passado."
+        },
+        "requireNoConflicts": {
+          "type": "boolean",
+          "description": "Exige que o pull request esteja sem conflitos com a base."
+        },
+        "requireNoUnresolvedThreads": {
+          "type": "boolean",
+          "description": "Exige que não haja comentários de revisão não resolvidos."
+        },
+        "invalidateApprovalOnHeadChange": {
+          "type": "boolean",
+          "description": "Invalida as auditorias quando o head SHA muda após a aprovação."
+        },
+        "minimumConfidence": {
+          "type": "number",
+          "description": "Confiança mínima exigida de cada auditoria, entre 0 e 1.",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "agents": {
+      "type": "object",
+      "description": "Modelos usados pelos executáveis locais claude e codex.",
+      "additionalProperties": false,
+      "required": ["claudeModel", "codexModel"],
+      "properties": {
+        "claudeModel": {
+          "type": ["string", "null"],
+          "description": "Modelo passado ao executável claude; nulo usa o padrão global."
+        },
+        "codexModel": {
+          "type": ["string", "null"],
+          "description": "Modelo passado ao executável codex; nulo usa o padrão global."
+        }
+      }
+    },
+    "editor": {
+      "type": ["string", "null"],
+      "description": "Comando do editor usado para abrir o projeto a partir do painel."
+    },
+    "createdAt": {
+      "type": "string",
+      "description": "Data e hora de criação do projeto, em ISO 8601.",
+      "minLength": 1
+    },
+    "updatedAt": {
+      "type": "string",
+      "description": "Data e hora da última alteração da configuração, em ISO 8601.",
+      "minLength": 1
+    }
+  }
+}

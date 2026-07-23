@@ -1,0 +1,134 @@
+name: CI
+
+# O OrqPEG é um produto Windows-first: a integração contínua roda na mesma
+# plataforma em que o produto é operado.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Nome estável: este job é usado como check obrigatório na proteção da branch.
+  build-windows:
+    name: build-windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Instalar dependências de desenvolvimento
+        run: npm ci
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Verificar tipos
+        run: npm run typecheck
+
+      - name: Executar testes
+        run: npm test
+
+      - name: Validar schemas e wrappers da instalação
+        shell: bash
+        run: |
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+
+          const schemas = [
+            'project.schema.json',
+            'state.schema.json',
+            'prompt-review.schema.json',
+            'claude-merge-review.schema.json',
+            'codex-merge-review.schema.json',
+            'merge-consensus.schema.json',
+          ];
+
+          const wrappers = [
+            'ORQPEG.cmd',
+            'INSTALAR-E-CONFIGURAR.cmd',
+            'ABRIR-PAINEL.cmd',
+            'INICIAR-PAINEL.cmd',
+            'PARAR-PAINEL.cmd',
+            'CADASTRAR-PROJETO.cmd',
+            'EDITAR-PROJETO.cmd',
+            'REMOVER-PROJETO.cmd',
+            'LISTAR-PROJETOS.cmd',
+            'EXECUTAR-DRY-RUN.cmd',
+            'EXECUTAR.cmd',
+            'PAUSAR.cmd',
+            'RETOMAR.cmd',
+            'STATUS.cmd',
+            'DIAGNOSTICO.cmd',
+            'CANCELAR-ETAPA.cmd',
+          ];
+
+          let problems = 0;
+
+          for (const name of schemas) {
+            const file = path.join('schemas', name);
+            if (!fs.existsSync(file)) {
+              console.log('[FALHA] schema ausente: ' + file);
+              problems += 1;
+              continue;
+            }
+            let parsed = null;
+            try {
+              parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+            } catch (error) {
+              console.log('[FALHA] schema com JSON invalido: ' + file + ' - ' + error.message);
+              problems += 1;
+              continue;
+            }
+            const usable =
+              typeof parsed === 'object' &&
+              parsed !== null &&
+              (parsed.type !== undefined || parsed.properties !== undefined);
+            if (!usable) {
+              console.log('[FALHA] schema sem type nem properties: ' + file);
+              problems += 1;
+              continue;
+            }
+            console.log('[OK] schema ' + name);
+          }
+
+          for (const name of wrappers) {
+            if (!fs.existsSync(name)) {
+              console.log('[FALHA] wrapper ausente: ' + name);
+              problems += 1;
+              continue;
+            }
+            console.log('[OK] wrapper ' + name);
+          }
+
+          if (problems > 0) {
+            console.log('');
+            console.log(problems + ' problema(s) na validacao da instalacao.');
+            process.exit(1);
+          }
+
+          console.log('');
+          console.log('Instalacao valida: ' + schemas.length + ' schemas e ' + wrappers.length + ' wrappers.');
+          "
+
+      - name: Diagnóstico do produto
+        shell: bash
+        run: |
+          node dist/cli/main.js version
+          node dist/cli/main.js help

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <title>OrqPEG — Painel</title>
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body data-page="home">
+  <a class="skip-link" href="#main">Ir para o conteúdo</a>
+
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#logo"></use></svg>
+      <span>
+        <span class="brand-name">OrqPEG</span>
+        <span class="brand-sub">Painel local</span>
+      </span>
+    </a>
+
+    <nav class="mainnav" aria-label="Navegação principal">
+      <a href="index.html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#logs"></use></svg>Dashboard
+      </a>
+      <a href="painel-classico.html" aria-current="page">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#project"></use></svg>Painel clássico
+      </a>
+      <a href="settings.html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#settings"></use></svg>Configuração
+      </a>
+    </nav>
+
+    <p class="conn" id="conn">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="conn-label">Iniciando…</span>
+    </p>
+  </header>
+
+  <div class="banner" id="banner" role="status" aria-live="polite" hidden>
+    <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#alert"></use></svg>
+    <span class="banner__text" id="banner-text"></span>
+    <button type="button" class="banner__close" id="banner-close" aria-label="Fechar mensagem">&times;</button>
+  </div>
+
+  <main class="page" id="main">
+    <section class="masthead">
+      <div class="masthead__block">
+        <span class="eyebrow">Local AI orchestration infrastructure</span>
+        <h1 class="masthead__title">ORQPEG<span class="dot">.</span></h1>
+        <p class="masthead__lede">
+          Orquestração local de desenvolvimento com Claude Code, Codex CLI, testes,
+          Git, pull requests, CI e consenso operacional de merge.
+        </p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn btn--primary" id="btn-new-project">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#plus"></use></svg>Cadastrar projeto
+        </button>
+        <button type="button" class="btn" id="btn-diagnostics">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#diagnostics"></use></svg>Diagnóstico
+        </button>
+        <button type="button" class="btn" id="btn-refresh">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#refresh"></use></svg>Atualizar
+        </button>
+      </div>
+      <p class="masthead__meta" id="home-generated">Carregando dados do servidor…</p>
+    </section>
+
+    <section class="section" aria-labelledby="h-status">
+      <div class="section-head">
+        <h2 id="h-status">Status geral</h2>
+        <p class="section-note">Contagens da instalação local no momento da última leitura.</p>
+      </div>
+      <div class="grid grid--metrics" id="home-metrics" aria-live="polite">
+        <p class="empty">Sem dados</p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-detect">
+      <div class="section-head">
+        <h2 id="h-detect">Detecção do ambiente</h2>
+        <p class="section-note">
+          Executáveis locais exigidos pelo fluxo. O OrqPEG só fala com estes binários — nunca com API de IA.
+        </p>
+      </div>
+      <div class="grid grid--cards" id="home-tools" aria-live="polite">
+        <p class="empty">Sem dados</p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-apiguard">
+      <div class="section-head">
+        <h2 id="h-apiguard">Guarda de API</h2>
+        <p class="section-note">
+          Variáveis inspecionadas por nome antes de cada processo filho. O valor nunca é lido, gravado ou exibido.
+        </p>
+      </div>
+      <div id="home-apiguard" aria-live="polite">
+        <p class="empty">Sem dados</p>
+      </div>
+    </section>
+
+    <section class="card" id="card-diagnostics" aria-labelledby="h-diagnostics" hidden>
+      <div class="card-head">
+        <h2 id="h-diagnostics">Diagnóstico do sistema</h2>
+        <span id="diagnostics-overall"></span>
+      </div>
+      <p class="faint" id="diagnostics-summary">Sem dados</p>
+      <div class="table-wrap" id="diagnostics-table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th scope="col">Status</th>
+              <th scope="col">Categoria</th>
+              <th scope="col">Item</th>
+              <th scope="col">Detalhe</th>
+              <th scope="col">Correção sugerida</th>
+            </tr>
+          </thead>
+          <tbody id="diagnostics-body">
+            <tr><td class="empty" colspan="5">Sem dados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-projects">
+      <div class="section-head">
+        <h2 id="h-projects">Projetos</h2>
+        <p class="legend">
+          <span class="chip chip--approved">Aprovado / mesclado</span>
+          <span class="chip chip--running">Executando</span>
+          <span class="chip chip--waiting">Aguardando</span>
+          <span class="chip chip--failed">Falha</span>
+          <span class="chip chip--pending">Pendente</span>
+          <span class="chip chip--audit">Auditoria</span>
+        </p>
+        <p class="section-note">
+          Um projeto por linha, com o estado da execução mais recente. O código de cada projeto permanece onde já está.
+        </p>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th scope="col">Projeto</th>
+              <th scope="col">Caminho local</th>
+              <th scope="col">GitHub</th>
+              <th scope="col">Branch base</th>
+              <th scope="col">Worktree</th>
+              <th scope="col" title="Total / aprovados / pendentes">Prompts (T/A/P)</th>
+              <th scope="col">Execução</th>
+              <th scope="col">PR</th>
+              <th scope="col">CI</th>
+              <th scope="col">Consenso</th>
+              <th scope="col">Merge</th>
+              <th scope="col">Erro</th>
+            </tr>
+          </thead>
+          <tbody id="projects-body" aria-live="polite">
+            <tr><td class="empty" colspan="12">Sem dados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="grid grid--2">
+      <section class="card" aria-labelledby="h-activity">
+        <h2 id="h-activity">Últimas atividades</h2>
+        <ol class="activity" id="recent-activity" aria-live="polite">
+          <li class="empty">Sem dados</li>
+        </ol>
+      </section>
+
+      <section class="card" aria-labelledby="h-merges">
+        <h2 id="h-merges">Merges recentes</h2>
+        <div class="table-wrap">
+          <table class="data">
+            <thead>
+              <tr>
+                <th scope="col">Projeto</th>
+                <th scope="col">Execução</th>
+                <th scope="col">PR</th>
+                <th scope="col">Merge SHA</th>
+                <th scope="col">Quando</th>
+              </tr>
+            </thead>
+            <tbody id="merges-body">
+              <tr><td class="empty" colspan="5">Sem dados</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <span>OrqPEG — orquestração local entre Claude Code e Codex CLI. Nenhuma chamada a API de IA parte deste painel.</span>
+    <span>Servidor restrito a 127.0.0.1.</span>
+  </footer>
+
+  <dialog id="dlg-new-project" aria-labelledby="h-new-project">
+    <form id="form-new-project" method="dialog">
+      <div class="dialog-head">
+        <h2 id="h-new-project">Cadastrar projeto</h2>
+      </div>
+      <div class="dialog-body">
+        <p class="faint">
+          O cadastro apenas registra o projeto no OrqPEG. Nenhum arquivo do repositório é criado, movido ou alterado.
+        </p>
+        <div class="warn-box" id="new-project-error-box" hidden>
+          <span id="new-project-error"></span>
+        </div>
+        <div class="grid grid--2">
+          <p class="field">
+            <label for="np-id">Identificador (slug)</label>
+            <input type="text" id="np-id" name="id" required autocomplete="off" spellcheck="false" pattern="[A-Za-z0-9._-]+">
+            <span class="hint">Letras, números, ponto, hífen e sublinhado.</span>
+          </p>
+          <p class="field">
+            <label for="np-name">Nome</label>
+            <input type="text" id="np-name" name="name" required autocomplete="off">
+          </p>
+        </div>
+        <p class="field">
+          <label for="np-repository-path">Caminho do repositório local</label>
+          <input type="text" id="np-repository-path" name="repositoryPath" required autocomplete="off" spellcheck="false">
+          <span class="hint">Caminho absoluto, incluindo espaços e acentos, por exemplo E:\Meus Projetos\Ação.</span>
+        </p>
+        <p class="field">
+          <label for="np-github">Repositório no GitHub</label>
+          <input type="text" id="np-github" name="githubRepository" required autocomplete="off" spellcheck="false" placeholder="owner/repo">
+        </p>
+        <div class="grid grid--3">
+          <p class="field">
+            <label for="np-remote">Remoto</label>
+            <input type="text" id="np-remote" name="remote" autocomplete="off" spellcheck="false">
+            <span class="hint">Vazio usa o padrão do OrqPEG.</span>
+          </p>
+          <p class="field">
+            <label for="np-base-branch">Branch base</label>
+            <input type="text" id="np-base-branch" name="baseBranch" autocomplete="off" spellcheck="false">
+            <span class="hint">Vazio usa o padrão do OrqPEG.</span>
+          </p>
+          <p class="field">
+            <label for="np-editor">Editor</label>
+            <input type="text" id="np-editor" name="editor" autocomplete="off" spellcheck="false">
+            <span class="hint">Comando usado por "Abrir editor".</span>
+          </p>
+        </div>
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn" id="btn-new-project-cancel">Cancelar</button>
+        <button type="submit" class="btn btn--primary" id="btn-new-project-submit">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#plus"></use></svg>Cadastrar
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="assets/event-stream.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

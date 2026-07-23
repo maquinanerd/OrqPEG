@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <title>Configuração — OrqPEG</title>
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body data-page="settings">
+  <a class="skip-link" href="#main">Ir para o conteúdo</a>
+
+  <header class="topbar">
+    <a class="brand" href="index.html">
+      <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#logo"></use></svg>
+      <span>
+        <span class="brand-name">OrqPEG</span>
+        <span class="brand-sub">Painel local</span>
+      </span>
+    </a>
+
+    <nav class="mainnav" aria-label="Navegação principal">
+      <a href="index.html">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#project"></use></svg>Painel
+      </a>
+      <a href="settings.html" aria-current="page">
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#settings"></use></svg>Configuração
+      </a>
+    </nav>
+  </header>
+
+  <div class="banner" id="banner" role="status" aria-live="polite" hidden>
+    <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#alert"></use></svg>
+    <span class="banner__text" id="banner-text"></span>
+    <button type="button" class="banner__close" id="banner-close" aria-label="Fechar mensagem">&times;</button>
+  </div>
+
+  <main class="page" id="main">
+    <section class="page-head">
+      <div class="titles">
+        <span class="eyebrow">Parâmetros da instalação</span>
+        <h1>Configuração global</h1>
+        <p class="sub">Somente leitura. O painel não grava configuração: a edição é feita direto no arquivo.</p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn" id="btn-diagnostics">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#diagnostics"></use></svg>Diagnóstico
+        </button>
+        <button type="button" class="btn" id="btn-refresh">
+          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#refresh"></use></svg>Atualizar
+        </button>
+      </div>
+    </section>
+
+    <section class="card card--note" aria-labelledby="h-where">
+      <div class="card-head">
+        <h2 id="h-where">Onde editar</h2>
+        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#settings"></use></svg>
+      </div>
+      <p>
+        A configuração global fica no arquivo <span class="mono">config/global.json</span>, dentro da pasta de
+        instalação do OrqPEG. Edite esse arquivo com um editor de texto e reinicie o painel para aplicar as mudanças.
+      </p>
+      <ul class="list-plain">
+        <li><span class="mono">panel.host</span> e <span class="mono">panel.port</span> — endereço do painel; o host é sempre restrito a 127.0.0.1.</li>
+        <li><span class="mono">agents.claudeCommand</span> e <span class="mono">agents.codexCommand</span> — executáveis locais chamados pelo orquestrador.</li>
+        <li><span class="mono">agents.claudeTimeoutSeconds</span> e <span class="mono">agents.codexTimeoutSeconds</span> — tempos-limite de cada agente.</li>
+        <li><span class="mono">security.blockWhenApiKeysPresent</span>, <span class="mono">security.strippedEnvVars</span> e <span class="mono">security.warnEnvVars</span> — política de segurança de variáveis de API.</li>
+        <li><span class="mono">git.allowForcePush</span> — permanentemente falso: force push é proibido pelo produto.</li>
+      </ul>
+      <p class="faint">
+        A API do painel expõe apenas <span class="mono">GET /api/home</span> e <span class="mono">GET /api/diagnostics</span>
+        para leitura de ambiente. Tempos-limite e modelos padrão não são publicados pela API e por isso não aparecem
+        abaixo: consulte-os direto no arquivo.
+      </p>
+    </section>
+
+    <div class="grid grid--2">
+      <section class="card" aria-labelledby="h-panel">
+        <h2 id="h-panel">Painel</h2>
+        <dl class="kv" id="kv-panel" aria-live="polite"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+
+      <section class="card" aria-labelledby="h-security">
+        <h2 id="h-security">Política de segurança</h2>
+        <dl class="kv kv--wide" id="kv-security" aria-live="polite"><dt>Estado</dt><dd>Sem dados</dd></dl>
+      </section>
+    </div>
+
+    <section class="section" aria-labelledby="h-tools">
+      <h2 id="h-tools">Comandos externos detectados</h2>
+      <div class="table-wrap">
+        <table class="data">
+          <caption>Executáveis locais usados pelo OrqPEG. Nenhuma API de IA é acessada pelo painel.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Ferramenta</th>
+              <th scope="col">Comando</th>
+              <th scope="col">Disponível</th>
+              <th scope="col">Versão</th>
+              <th scope="col">Caminho</th>
+              <th scope="col">Autenticação</th>
+            </tr>
+          </thead>
+          <tbody id="settings-tools-body" aria-live="polite">
+            <tr><td class="empty" colspan="6">Sem dados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="card-diagnostics" aria-labelledby="h-diagnostics" hidden>
+      <div class="card-head">
+        <h2 id="h-diagnostics">Diagnóstico do sistema</h2>
+        <span id="diagnostics-overall"></span>
+      </div>
+      <p class="faint" id="diagnostics-summary">Sem dados</p>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th scope="col">Status</th>
+              <th scope="col">Categoria</th>
+              <th scope="col">Item</th>
+              <th scope="col">Detalhe</th>
+              <th scope="col">Correção sugerida</th>
+            </tr>
+          </thead>
+          <tbody id="diagnostics-body">
+            <tr><td class="empty" colspan="5">Sem dados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Configuração exibida a partir de GET /api/home. O painel nunca lê o valor de variáveis de ambiente sensíveis.</span>
+  </footer>
+
+  <script src="assets/event-stream.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
