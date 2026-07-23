@@ -632,7 +632,10 @@ test('todo LoopGuardTrigger tem rótulo no painel', () => {
 
   const uniao = fs
     .readFileSync(path.join(raizRepo, 'src', 'types.ts'), 'utf8')
-    .match(/export type LoopGuardTrigger =([\s\S]*?);\n/);
+    // `\r?` porque core.autocrlf=true e o repositório não tem .gitattributes:
+    // todo checkout novo no Windows (clone ou `git worktree add`) grava CRLF, e
+    // o `;\n` cru só casava em cópia de trabalho que nunca passou por checkout.
+    .match(/export type LoopGuardTrigger =([\s\S]*?);\r?\n/);
   assert.ok(uniao, 'a união LoopGuardTrigger precisa ser localizável em src/types.ts');
   const gatilhos = [...uniao[1].matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]);
   assert.ok(gatilhos.length > 20, `esperava dezenas de gatilhos, achei ${gatilhos.length}`);
