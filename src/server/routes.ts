@@ -40,6 +40,13 @@ import {
   requireEffectivePolicy,
 } from '../execution/effective-policy';
 import { withLock } from '../state/locks';
+import { readCuratedPackage } from '../packages/package-reader';
+import {
+  getImportedPackage,
+  getImportedRound,
+  importCuratedPackage,
+} from '../packages/package-store';
+import { loadSkillCatalog, skillsRoot } from '../skills/skill-catalog';
 
 /**
  * Roteador da API do painel.
@@ -112,6 +119,18 @@ export function createApiRouter(deps: RouterDeps): {
       method: 'GET',
       pattern: /^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/report$/,
       handle: handleReport,
+    },
+    { method: 'GET', pattern: /^\/api\/skills$/, handle: handleListSkills },
+    { method: 'GET', pattern: /^\/api\/projects\/([^/]+)\/package$/, handle: handleGetPackage },
+    {
+      method: 'POST',
+      pattern: /^\/api\/projects\/([^/]+)\/package\/import$/,
+      handle: handleImportPackage,
+    },
+    {
+      method: 'POST',
+      pattern: /^\/api\/projects\/([^/]+)\/package\/preview$/,
+      handle: handlePreviewPackage,
     },
     { method: 'GET', pattern: /^\/api\/projects\/([^/]+)\/dry-run$/, handle: handleDryRun },
     { method: 'POST', pattern: /^\/api\/projects\/([^/]+)\/run$/, handle: handleStartRun },
@@ -763,6 +782,132 @@ async function handleMaterializePolicy(ctx: RouteContext): Promise<void> {
     warning:
       'Snapshot capturado APÓS o início da execução. Não representa necessariamente a política original desta execução.',
     policy: outcome.value.value.effectivePolicy,
+  });
+}
+
+/**
+ * Catálogo local de Skills.
+ *
+ * Devolve também os problemas: uma Skill malformada precisa aparecer como
+ * defeito nomeado, senão a rodada falharia depois com "Skill ausente" e a
+ * pessoa procuraria no lugar errado.
+ */
+async function handleListSkills(ctx: RouteContext): Promise<void> {
+  const catalog = loadSkillCatalog();
+  sendJson(ctx.res, 200, {
+    root: skillsRoot(),
+    skills: catalog.skills.map((skill) => ({
+      id: skill.manifest.id,
+      name: skill.manifest.name,
+      version: skill.manifest.version,
+      description: skill.manifest.description,
+      status: skill.manifest.status,
+      compatibleAgents: skill.manifest.compatibleAgents,
+      roles: skill.manifest.roles,
+      category: skill.category,
+      contentHash: skill.contentHash,
+    })),
+    problems: catalog.problems,
+  });
+}
+
+/** Pacote importado no projeto, com as rodadas e o que cada uma declara. */
+async function handleGetPackage(ctx: RouteContext): Promise<void> {
+  const projectId = requireId(ctx, 0);
+  if (projectId === null) return;
+
+  const record = getImportedPackage(projectId);
+  if (!record.ok) {
+    sendJson(ctx.res, 500, { error: record.error.message });
+    return;
+  }
+  if (!record.value) {
+    sendJson(ctx.res, 200, { imported: false, package: null, rounds: [] });
+    return;
+  }
+
+  const rounds = record.value.roundIds
+    .map((id) => getImportedRound(projectId, id))
+    .filter((result) => result.ok)
+    .map((result) => (result as { value: unknown }).value);
+
+  sendJson(ctx.res, 200, { imported: true, package: record.value, rounds });
+}
+
+/**
+ * Valida um pacote SEM importar.
+ *
+ * Existe para que o operador veja os problemas antes de mexer no projeto: a
+ * importação é uma decisão, e decidir sem ver a lista de erros é decidir no
+ * escuro.
+ */
+async function handlePreviewPackage(ctx: RouteContext): Promise<void> {
+  const projectId = requireId(ctx, 0);
+  if (projectId === null) return;
+
+  const body = await readJsonBody<{ sourcePath?: string }>(ctx.req);
+  if (!body.ok) {
+    sendJson(ctx.res, 400, { error: body.error.message });
+    return;
+  }
+
+  const parsed = readCuratedPackage((body.value.sourcePath ?? '').trim());
+  if (!parsed.ok) {
+    sendJson(ctx.res, 422, {
+      valid: false,
+      error: parsed.error.message,
+      problems: parsed.error.details?.['problems'] ?? [],
+    });
+    return;
+  }
+
+  sendJson(ctx.res, 200, {
+    valid: true,
+    plan: parsed.value.plan,
+    rounds: parsed.value.rounds,
+    packageHash: parsed.value.packageHash,
+  });
+}
+
+async function handleImportPackage(ctx: RouteContext): Promise<void> {
+  const projectId = requireId(ctx, 0);
+  if (projectId === null) return;
+
+  const body = await readJsonBody<{
+    sourcePath?: string;
+    version?: string;
+    replaceExisting?: boolean;
+  }>(ctx.req);
+  if (!body.ok) {
+    sendJson(ctx.res, 400, { error: body.error.message });
+    return;
+  }
+
+  const imported = importCuratedPackage({
+    projectId,
+    sourcePath: (body.value.sourcePath ?? '').trim(),
+    version: (body.value.version ?? '').trim(),
+    ...(body.value.replaceExisting === true ? { replaceExisting: true } : {}),
+  });
+
+  if (!imported.ok) {
+    /* 422 quando o pacote é inválido: o pedido está bem formado, o conteúdo
+       apontado é que não serve. */
+    const status = imported.error.code === 'VALIDATION_FAILED' ? 422 : 400;
+    sendJson(ctx.res, status, {
+      error: imported.error.message,
+      problems: imported.error.details?.['problems'] ?? [],
+    });
+    return;
+  }
+
+  ctx.deps.logger.info(
+    `Pacote "${imported.value.record.packageId}" versão ${imported.value.record.version} importado em ${projectId}.`,
+  );
+  sendJson(ctx.res, 201, {
+    imported: true,
+    package: imported.value.record,
+    rounds: imported.value.package.rounds,
   });
 }
 
