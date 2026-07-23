@@ -36,11 +36,14 @@ gates passarem — executa o merge.
 9. [Painel](#painel)
 10. [Os 20 gates de merge](#os-20-gates-de-merge)
 11. [Invalidação de aprovações](#invalidação-de-aprovações)
-12. [Pausa, retomada e cancelamento seguro](#pausa-retomada-e-cancelamento-seguro)
-13. [Logs, relatórios e artefatos](#logs-relatórios-e-artefatos)
-14. [Limites de assinatura](#limites-de-assinatura)
-15. [Os 16 comandos `.cmd`](#os-16-comandos-cmd)
-16. [Solução de problemas](#solução-de-problemas)
+12. [Orçamentos: nada repete para sempre](#orçamentos-nada-repete-para-sempre)
+13. [Pacotes curados](#pacotes-curados)
+14. [Skills locais](#skills-locais)
+15. [Pausa, retomada e cancelamento seguro](#pausa-retomada-e-cancelamento-seguro)
+16. [Logs, relatórios e artefatos](#logs-relatórios-e-artefatos)
+17. [Limites de assinatura](#limites-de-assinatura)
+18. [Os 16 comandos `.cmd`](#os-16-comandos-cmd)
+19. [Solução de problemas](#solução-de-problemas)
 
 ---
 
@@ -516,6 +519,146 @@ Uma aprovação de auditoria vale para **um commit específico**, não para a PR
 `merge.invalidateApprovalOnHeadChange` controla a invalidação automática por
 mudança de head e vem ligado por padrão. A auditoria precisa ser refeita — não
 existe reaproveitamento de aprovação antiga.
+
+---
+
+## Orçamentos: nada repete para sempre
+
+Contar tentativas não protege ninguém. Um ciclo pode devolver o mesmo diff,
+receber a mesma revisão e falhar no mesmo teste indefinidamente sem que nenhum
+contador estoure — e a assinatura vai embora sem que nada avance. O OrqPEG trata
+**cada laço** como algo que precisa de teto e de uma parada nomeada.
+
+São quatro laços governados:
+
+| Laço | Teto | Ao esgotar |
+| --- | --- | --- |
+| Tentativas de um prompt | `maxAttemptsPerPrompt` e os orçamentos de chamadas | `MAX_ATTEMPTS_REACHED`, `NO_PROGRESS`, `OSCILLATION_DETECTED`… |
+| Espera do CI | `ciWaitTimeoutMinutes` (histórico) | `CI_WAIT_TIMEOUT` |
+| Reparo do CI | `maxCiRepairCycles` | `CI_REPAIR_BUDGET_EXHAUSTED` ou `REPEATED_CI_FAILURE` |
+| Correção pós-auditoria | `maxMergeCorrectionCycles` | `MERGE_CORRECTION_BUDGET_EXHAUSTED` |
+
+Toda parada preserva branch, PR, worktree e artefatos. Nenhuma delas usa
+`FAILED` ou `BLOCKED` genérico quando existe gatilho específico.
+
+### A política é congelada no início da execução
+
+Os limites acima são resolvidos **uma única vez**, quando a execução começa:
+
+```text
+padrões do produto → configuração global → projeto → rodada
+    → validação → política efetiva → hash → snapshot no RunRecord
+```
+
+A partir daí, guard, painel, autorização de override, retomada, relatórios e
+dry-run leem desse snapshot. O cadastro do projeto continua servindo para
+identidade e caminhos; nunca para limites.
+
+Isso existe por um motivo concreto: antes, editar o `project.json` alterava
+retroativamente uma execução já iniciada — e aumentar
+`maxManualOverridesPerPrompt` concedia mais overrides a uma parada que já havia
+consumido o seu.
+
+Duas regras que parecem a mesma e não são:
+
+1. A execução **sempre** usa a política congelada.
+2. Alterar as fontes durante a execução pode **parar** a execução
+   (`PROJECT_CONFIG_CHANGED`), mas nunca modifica a política congelada.
+
+Salvar o projeto sem mudar nada relevante — só `updatedAt`, o nome, a ordem das
+chaves — não interrompe nada: o hash é canônico e ignora ruído.
+
+Execuções criadas antes desse congelamento são tratadas *fail-closed*: não são
+retomadas em silêncio, e o painel declara **política histórica não disponível**
+em vez de exibir denominadores do cadastro de hoje.
+
+---
+
+## Pacotes curados
+
+O OrqPEG **não planeja projetos**. O plano nasce do seu trabalho com um modelo
+de conversa, é validado por você, e só então é importado aqui para ser
+executado.
+
+```text
+<pacote>/
+├── PROJECT-CONTEXT.md
+├── ROADMAP.md
+├── VALIDATION.md
+├── execution-plan.json
+└── rounds/
+    └── 01-fundacao/
+        ├── round.json
+        ├── README.md
+        └── prompts/
+            ├── 010-database.md
+            └── 020-backend.md
+```
+
+O importador **valida e recusa**. Ele não completa seção ausente, não reescreve
+roadmap, não inventa dependência e não conserta arquivo inválido — fazer isso
+seria decidir o que você quis dizer. Um pacote quebrado produz:
+
+```text
+PACOTE INVÁLIDO — 3 problema(s) em C:\pacotes\meu-projeto:
+  - ROADMAP.md: arquivo obrigatório ausente
+  - execution-plan.json/validation.status: precisa ser "approved" para executar
+  - rounds/02-interface/prompts/030-extra.md: existe em disco mas não está
+    declarado em round.json; não seria executado
+```
+
+Todos os problemas de uma vez, porque quem monta o pacote precisa corrigir tudo
+junto, não descobrir um erro por tentativa.
+
+Para executar, o pacote precisa declarar `validation.status: "approved"` e o
+`validatedCommitSha` do repositório contra o qual foi validado.
+
+A pasta de origem nunca é tocada: importar é copiar. Reimportar a mesma versão
+com conteúdo diferente exige intenção explícita, porque sobrescrever apagaria o
+pacote sob o qual as execuções anteriores rodaram.
+
+`continueBetweenRounds` é `false` por padrão — terminar uma rodada é um bom
+momento para uma pessoa olhar antes de gastar a próxima.
+
+---
+
+## Skills locais
+
+Uma Skill, nesta versão, é um **documento** que entra no prompt do agente. Nada
+além disso.
+
+```text
+skills/
+└── quality/
+    └── typescript-strict/
+        ├── skill.json
+        └── SKILL.md
+```
+
+A rodada declara o que quer, sempre com versão:
+
+```json
+{
+  "skills": {
+    "claude": ["typescript-strict@1.0.0"],
+    "codex": ["security-review@1.0.0"]
+  }
+}
+```
+
+Regras, todas verificadas:
+
+- ativação é **explícita**; não existe descoberta automática;
+- Skill ausente, versão divergente, status não aprovado ou agente incompatível
+  **bloqueiam a rodada** — sem versão, atualizar a Skill mudaria em silêncio o
+  comportamento de algo já validado;
+- as Skills são congeladas por hash no início e conferidas depois: editá-las no
+  meio da execução bloqueia, pela mesma razão que editar um prompt bloqueia;
+- `executeScripts` e `networkAccess` verdadeiros são **recusados na leitura**;
+- nenhuma Skill amplia escopo, substitui política ou dispensa teste — isso é
+  dito também ao agente, dentro do bloco que ele recebe.
+
+Não há marketplace, instalação automática nem download. É catálogo local.
 
 ---
 

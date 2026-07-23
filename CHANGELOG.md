@@ -5,6 +5,93 @@ Todas as mudanças relevantes deste projeto são documentadas neste arquivo.
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o
 versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+Fechamento do escopo do OrqPEG 1.0. Tudo aqui existe para uma finalidade só:
+**nenhuma repetição do produto é ilimitada, e nenhuma parada é anônima.**
+
+### Added
+
+#### Política efetiva congelada
+
+- `EffectiveExecutionPolicySnapshot` resolvido **uma única vez** antes de
+  `createRun()`, com precedência `rodada > projeto > global > padrões do
+  produto`, e guardado em `RunRecord.effectivePolicy`.
+- Congela `loopGuard`, `ci`, `mergeAudit`, `commands`, `agents` (modelo já
+  resolvido contra o padrão global), `git`, `pullRequest`, `merge`,
+  `repository` e `worktree`.
+- Dois hashes com papéis distintos: `effectiveHash` identifica a política e é
+  comparável entre execuções; `integrityHash` sela o snapshot inteiro,
+  `sourceMetadata` inclusive.
+- Camada global opcional em `GlobalConfig.loopGuard`.
+- `POST /api/projects/:id/runs/:runId/materialize-policy` para execuções
+  legadas, com confirmação explícita e marca de procedência.
+
+#### Orçamento de CI
+
+- `EffectiveCiPolicy` com `maxRepairCycles`, `pollingInitialSeconds`,
+  `pollingMaxSeconds`, `waitTimeoutMinutes` e `stopOnRepeatedFailure`.
+- Espera com relógio **histórico** persistido (`CiWaitState`): reiniciar o
+  painel não renova o prazo.
+- Polling com backoff limitado. Nenhuma chamada de IA enquanto os checks
+  estiverem apenas pendentes.
+- Fingerprint normalizado de falha de CI, que descarta run ID, timestamps,
+  duração, URLs efêmeras, SHAs, UUIDs e caminhos de runner.
+- Ciclos de reparo com testes locais antes do push e artefatos append-only em
+  `artifacts/<run-id>/ci-repairs/cycle-NNN/`.
+
+#### Orçamento de auditoria final
+
+- `EffectiveMergeAuditPolicy.maxCorrectionCycles`.
+- Distinção entre pedido de mudança (corrigível, consome ciclo) e bloqueio
+  estrutural (CI vermelho, conflito, auditor ausente — não consome).
+- Invalidação das aprovações **antes** da correção começar; cada correção
+  dispara CI novo antes de reauditar.
+- Artefatos em `artifacts/<run-id>/merge-corrections/cycle-NNN/`.
+
+#### Pacotes curados
+
+- Importador que lê `PROJECT-CONTEXT.md`, `ROADMAP.md`, `VALIDATION.md`,
+  `execution-plan.json` e `rounds/*/round.json` + prompts.
+- Valida e **recusa**; nunca completa, reescreve ou conserta. Relata todos os
+  problemas de uma vez.
+- Exige `validation.status = "approved"` e `validatedCommitSha`.
+- A origem nunca é tocada. Reimportar exige versão nova ou intenção explícita;
+  o pacote anterior vai para `package-anterior/<versão>-<carimbo>`.
+
+#### Skills locais
+
+- Catálogo declarativo em `skills/<categoria>/<id>/{skill.json,SKILL.md}`.
+- Ativação só explícita, no formato `<id>@<versão>`.
+- `executeScripts` e `networkAccess` verdadeiros são recusados na leitura.
+- Skills congeladas por execução e conferidas por hash: ausência, versão
+  divergente ou edição durante a execução bloqueiam.
+- Sem marketplace, sem download, sem descoberta automática.
+
+### Changed
+
+- Gatilhos novos: `PROJECT_CONFIG_CHANGED`, `POLICY_SNAPSHOT_MISSING`,
+  `CI_REPAIR_BUDGET_EXHAUSTED`, `CI_CONFIGURATION_ERROR` e
+  `CI_REQUIRED_CHECK_MISSING`.
+- Artefatos de parada do Loop Guard passam a `stops/stop-NNN/`, append-only e
+  encadeados por `previousStopHash`.
+- Concessão de override sob lock persistente de escopo `run`, com releitura
+  garantida estruturalmente por `withRunLocked`.
+- `schemas/state.schema.json` sincronizado com o `RunRecord` real.
+
+### Fixed
+
+- Edição do `project.json` deixa de alterar retroativamente os limites de uma
+  execução em curso — inclusive o número de overrides disponíveis.
+- Detecção de mutação de configuração deixa de ser código morto: o hash "de
+  agora" passa a vir do disco, não do objeto em memória que originou o
+  snapshot.
+- `prepare()` não recaptura mais os hashes na retomada, o que apagava a
+  evidência de que o cadastro havia sido editado.
+- Adoção de worktree na retomada exige prova de propriedade; merge, cherry-pick
+  e revert pela metade deixam de passar despercebidos.
+- Artefatos de parada e de tentativa deixam de ser sobrescritos.
+
 ## [1.0.0] - 2026-07-21
 
 Primeira versão do OrqPEG, o orquestrador local que coordena os executáveis
