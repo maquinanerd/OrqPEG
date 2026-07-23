@@ -147,7 +147,7 @@ de 24 px.
 
 | Nós Figma | Componente | Arquivo |
 | --- | --- | --- |
-| `2:2` | `AppShell` | `public/dashboard.html` › `.shell` |
+| `2:2` | `AppShell` | `public/index.html` › `.shell` |
 | `2:3` | Reference Backdrop | `body` › `.mat` |
 | `2:4`–`2:7` | Cabeçalho de apresentação | `.canvas-head` |
 | `2:8` | Superfície do shell | `.shell` |
@@ -164,7 +164,7 @@ de 24 px.
 | `2:97`–`2:99` | Bloco do responsável | `.owner` |
 | `2:101`–`2:110` | Ações rápidas do cabeçalho | `.header-actions` |
 | `2:111`–`2:112` | `RunSelector` | `.run-selector` |
-| `2:113`–`2:117` | `WorkspaceTabs` (5 abas) | `.tabs` › `.tab` |
+| `2:113`–`2:117` | `WorkspaceTabs` (5 abas + `Sistema`) | `.tabs` › `.tab` |
 | `2:118` | Divisor | `.workspace-divider` |
 | `2:119`–`2:145` | `ExecutionTimeline` (3 eventos) | `.timeline` › `.event` |
 | `2:126`, `2:135`, `2:144` | Pílula de estágio | `.pill--stage` |
@@ -241,13 +241,27 @@ ponto em que deixariam o workspace abaixo de 560 px de largura útil.
    evidência de teste) e evita sugerir um navegador de sistema de arquivos, que o
    painel deliberadamente não expõe.
 
-8. **Dashboard como página nova, não substituição do painel atual.** O sistema
-   visual do Figma (rail escuro, lime/lavender/coral, raios de 22–28 px) é
-   incompatível com o de `public/assets/styles.css` (verde dessaturado, cantos
-   quase retos). Aplicá-lo por cima quebraria `project.html`, `run.html`,
-   `prompt.html` e `settings.html`. O Master Canvas foi implementado em
-   `public/dashboard.html`, com camada de tokens própria, e as páginas existentes
-   seguem intactas.
+8. **Dashboard é a home; o painel anterior virou rota própria.** O Master Canvas
+   é `public/index.html` — a página inicial do painel. A home anterior foi
+   preservada integralmente em `public/painel-classico.html`, alcançável pelo
+   logotipo do rail e pela navegação daquela página.
+
+   A troca foi feita por movimentação de arquivo (`git mv`), não por reescrita,
+   e as duas folhas de estilo continuam separadas: `tokens.css` +
+   `dashboard.css` servem a home nova; `styles.css` segue servindo
+   `painel-classico.html`, `project.html`, `run.html`, `prompt.html` e
+   `settings.html`, sem uma linha alterada. Os dois sistemas visuais são
+   incompatíveis — rail escuro com lime e raios de 22–28 px contra verde
+   dessaturado com cantos quase retos — e mantê-los isolados é o que impede a
+   home nova de quebrar as cinco páginas restantes.
+
+   Para a home não ser um downgrade, três capacidades que só existiam na página
+   anterior foram portadas: **cadastro de projeto** (diálogo de sete campos,
+   validado no servidor por `POST /api/projects`), **guarda de API** e
+   **merges recentes** e **diagnóstico** — as três últimas na aba `Sistema`,
+   sexta aba, acrescentada às cinco do desenho justamente porque a home tem
+   escopo maior que um projeto. O item `Gates` do rail passou a `Sistema`, que
+   é o que ele de fato abre.
 
 ## 6. Mapa dado demonstrativo → dado real
 

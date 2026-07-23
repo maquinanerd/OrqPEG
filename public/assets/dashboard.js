@@ -831,6 +831,167 @@
   }
 
   /* ----------------------------------------------------------------------
+     13b. Sistema
+
+     O que não pertence a um projeto só. Existe porque este dashboard virou a
+     página inicial do painel e precisa cobrir o que a home anterior cobria:
+     estado geral, guarda de API, merges recentes e diagnóstico.
+     ---------------------------------------------------------------------- */
+
+  function renderSystem(home) {
+    var status = $('system-status');
+    clear(status);
+    [
+      ['Produto', home.product + ' ' + home.version],
+      ['Gerado em', fullTime(home.generatedAt)],
+      ['Projetos', String(home.projects.length)],
+      ['Execuções em curso', String(home.activeRuns)],
+      ['Execuções pausadas', String(home.pausedRuns)],
+      ['Execuções bloqueadas', String(home.blockedRuns)],
+      ['Ferramentas disponíveis', home.tools.filter(function (t) { return t.available; }).length + ' de ' + home.tools.length],
+    ].forEach(function (row) {
+      status.appendChild(el('dt', null, row[0]));
+      status.appendChild(el('dd', null, row[1]));
+    });
+
+    /* A guarda relata NOMES de variáveis; valor de credencial nunca sai do
+       servidor, e o painel não pede. */
+    var guard = home.apiGuard || { presentKeys: [], warnKeys: [], blocked: false, strippedForChildren: [] };
+    $('api-guard-note').textContent = guard.blocked
+      ? 'Execução bloqueada: há credencial de API no ambiente. O OrqPEG não usa API de IA.'
+      : 'Nenhuma credencial de API bloqueando a execução. Só nomes de variáveis são inspecionados.';
+
+    var guardList = $('api-guard-list');
+    clear(guardList);
+    [
+      ['Detectadas', guard.presentKeys],
+      ['Em aviso', guard.warnKeys],
+      ['Removidas dos processos filhos', guard.strippedForChildren],
+    ].forEach(function (row) {
+      var item = document.createElement('li');
+      item.className = 'list-row';
+      item.appendChild(el('span', 'list-row-label', row[0]));
+      item.appendChild(el('span', 'list-row-value', row[1].length ? row[1].join(', ') : 'nenhuma'));
+      guardList.appendChild(item);
+    });
+
+    var merges = $('merge-list');
+    clear(merges);
+    show($('merge-list-empty'), home.recentMerges.length === 0);
+    home.recentMerges.forEach(function (merge) {
+      var item = document.createElement('li');
+      item.className = 'list-row';
+      item.appendChild(
+        el('span', 'list-row-label', merge.projectId + ' · ' + merge.runId),
+      );
+      item.appendChild(
+        el(
+          'span',
+          'list-row-value',
+          (merge.prNumber ? 'PR #' + merge.prNumber + ' · ' : '') +
+            (merge.mergeSha ? merge.mergeSha.slice(0, 10) : 'sem sha') +
+            ' · ' + fullTime(merge.at),
+        ),
+      );
+      merges.appendChild(item);
+    });
+  }
+
+  function renderDiagnostics(report) {
+    var list = $('diagnostics-list');
+    clear(list);
+
+    var head = document.createElement('li');
+    head.className = 'list-row';
+    head.appendChild(el('span', 'list-row-label', 'Resultado geral: ' + report.overall));
+    head.appendChild(
+      el(
+        'span',
+        'list-row-value',
+        report.counts.ok + ' ok · ' + report.counts.aviso + ' aviso · ' + report.counts.erro + ' erro',
+      ),
+    );
+    list.appendChild(head);
+
+    report.items.forEach(function (entry) {
+      var item = document.createElement('li');
+      item.className = 'list-row';
+      item.appendChild(el('span', 'list-row-label', entry.title));
+      item.appendChild(el('span', 'list-row-value', entry.status + ' — ' + entry.detail));
+      list.appendChild(item);
+    });
+  }
+
+  /* ----------------------------------------------------------------------
+     13c. Cadastro de projeto
+
+     Portado da home anterior. Sem ele, esta página perderia a única forma de
+     registrar um projeto. A validação real é do servidor: `POST /api/projects`
+     roda validateProjectConfig e é ele quem recusa caminho, slug ou remoto
+     inválido. O cliente só evita o ida-e-volta óbvio.
+     ---------------------------------------------------------------------- */
+
+  var PROJECT_FIELDS = [
+    ['np-id', 'id'],
+    ['np-name', 'name'],
+    ['np-repository-path', 'repositoryPath'],
+    ['np-github', 'githubRepository'],
+    ['np-remote', 'remote'],
+    ['np-base-branch', 'baseBranch'],
+    ['np-editor', 'editor'],
+  ];
+
+  var projectDialogReturnFocus = null;
+
+  function openProjectDialog() {
+    projectDialogReturnFocus = document.activeElement;
+    PROJECT_FIELDS.forEach(function (field) {
+      $(field[0]).value = '';
+    });
+    show($('project-error'), false);
+    show($('project-backdrop'), true);
+    show($('project-dialog'), true);
+    $('np-id').focus();
+  }
+
+  function closeProjectDialog() {
+    show($('project-backdrop'), false);
+    show($('project-dialog'), false);
+    if (projectDialogReturnFocus && projectDialogReturnFocus.focus) {
+      projectDialogReturnFocus.focus();
+    }
+  }
+
+  function submitProject(event) {
+    event.preventDefault();
+
+    var payload = {};
+    PROJECT_FIELDS.forEach(function (field) {
+      var value = $(field[0]).value.trim();
+      if (value) payload[field[1]] = value;
+    });
+
+    var box = $('project-error');
+    var submit = $('project-submit');
+    submit.disabled = true;
+
+    postJson('/api/projects', payload)
+      .then(function (created) {
+        submit.disabled = false;
+        closeProjectDialog();
+        state.projectId = (created && created.project && created.project.id) || payload.id;
+        announce('Projeto cadastrado: ' + payload.name + '.');
+        return loadHome();
+      })
+      .catch(function (error) {
+        submit.disabled = false;
+        box.textContent = error.message;
+        show(box, true);
+        announceAlert('Cadastro recusado: ' + error.message);
+      });
+  }
+
+  /* ----------------------------------------------------------------------
      14. Ações do cabeçalho
      ---------------------------------------------------------------------- */
 
@@ -889,6 +1050,7 @@
 
         renderProjectList(home);
         renderAgents(home);
+        renderSystem(home);
 
         var project = home.projects.filter(function (item) {
           return item.id === state.projectId;
@@ -1082,6 +1244,27 @@
       loadHome();
     });
 
+    $('sidebar-new-project').addEventListener('click', openProjectDialog);
+    $('empty-new-project').addEventListener('click', openProjectDialog);
+    $('project-cancel').addEventListener('click', closeProjectDialog);
+    $('project-dialog').addEventListener('submit', submitProject);
+
+    $('btn-run-diagnostics').addEventListener('click', function () {
+      var button = $('btn-run-diagnostics');
+      button.disabled = true;
+      announce('Executando diagnóstico.');
+      getJson('/api/diagnostics')
+        .then(function (report) {
+          button.disabled = false;
+          renderDiagnostics(report);
+          announce('Diagnóstico concluído: ' + report.overall + '.');
+        })
+        .catch(function (error) {
+          button.disabled = false;
+          announceAlert('Diagnóstico falhou: ' + error.message);
+        });
+    });
+
     var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
     tabs.forEach(function (tab, index) {
       tab.addEventListener('click', function () {
@@ -1106,7 +1289,7 @@
     document.querySelectorAll('.rail-item[data-view]').forEach(function (item) {
       item.addEventListener('click', function () {
         var view = item.dataset.view;
-        activateTab(view === 'execucoes' || view === 'gates' ? 'resumo' : view);
+        activateTab(view === 'execucoes' ? 'resumo' : view);
       });
     });
 
@@ -1142,7 +1325,10 @@
     prompts: 'prompts',
     artefatos: 'artefatos',
     historico: 'historico',
+    sistema: 'sistema',
   };
+
+  var VIEWS = ['resumo', 'agentes', 'prompts', 'artefatos', 'historico', 'sistema'];
 
   function activateTab(view) {
     if (!view || !TAB_TO_RAIL[view]) return;
@@ -1153,7 +1339,7 @@
       tab.tabIndex = selected ? 0 : -1;
     });
 
-    ['resumo', 'agentes', 'prompts', 'artefatos', 'historico'].forEach(function (name) {
+    VIEWS.forEach(function (name) {
       var panel = $('panel-' + name);
       if (panel) panel.hidden = name !== view;
     });
@@ -1240,13 +1426,8 @@
     }
 
     if (kind === 'diagnostics') {
-      getJson('/api/diagnostics')
-        .then(function () {
-          announce('Diagnóstico executado. Veja o painel clássico para o detalhe.');
-        })
-        .catch(function (error) {
-          announceAlert('Diagnóstico falhou: ' + error.message);
-        });
+      activateTab('sistema');
+      $('btn-run-diagnostics').focus();
       return;
     }
 
@@ -1387,11 +1568,15 @@
     });
 
     document.addEventListener('keydown', function (event) {
-      var dialog = $('confirm-dialog');
+      /* Dois diálogos usam o mesmo tratamento: confirmação e cadastro. Só um
+         fica aberto por vez. */
+      var confirm = $('confirm-dialog');
+      var dialog = confirm.hidden ? $('project-dialog') : confirm;
       if (dialog.hidden) return;
 
       if (event.key === 'Escape') {
-        closeDialog();
+        if (dialog === confirm) closeDialog();
+        else closeProjectDialog();
         return;
       }
 

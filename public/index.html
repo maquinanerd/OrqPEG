@@ -3,261 +3,473 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <meta name="referrer" content="no-referrer">
-  <title>OrqPEG — Painel</title>
-  <link rel="stylesheet" href="assets/styles.css">
+  <title>Dashboard — OrqPEG</title>
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/dashboard.css">
 </head>
-<body data-page="home">
-  <a class="skip-link" href="#main">Ir para o conteúdo</a>
+<body class="mat" data-page="dashboard">
 
-  <header class="topbar">
-    <a class="brand" href="index.html">
-      <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#logo"></use></svg>
-      <span>
-        <span class="brand-name">OrqPEG</span>
-        <span class="brand-sub">Painel local</span>
-      </span>
+<a class="skip-link" href="#workspace">Ir para o conteúdo</a>
+
+<!-- Cabeçalho de apresentação — Figma 2:4 … 2:7 -->
+<div class="canvas-head">
+  <p class="brand-pill">ORQPEG DESIGN SYSTEM</p>
+  <h1 class="canvas-title">Operational orchestration interface</h1>
+  <p class="canvas-meta" id="canvas-meta">Painel local • carregando…</p>
+</div>
+
+<div class="shell">
+
+  <!-- ==================================================================
+       GlobalRail — Figma 2:9 … 2:28
+       ================================================================== -->
+  <nav class="rail" aria-label="Navegação principal">
+    <a class="rail-logo" href="painel-classico.html" aria-label="Painel clássico do OrqPEG">
+      <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#logo"></use></svg>
     </a>
 
-    <nav class="mainnav" aria-label="Navegação principal">
-      <a href="index.html" aria-current="page">
-        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#project"></use></svg>Painel
-      </a>
-      <a href="settings.html">
-        <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#settings"></use></svg>Configuração
-      </a>
-    </nav>
+    <ul class="rail-items" role="list">
+      <li><button type="button" class="rail-item" data-view="resumo" aria-current="page">
+        <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#project"></use></svg>
+        <span class="rail-label">Resumo</span>
+      </button></li>
+      <li><button type="button" class="rail-item" data-view="execucoes">
+        <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#play"></use></svg>
+        <span class="rail-label">Execuções</span>
+      </button></li>
+      <li><button type="button" class="rail-item" data-view="prompts">
+        <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#prompt"></use></svg>
+        <span class="rail-label">Prompts</span>
+      </button></li>
+      <li><button type="button" class="rail-item" data-view="sistema">
+        <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#shield"></use></svg>
+        <span class="rail-label">Sistema</span>
+      </button></li>
+      <li><button type="button" class="rail-item" data-view="artefatos">
+        <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#report"></use></svg>
+        <span class="rail-label">Artefatos</span>
+      </button></li>
+      <li><button type="button" class="rail-item" data-view="historico">
+        <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#clock"></use></svg>
+        <span class="rail-label">Histórico</span>
+      </button></li>
+      <li><a class="rail-item" href="settings.html">
+        <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#settings"></use></svg>
+        <span class="rail-label">Configurações</span>
+      </a></li>
+    </ul>
 
-    <p class="conn" id="conn">
-      <span class="dot" aria-hidden="true"></span>
-      <span id="conn-label">Iniciando…</span>
-    </p>
-  </header>
-
-  <div class="banner" id="banner" role="status" aria-live="polite" hidden>
-    <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#alert"></use></svg>
-    <span class="banner__text" id="banner-text"></span>
-    <button type="button" class="banner__close" id="banner-close" aria-label="Fechar mensagem">&times;</button>
-  </div>
-
-  <main class="page" id="main">
-    <section class="masthead">
-      <div class="masthead__block">
-        <span class="eyebrow">Local AI orchestration infrastructure</span>
-        <h1 class="masthead__title">ORQPEG<span class="dot">.</span></h1>
-        <p class="masthead__lede">
-          Orquestração local de desenvolvimento com Claude Code, Codex CLI, testes,
-          Git, pull requests, CI e consenso operacional de merge.
-        </p>
-      </div>
-      <div class="actions">
-        <button type="button" class="btn btn--primary" id="btn-new-project">
-          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#plus"></use></svg>Cadastrar projeto
-        </button>
-        <button type="button" class="btn" id="btn-diagnostics">
-          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#diagnostics"></use></svg>Diagnóstico
-        </button>
-        <button type="button" class="btn" id="btn-refresh">
-          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#refresh"></use></svg>Atualizar
-        </button>
-      </div>
-      <p class="masthead__meta" id="home-generated">Carregando dados do servidor…</p>
-    </section>
-
-    <section class="section" aria-labelledby="h-status">
-      <div class="section-head">
-        <h2 id="h-status">Status geral</h2>
-        <p class="section-note">Contagens da instalação local no momento da última leitura.</p>
-      </div>
-      <div class="grid grid--metrics" id="home-metrics" aria-live="polite">
-        <p class="empty">Sem dados</p>
-      </div>
-    </section>
-
-    <section class="section" aria-labelledby="h-detect">
-      <div class="section-head">
-        <h2 id="h-detect">Detecção do ambiente</h2>
-        <p class="section-note">
-          Executáveis locais exigidos pelo fluxo. O OrqPEG só fala com estes binários — nunca com API de IA.
-        </p>
-      </div>
-      <div class="grid grid--cards" id="home-tools" aria-live="polite">
-        <p class="empty">Sem dados</p>
-      </div>
-    </section>
-
-    <section class="section" aria-labelledby="h-apiguard">
-      <div class="section-head">
-        <h2 id="h-apiguard">Guarda de API</h2>
-        <p class="section-note">
-          Variáveis inspecionadas por nome antes de cada processo filho. O valor nunca é lido, gravado ou exibido.
-        </p>
-      </div>
-      <div id="home-apiguard" aria-live="polite">
-        <p class="empty">Sem dados</p>
-      </div>
-    </section>
-
-    <section class="card" id="card-diagnostics" aria-labelledby="h-diagnostics" hidden>
-      <div class="card-head">
-        <h2 id="h-diagnostics">Diagnóstico do sistema</h2>
-        <span id="diagnostics-overall"></span>
-      </div>
-      <p class="faint" id="diagnostics-summary">Sem dados</p>
-      <div class="table-wrap" id="diagnostics-table-wrap">
-        <table class="data">
-          <thead>
-            <tr>
-              <th scope="col">Status</th>
-              <th scope="col">Categoria</th>
-              <th scope="col">Item</th>
-              <th scope="col">Detalhe</th>
-              <th scope="col">Correção sugerida</th>
-            </tr>
-          </thead>
-          <tbody id="diagnostics-body">
-            <tr><td class="empty" colspan="5">Sem dados</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="section" aria-labelledby="h-projects">
-      <div class="section-head">
-        <h2 id="h-projects">Projetos</h2>
-        <p class="legend">
-          <span class="chip chip--approved">Aprovado / mesclado</span>
-          <span class="chip chip--running">Executando</span>
-          <span class="chip chip--waiting">Aguardando</span>
-          <span class="chip chip--failed">Falha</span>
-          <span class="chip chip--pending">Pendente</span>
-          <span class="chip chip--audit">Auditoria</span>
-        </p>
-        <p class="section-note">
-          Um projeto por linha, com o estado da execução mais recente. O código de cada projeto permanece onde já está.
-        </p>
-      </div>
-      <div class="table-wrap">
-        <table class="data">
-          <thead>
-            <tr>
-              <th scope="col">Projeto</th>
-              <th scope="col">Caminho local</th>
-              <th scope="col">GitHub</th>
-              <th scope="col">Branch base</th>
-              <th scope="col">Worktree</th>
-              <th scope="col" title="Total / aprovados / pendentes">Prompts (T/A/P)</th>
-              <th scope="col">Execução</th>
-              <th scope="col">PR</th>
-              <th scope="col">CI</th>
-              <th scope="col">Consenso</th>
-              <th scope="col">Merge</th>
-              <th scope="col">Erro</th>
-            </tr>
-          </thead>
-          <tbody id="projects-body" aria-live="polite">
-            <tr><td class="empty" colspan="12">Sem dados</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <div class="grid grid--2">
-      <section class="card" aria-labelledby="h-activity">
-        <h2 id="h-activity">Últimas atividades</h2>
-        <ol class="activity" id="recent-activity" aria-live="polite">
-          <li class="empty">Sem dados</li>
-        </ol>
-      </section>
-
-      <section class="card" aria-labelledby="h-merges">
-        <h2 id="h-merges">Merges recentes</h2>
-        <div class="table-wrap">
-          <table class="data">
-            <thead>
-              <tr>
-                <th scope="col">Projeto</th>
-                <th scope="col">Execução</th>
-                <th scope="col">PR</th>
-                <th scope="col">Merge SHA</th>
-                <th scope="col">Quando</th>
-              </tr>
-            </thead>
-            <tbody id="merges-body">
-              <tr><td class="empty" colspan="5">Sem dados</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+    <div class="rail-foot">
+      <button type="button" class="rail-item rail-item--notify" id="rail-notify"
+              aria-describedby="rail-notify-count">
+        <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#alert"></use></svg>
+        <span class="rail-label">Alertas</span>
+        <span class="rail-badge" id="rail-notify-count" hidden></span>
+      </button>
+      <p class="rail-avatar" id="rail-avatar" aria-label="Sessão local">··</p>
     </div>
+  </nav>
+
+  <!-- ==================================================================
+       ProjectSidebar — Figma 2:29 … 2:87
+       ================================================================== -->
+  <aside class="sidebar" aria-labelledby="h-sidebar">
+    <h2 class="sr-only" id="h-sidebar">Projetos e execuções</h2>
+
+    <!-- StatGrid — Figma 2:30 … 2:45 -->
+    <ul class="stat-grid" role="list" id="stat-grid" aria-busy="true">
+      <li class="stat" data-stat="projects">
+        <span class="stat-dot stat-dot--lime" aria-hidden="true"></span>
+        <span class="stat-label">Projetos</span>
+        <span class="stat-value" data-field="value">—</span>
+      </li>
+      <li class="stat" data-stat="agents">
+        <span class="stat-dot stat-dot--coral" aria-hidden="true"></span>
+        <span class="stat-label">Agentes</span>
+        <span class="stat-value" data-field="value">—</span>
+      </li>
+      <li class="stat" data-stat="active">
+        <span class="stat-dot stat-dot--cyan" aria-hidden="true"></span>
+        <span class="stat-label">Em curso</span>
+        <span class="stat-value" data-field="value">—</span>
+      </li>
+      <li class="stat" data-stat="pending">
+        <span class="stat-dot stat-dot--lavender" aria-hidden="true"></span>
+        <span class="stat-label">Aprovações</span>
+        <span class="stat-value" data-field="value">—</span>
+      </li>
+    </ul>
+
+    <div class="sidebar-section-head">
+      <h3 class="section-title">Execuções</h3>
+      <span class="sidebar-tools">
+        <button type="button" class="chevron" id="sidebar-new-project" aria-label="Cadastrar projeto">
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#plus"></use></svg>
+        </button>
+        <button type="button" class="chevron" id="sidebar-refresh" aria-label="Recarregar projetos">
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#refresh"></use></svg>
+        </button>
+      </span>
+    </div>
+
+    <!-- ProjectList — Figma 2:48 … 2:87 -->
+    <div class="project-list-wrap">
+      <ul class="project-list" role="list" id="project-list" aria-busy="true"></ul>
+
+      <p class="state-note" id="project-list-empty" hidden>
+        Nenhum projeto cadastrado.
+        <button type="button" class="link-button" id="empty-new-project">
+          Cadastre o primeiro projeto
+        </button>
+        para começar.
+      </p>
+      <p class="state-note state-note--error" id="project-list-error" hidden></p>
+    </div>
+  </aside>
+
+  <!-- ==================================================================
+       Workspace — Figma 2:88 … 2:163
+       ================================================================== -->
+  <main class="workspace" id="workspace" tabindex="-1">
+
+    <!-- ProjectHeader — Figma 2:88 … 2:100 -->
+    <header class="project-header">
+      <p class="project-monogram" id="project-monogram" aria-hidden="true">··</p>
+
+      <div class="project-identity">
+        <h2 class="project-title" id="project-title">Selecione um projeto</h2>
+        <p class="project-meta" id="project-meta">—</p>
+        <p class="project-path" id="project-path"></p>
+      </div>
+
+      <div class="project-badges">
+        <span class="pill pill--env" id="pill-env" hidden></span>
+        <span class="pill pill--ready" id="pill-ready" hidden></span>
+      </div>
+
+      <div class="owner">
+        <span class="owner-avatar" id="owner-avatar" aria-hidden="true">··</span>
+        <span class="owner-text">
+          <span class="owner-label">Repositório</span>
+          <span class="owner-name" id="owner-name">—</span>
+        </span>
+      </div>
+    </header>
+
+    <!-- Ações + RunSelector + WorkspaceTabs — Figma 2:101 … 2:118 -->
+    <div class="workspace-bar">
+      <div class="header-actions" role="group" aria-label="Ações da execução">
+        <button type="button" class="header-action" data-action="start" title="Iniciar execução" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#play"></use></svg>
+          <span class="sr-only">Iniciar execução</span>
+        </button>
+        <button type="button" class="header-action" data-action="pause" title="Pausar execução" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#pause"></use></svg>
+          <span class="sr-only">Pausar execução</span>
+        </button>
+        <button type="button" class="header-action" data-action="resume" title="Retomar execução" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#resume"></use></svg>
+          <span class="sr-only">Retomar execução</span>
+        </button>
+        <button type="button" class="header-action" data-action="cancel" title="Cancelar execução" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#cancel"></use></svg>
+          <span class="sr-only">Cancelar execução</span>
+        </button>
+        <button type="button" class="header-action" data-action="open" title="Abrir repositório" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#folder"></use></svg>
+          <span class="sr-only">Abrir repositório</span>
+        </button>
+      </div>
+
+      <p class="run-selector-wrap">
+        <label class="sr-only" for="run-selector">Execução</label>
+        <select class="run-selector" id="run-selector" disabled>
+          <option value="">Sem execuções</option>
+        </select>
+      </p>
+
+      <div class="tabs" role="tablist" aria-label="Seções do workspace">
+        <button type="button" class="tab" role="tab" id="tab-resumo"
+                aria-selected="true" aria-controls="panel-resumo" data-view="resumo">Resumo</button>
+        <button type="button" class="tab" role="tab" id="tab-agentes" tabindex="-1"
+                aria-selected="false" aria-controls="panel-agentes" data-view="agentes">Agentes</button>
+        <button type="button" class="tab" role="tab" id="tab-prompts" tabindex="-1"
+                aria-selected="false" aria-controls="panel-prompts" data-view="prompts">Prompts</button>
+        <button type="button" class="tab" role="tab" id="tab-artefatos" tabindex="-1"
+                aria-selected="false" aria-controls="panel-artefatos" data-view="artefatos">Artefatos</button>
+        <button type="button" class="tab" role="tab" id="tab-historico" tabindex="-1"
+                aria-selected="false" aria-controls="panel-historico" data-view="historico">Histórico</button>
+        <button type="button" class="tab" role="tab" id="tab-sistema" tabindex="-1"
+                aria-selected="false" aria-controls="panel-sistema" data-view="sistema">Sistema</button>
+      </div>
+    </div>
+
+    <hr class="workspace-divider">
+
+    <!-- ExecutionTimeline — Figma 2:119 … 2:145 -->
+    <section class="timeline-section" id="panel-resumo" role="tabpanel"
+             aria-labelledby="tab-resumo" tabindex="0">
+      <h3 class="sr-only">Linha do tempo da execução</h3>
+
+      <p class="run-status" id="run-status" role="status" data-kind="idle" hidden></p>
+
+      <ol class="timeline" id="timeline" role="list" aria-busy="true"></ol>
+
+      <p class="state-note" id="timeline-empty" hidden>
+        Nenhum evento registrado nesta execução.
+      </p>
+      <p class="state-note state-note--error" id="timeline-error" hidden></p>
+    </section>
+
+    <!-- AgentConsole — Figma 2:146 … 2:163 -->
+    <section class="console" aria-labelledby="h-console">
+      <div class="console-actions" role="group" aria-label="Atalhos do console">
+        <button type="button" class="console-action" data-console="logs" title="Registros" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#logs"></use></svg>
+          <span class="sr-only">Registros</span>
+        </button>
+        <button type="button" class="console-action" data-console="report" title="Relatório" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#report"></use></svg>
+          <span class="sr-only">Relatório</span>
+        </button>
+        <button type="button" class="console-action" data-console="audit" title="Auditoria" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#audit"></use></svg>
+          <span class="sr-only">Auditoria</span>
+        </button>
+        <button type="button" class="console-action" data-console="pr" title="Pull request" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#pr"></use></svg>
+          <span class="sr-only">Pull request</span>
+        </button>
+        <button type="button" class="console-action" data-console="worktree" title="Worktree" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#worktree"></use></svg>
+          <span class="sr-only">Worktree</span>
+        </button>
+        <button type="button" class="console-action" data-console="diagnostics" title="Diagnóstico" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#diagnostics"></use></svg>
+          <span class="sr-only">Diagnóstico</span>
+        </button>
+      </div>
+
+      <div class="console-head">
+        <h3 class="console-title" id="h-console">Agente Orquestrador</h3>
+        <span class="console-dot" id="console-dot" aria-hidden="true"></span>
+        <span class="console-status" id="console-status">desconectado</span>
+      </div>
+
+      <div class="console-log" id="console-log" role="log" aria-live="polite"
+           aria-relevant="additions text" aria-label="Diálogo do agente"></div>
+
+      <form class="console-form" id="console-form">
+        <label class="sr-only" for="console-input">Instrução ao agente</label>
+        <input class="console-input" id="console-input" type="text" autocomplete="off"
+               placeholder="Selecione uma execução…" disabled
+               aria-describedby="console-governance">
+        <button type="submit" class="console-send" id="console-send" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#play"></use></svg>
+          <span class="sr-only">Enviar instrução</span>
+        </button>
+      </form>
+      <p class="console-governance" id="console-governance">
+        Campo bloqueado: nenhuma execução selecionada.
+      </p>
+    </section>
+
+    <!-- Painéis alternativos das abas -->
+    <section class="tab-panel" id="panel-agentes" role="tabpanel"
+             aria-labelledby="tab-agentes" tabindex="0" hidden>
+      <h3 class="panel-title">Agentes detectados</h3>
+      <ul class="agent-list" role="list" id="agent-list"></ul>
+    </section>
+
+    <section class="tab-panel" id="panel-prompts" role="tabpanel"
+             aria-labelledby="tab-prompts" tabindex="0" hidden>
+      <h3 class="panel-title">Prompts da execução</h3>
+      <ol class="prompt-list" role="list" id="prompt-list"></ol>
+      <p class="state-note" id="prompt-list-empty" hidden>Nenhum prompt nesta execução.</p>
+    </section>
+
+    <section class="tab-panel" id="panel-artefatos" role="tabpanel"
+             aria-labelledby="tab-artefatos" tabindex="0" hidden>
+      <h3 class="panel-title">Artefatos e integração</h3>
+      <dl class="artifact-list" id="artifact-list"></dl>
+      <p class="state-note" id="artifact-list-empty" hidden>Nenhum artefato produzido ainda.</p>
+    </section>
+
+    <section class="tab-panel" id="panel-historico" role="tabpanel"
+             aria-labelledby="tab-historico" tabindex="0" hidden>
+      <h3 class="panel-title">Execuções anteriores</h3>
+      <ol class="history-list" role="list" id="history-list"></ol>
+      <p class="state-note" id="history-list-empty" hidden>Nenhuma execução anterior.</p>
+    </section>
+
+    <!-- Sistema: o que não pertence a um projeto só. Existe porque o dashboard
+         virou a home e precisa cobrir o que a home anterior cobria. -->
+    <section class="tab-panel" id="panel-sistema" role="tabpanel"
+             aria-labelledby="tab-sistema" tabindex="0" hidden>
+      <h3 class="panel-title">Estado do sistema</h3>
+      <dl class="artifact-list" id="system-status"></dl>
+
+      <h3 class="panel-title panel-title--spaced">Guarda de API</h3>
+      <p class="state-note" id="api-guard-note"></p>
+      <ul class="agent-list" role="list" id="api-guard-list"></ul>
+
+      <h3 class="panel-title panel-title--spaced">Merges recentes</h3>
+      <ol class="history-list" role="list" id="merge-list"></ol>
+      <p class="state-note" id="merge-list-empty" hidden>Nenhum merge registrado.</p>
+
+      <h3 class="panel-title panel-title--spaced">Diagnóstico</h3>
+      <p>
+        <button type="button" class="btn btn--reject" id="btn-run-diagnostics">
+          Executar diagnóstico
+        </button>
+      </p>
+      <ul class="agent-list" role="list" id="diagnostics-list"></ul>
+    </section>
   </main>
 
-  <footer class="footer">
-    <span>OrqPEG — orquestração local entre Claude Code e Codex CLI. Nenhuma chamada a API de IA parte deste painel.</span>
-    <span>Servidor restrito a 127.0.0.1.</span>
-  </footer>
+  <!-- ==================================================================
+       ContextPanel — Figma 2:164 … 2:207
+       ================================================================== -->
+  <aside class="context" aria-labelledby="h-context">
+    <h2 class="sr-only" id="h-context">Etapa atual e aprovação</h2>
 
-  <dialog id="dlg-new-project" aria-labelledby="h-new-project">
-    <form id="form-new-project" method="dialog">
-      <div class="dialog-head">
-        <h2 id="h-new-project">Cadastrar projeto</h2>
+    <!-- CurrentStageCard — Figma 2:165 … 2:182 -->
+    <section class="stage-card" id="stage-card" aria-labelledby="h-stage">
+      <p class="card-eyebrow">Etapa atual</p>
+      <h3 class="stage-title" id="h-stage">Sem execução ativa</h3>
+
+      <p class="stage-pills">
+        <span class="pill pill--stage" id="stage-state">—</span>
+        <span class="pill pill--progress" id="stage-progress-pill">—</span>
+      </p>
+
+      <p class="stage-progress-label">Progresso da execução</p>
+      <p class="stage-progress-value" id="stage-progress-value">—</p>
+      <div class="progress-track" role="progressbar" id="stage-progress-bar"
+           aria-valuemin="0" aria-valuemax="100" aria-labelledby="h-stage">
+        <span class="progress-fill" id="stage-progress-fill"></span>
       </div>
-      <div class="dialog-body">
-        <p class="faint">
-          O cadastro apenas registra o projeto no OrqPEG. Nenhum arquivo do repositório é criado, movido ou alterado.
-        </p>
-        <div class="warn-box" id="new-project-error-box" hidden>
-          <span id="new-project-error"></span>
-        </div>
-        <div class="grid grid--2">
-          <p class="field">
-            <label for="np-id">Identificador (slug)</label>
-            <input type="text" id="np-id" name="id" required autocomplete="off" spellcheck="false" pattern="[A-Za-z0-9._-]+">
-            <span class="hint">Letras, números, ponto, hífen e sublinhado.</span>
-          </p>
-          <p class="field">
-            <label for="np-name">Nome</label>
-            <input type="text" id="np-name" name="name" required autocomplete="off">
-          </p>
-        </div>
-        <p class="field">
-          <label for="np-repository-path">Caminho do repositório local</label>
-          <input type="text" id="np-repository-path" name="repositoryPath" required autocomplete="off" spellcheck="false">
-          <span class="hint">Caminho absoluto, incluindo espaços e acentos, por exemplo E:\Meus Projetos\Ação.</span>
-        </p>
-        <p class="field">
-          <label for="np-github">Repositório no GitHub</label>
-          <input type="text" id="np-github" name="githubRepository" required autocomplete="off" spellcheck="false" placeholder="owner/repo">
-        </p>
-        <div class="grid grid--3">
-          <p class="field">
-            <label for="np-remote">Remoto</label>
-            <input type="text" id="np-remote" name="remote" autocomplete="off" spellcheck="false">
-            <span class="hint">Vazio usa o padrão do OrqPEG.</span>
-          </p>
-          <p class="field">
-            <label for="np-base-branch">Branch base</label>
-            <input type="text" id="np-base-branch" name="baseBranch" autocomplete="off" spellcheck="false">
-            <span class="hint">Vazio usa o padrão do OrqPEG.</span>
-          </p>
-          <p class="field">
-            <label for="np-editor">Editor</label>
-            <input type="text" id="np-editor" name="editor" autocomplete="off" spellcheck="false">
-            <span class="hint">Comando usado por "Abrir editor".</span>
-          </p>
-        </div>
-      </div>
-      <div class="dialog-foot">
-        <button type="button" class="btn" id="btn-new-project-cancel">Cancelar</button>
-        <button type="submit" class="btn btn--primary" id="btn-new-project-submit">
-          <svg aria-hidden="true" focusable="false"><use href="assets/icons.svg#plus"></use></svg>Cadastrar
+
+      <!-- GateChecklist — Figma 2:174 … 2:182 -->
+      <h4 class="checklist-title">Gates de mesclagem</h4>
+      <ul class="checklist" role="list" id="gate-checklist"></ul>
+      <p class="state-note state-note--onaccent" id="gate-checklist-empty" hidden>
+        Gates ainda não avaliados nesta execução.
+      </p>
+    </section>
+
+    <!-- ApprovalCard — Figma 2:183 … 2:207 -->
+    <section class="approval" id="approval-card" aria-labelledby="h-approval">
+      <h3 class="approval-title" id="h-approval">Nenhuma decisão pendente</h3>
+      <p class="approval-subtitle" id="approval-subtitle">
+        A execução não está aguardando intervenção humana.
+      </p>
+
+      <ul class="file-rows" role="list" id="approval-files"></ul>
+
+      <p class="decision-label">Decisão do operador</p>
+      <ul class="approval-checks" role="list" id="approval-checks"></ul>
+
+      <div class="approval-buttons">
+        <button type="button" class="btn btn--reject" id="btn-reject" disabled>
+          Solicitar ajuste
+        </button>
+        <button type="button" class="btn btn--approve" id="btn-approve" disabled>
+          Autorizar etapa
         </button>
       </div>
-    </form>
-  </dialog>
+    </section>
+  </aside>
+</div>
 
-  <script src="assets/event-stream.js"></script>
-<script src="assets/app.js"></script>
+<!-- Indicador de transporte — canto inferior do shell -->
+<div class="transport" id="transport" data-status="down" role="status" aria-live="polite">
+  <span class="transport-dot" aria-hidden="true"></span>
+  <span class="transport-text" id="transport-text">Sem conexão</span>
+</div>
+
+<!-- Anúncios não visuais para leitores de tela -->
+<p class="sr-only" id="live-region" role="status" aria-live="polite"></p>
+<p class="sr-only" id="alert-region" role="alert"></p>
+
+<!-- Diálogo de confirmação para ações sensíveis (governança §8) -->
+<div class="dialog-backdrop" id="confirm-backdrop" hidden></div>
+<div class="dialog" id="confirm-dialog" role="dialog" aria-modal="true"
+     aria-labelledby="confirm-title" aria-describedby="confirm-body" hidden>
+  <h2 class="dialog-title" id="confirm-title">Confirmar ação</h2>
+  <p class="dialog-body" id="confirm-body"></p>
+  <label class="dialog-field" for="confirm-reason">
+    Justificativa (registrada na execução)
+    <input type="text" id="confirm-reason" autocomplete="off">
+  </label>
+  <p class="dialog-error" id="confirm-error" hidden></p>
+  <div class="dialog-foot">
+    <button type="button" class="btn btn--ghost" id="confirm-cancel">Cancelar</button>
+    <button type="button" class="btn btn--approve" id="confirm-ok">Confirmar</button>
+  </div>
+</div>
+
+<!-- Cadastro de projeto. Portado da home anterior: sem ele, a página inicial
+     perderia a única forma de registrar um projeto no OrqPEG. -->
+<div class="dialog-backdrop" id="project-backdrop" hidden></div>
+<form class="dialog dialog--wide" id="project-dialog" role="dialog" aria-modal="true"
+      aria-labelledby="project-dialog-title" hidden>
+  <h2 class="dialog-title" id="project-dialog-title">Cadastrar projeto</h2>
+  <p class="dialog-body">
+    O cadastro apenas registra o projeto no OrqPEG. Nenhum arquivo do repositório
+    é criado, movido ou alterado.
+  </p>
+  <p class="dialog-error" id="project-error" hidden></p>
+
+  <div class="dialog-grid">
+    <label class="dialog-field" for="np-id">
+      Identificador (slug)
+      <input type="text" id="np-id" required autocomplete="off" spellcheck="false"
+             pattern="[A-Za-z0-9._-]+" aria-describedby="np-id-hint">
+      <span class="dialog-hint" id="np-id-hint">Letras, números, ponto, hífen e sublinhado.</span>
+    </label>
+    <label class="dialog-field" for="np-name">
+      Nome
+      <input type="text" id="np-name" required autocomplete="off">
+    </label>
+  </div>
+
+  <label class="dialog-field" for="np-repository-path">
+    Caminho do repositório local
+    <input type="text" id="np-repository-path" required autocomplete="off" spellcheck="false"
+           aria-describedby="np-path-hint">
+    <span class="dialog-hint" id="np-path-hint">Caminho absoluto, incluindo espaços e acentos.</span>
+  </label>
+
+  <label class="dialog-field" for="np-github">
+    Repositório no GitHub
+    <input type="text" id="np-github" required autocomplete="off" spellcheck="false"
+           placeholder="owner/repo">
+  </label>
+
+  <div class="dialog-grid dialog-grid--3">
+    <label class="dialog-field" for="np-remote">
+      Remoto
+      <input type="text" id="np-remote" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="dialog-field" for="np-base-branch">
+      Branch base
+      <input type="text" id="np-base-branch" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="dialog-field" for="np-editor">
+      Editor
+      <input type="text" id="np-editor" autocomplete="off" spellcheck="false">
+    </label>
+  </div>
+  <p class="dialog-hint">Campos vazios usam o padrão do OrqPEG.</p>
+
+  <div class="dialog-foot">
+    <button type="button" class="btn btn--ghost" id="project-cancel">Cancelar</button>
+    <button type="submit" class="btn btn--approve" id="project-submit">Cadastrar</button>
+  </div>
+</form>
+
+<script src="assets/event-stream.js"></script>
+<script src="assets/dashboard.js"></script>
 </body>
 </html>

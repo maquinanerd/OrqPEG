@@ -419,6 +419,23 @@ body {
 .chevron:hover { color: var(--fig-paper); }
 .chevron .icon { width: var(--fig-size-lg); height: var(--fig-size-lg); }
 
+.sidebar-tools {
+  display: flex;
+  gap: var(--fig-space-1);
+}
+
+/* Botão que age como link dentro de texto corrido. Precisa ser <button>: o
+   destino é um diálogo, não uma URL, e um <a href> mentiria sobre isso. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .project-list-wrap {
   flex: 1;
   min-height: 0;
@@ -1038,6 +1055,10 @@ body {
   font-weight: var(--fig-weight-semibold);
 }
 
+.panel-title--spaced {
+  margin-top: var(--fig-space-12);
+}
+
 .agent-list,
 .prompt-list,
 .history-list {
@@ -1494,6 +1515,37 @@ body {
   margin: var(--fig-space-4) 0 0;
   font-size: var(--fig-size-sm);
   color: var(--fig-coral);
+}
+
+/* Diálogo de cadastro: sete campos não cabem na largura do de confirmação. */
+.dialog--wide {
+  width: min(680px, calc(100vw - var(--fig-space-12)));
+  max-height: calc(100vh - var(--fig-space-12));
+  overflow-y: auto;
+}
+
+.dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--fig-space-4);
+}
+
+.dialog-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dialog-hint {
+  margin: var(--fig-space-1) 0 0;
+  font-size: var(--fig-size-xs);
+  font-weight: var(--fig-weight-regular);
+  color: var(--fig-text-muted);
+}
+
+@media (max-width: 599px) {
+  .dialog-grid,
+  .dialog-grid--3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .dialog-foot {

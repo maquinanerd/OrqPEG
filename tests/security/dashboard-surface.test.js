@@ -103,7 +103,7 @@ test('painel sobe em porta efêmera', async () => {
 
 test('os arquivos do dashboard são servidos com o tipo correto', async () => {
   const expected = [
-    ['/dashboard.html', /text\/html/],
+    ['/index.html', /text\/html/],
     ['/assets/tokens.css', /text\/css/],
     ['/assets/dashboard.css', /text\/css/],
     ['/assets/dashboard.js', /text\/javascript/],
@@ -117,10 +117,53 @@ test('os arquivos do dashboard são servidos com o tipo correto', async () => {
   }
 });
 
-test('as páginas anteriores continuam servidas: o dashboard não as substituiu', async () => {
-  for (const pathname of ['/index.html', '/project.html', '/run.html', '/prompt.html', '/settings.html']) {
+test('o painel clássico continua servido: virou rota própria, não sumiu', async () => {
+  for (const pathname of ['/painel-classico.html', '/project.html', '/run.html', '/prompt.html', '/settings.html']) {
     const res = await request(pathname);
     assert.equal(res.status, 200, `${pathname} devolveu ${res.status}`);
+  }
+});
+
+test('a raiz do painel serve o dashboard, não a home anterior', async () => {
+  const raiz = await request('/');
+  assert.equal(raiz.status, 200);
+
+  // Marcas estruturais do Master Canvas, ausentes na home anterior.
+  assert.match(raiz.body, /class="rail"/, 'a raiz precisa servir o shell do dashboard');
+  assert.match(raiz.body, /id="stat-grid"/);
+  assert.match(raiz.body, /data-page="dashboard"/);
+
+  // E precisa ser byte a byte o mesmo que /index.html.
+  const index = await request('/index.html');
+  assert.equal(raiz.body, index.body);
+});
+
+test('a home nova não perdeu o cadastro de projeto da home anterior', () => {
+  const html = read('index.html');
+
+  // Sem estes campos, a página inicial deixaria de ter como registrar projeto,
+  // que era a ação primária da home substituída.
+  for (const id of [
+    'np-id',
+    'np-name',
+    'np-repository-path',
+    'np-github',
+    'np-remote',
+    'np-base-branch',
+    'np-editor',
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`), `campo ausente no cadastro: ${id}`);
+  }
+  assert.match(html, /id="project-dialog"/);
+  assert.match(html, /aria-modal="true"/);
+});
+
+test('a home nova cobre o que era exclusivo da home anterior', () => {
+  const html = read('index.html');
+  // Guarda de API, merges recentes e diagnóstico não pertencem a um projeto só
+  // e viviam apenas na home antiga.
+  for (const id of ['api-guard-list', 'merge-list', 'btn-run-diagnostics', 'system-status']) {
+    assert.match(html, new RegExp(`id="${id}"`), `bloco ausente: ${id}`);
   }
 });
 
@@ -128,7 +171,7 @@ test('o dashboard não abre caminho novo para fora de public/', async () => {
   const attempts = [
     '/assets/../../config/global.json',
     '/assets/..%2f..%2fconfig%2fglobal.json',
-    '/dashboard.html/../../config/global.json',
+    '/index.html/../../config/global.json',
     '/../config/global.json',
   ];
 
@@ -140,7 +183,7 @@ test('o dashboard não abre caminho novo para fora de public/', async () => {
 });
 
 test('a resposta traz a CSP que a página promete respeitar', async () => {
-  const res = await request('/dashboard.html');
+  const res = await request('/index.html');
   const csp = res.headers['content-security-policy'];
   assert.match(csp, /default-src 'self'/);
   assert.match(csp, /script-src 'self'/);
@@ -149,7 +192,7 @@ test('a resposta traz a CSP que a página promete respeitar', async () => {
 });
 
 test('a página do dashboard não usa estilo nem script inline', () => {
-  const html = read('dashboard.html');
+  const html = read('index.html');
 
   assert.equal(/\sstyle\s*=\s*"/.test(html), false, 'atributo style inline é barrado pela CSP');
   assert.equal(/<style[\s>]/i.test(html), false, 'bloco <style> é barrado pela CSP');
@@ -167,7 +210,7 @@ test('a página do dashboard não usa estilo nem script inline', () => {
 
 test('nenhum recurso externo: o painel é offline por construção', () => {
   const files = [
-    ['dashboard.html', 'html'],
+    ['index.html', 'html'],
     ['assets/dashboard.css', 'css'],
     ['assets/tokens.css', 'css'],
     ['assets/dashboard.js', 'js'],
@@ -265,7 +308,7 @@ test('promptId hostil é recusado antes de qualquer acesso a disco', async () =>
     '$(whoami)',
     '`id`',
     'prompt && curl evil.example',
-    'prompt nulo',
+    'prompt\u0000nulo',
   ];
 
   for (const promptId of hostis) {
