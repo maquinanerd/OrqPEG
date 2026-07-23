@@ -89,9 +89,21 @@ let fx = null;
 let raizTemporaria = null;
 
 function montarFixture() {
-  /* `realpathSync` desfaz nomes curtos (C:\Users\PABLO~1) e links do /var:
-     `git worktree list` devolve o caminho real e a comparação é literal. */
-  raizTemporaria = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'orqpeg-wto-')));
+  /*
+   * O caminho precisa ser o MESMO que o Git devolve, senão a comparação por
+   * caminho falha e o teste acusa "não registrado" quando o worktree existe.
+   *
+   * `realpathSync` sozinho não basta no Windows: ele resolve links, mas NÃO
+   * expande nomes curtos 8.3. No runner do CI o tmpdir é
+   * `C:\Users\RUNNER~1\...`, enquanto `git worktree list --porcelain` devolve
+   * `C:\Users\runneradmin\...`. Só `realpathSync.native` expande a forma
+   * curta; onde ele não existir, o comportamento anterior continua servindo.
+   */
+  const bruto = fs.mkdtempSync(path.join(os.tmpdir(), 'orqpeg-wto-'));
+  raizTemporaria =
+    typeof fs.realpathSync.native === 'function'
+      ? fs.realpathSync.native(bruto)
+      : fs.realpathSync(bruto);
 
   const repo = path.join(raizTemporaria, 'repo');
   const raizAutorizada = path.join(raizTemporaria, 'worktrees');
