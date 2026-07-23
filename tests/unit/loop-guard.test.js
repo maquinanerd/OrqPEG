@@ -615,3 +615,37 @@ test('MATRIZ: todo cenário de parada termina com gatilho nomeado e ações', ()
     assert.equal(assertRunCanContinue(decision).canContinue, false);
   }
 });
+
+/**
+ * Todo gatilho precisa ter rótulo em português no painel.
+ *
+ * Sem esta trava, um gatilho novo degrada em silêncio: o painel cai no padrão
+ * e mostra "Motivo não catalogado" ou um traço, justamente para a parada mais
+ * recente — a que ninguém ainda sabe ler. A parada não fica anônima (o código
+ * do gatilho aparece), mas a única frase que a explica em português fica vazia.
+ *
+ * Seis gatilhos já estavam sem rótulo quando isto foi escrito. O teste existe
+ * para que o sétimo reprove em vez de passar.
+ */
+test('todo LoopGuardTrigger tem rótulo no painel', () => {
+  const raizRepo = path.resolve(__dirname, '..', '..');
+
+  const uniao = fs
+    .readFileSync(path.join(raizRepo, 'src', 'types.ts'), 'utf8')
+    .match(/export type LoopGuardTrigger =([\s\S]*?);\n/);
+  assert.ok(uniao, 'a união LoopGuardTrigger precisa ser localizável em src/types.ts');
+  const gatilhos = [...uniao[1].matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]);
+  assert.ok(gatilhos.length > 20, `esperava dezenas de gatilhos, achei ${gatilhos.length}`);
+
+  const mapa = fs
+    .readFileSync(path.join(raizRepo, 'public', 'assets', 'app.js'), 'utf8')
+    .match(/LOOP_TRIGGER_LABEL\s*=\s*\{([\s\S]*?)\n\s*\};/);
+  assert.ok(mapa, 'LOOP_TRIGGER_LABEL precisa ser localizável em public/assets/app.js');
+  const rotulados = new Set([...mapa[1].matchAll(/([A-Z_]{4,}):/g)].map((m) => m[1]));
+
+  assert.deepEqual(
+    gatilhos.filter((gatilho) => !rotulados.has(gatilho)),
+    [],
+    'gatilho sem rótulo aparece no painel como "Motivo não catalogado"',
+  );
+});

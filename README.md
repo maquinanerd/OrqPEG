@@ -685,7 +685,12 @@ O que acontece com isso:
    O texto não vai para o registro: ele é relido do catálogo e conferido contra
    o hash a cada uso, o que mantém o `RunRecord` enxuto e prova que o agente
    recebeu o mesmo conteúdo que foi congelado.
-3. O bloco renderizado entra na instrução do executor, do corretor e do revisor.
+3. O bloco renderizado entra na instrução de quem **produz ou julga** o código
+   da branch: o executor, os três corretores (laço de prompt, reparo de CI e
+   correção pós-auditoria) e o revisor. As duas auditorias finais de merge
+   ficam de fora de propósito — elas julgam em sessão limpa e independente, e
+   entregar a elas o mesmo documento que orientou quem escreveu o código
+   enfraqueceria a independência que torna o consenso uma evidência.
 
 Regras, todas verificadas:
 

@@ -171,8 +171,17 @@ function rejectsCrossOrigin(req: http.IncomingMessage, res: http.ServerResponse)
     return true;
   }
 
+  /* `Origin: null` é recusado, não dispensado.
+   *
+   * Origem opaca — iframe com `sandbox`, por exemplo — manda literalmente
+   * `null`, e o atacante é quem controla esse iframe. Dispensar o caso porque
+   * "não dá para atribuir a ninguém" inverte o raciocínio: não poder atribuir
+   * é justamente o motivo para recusar. Em navegador sem `Sec-Fetch-Site` a
+   * dispensa deixava passar as rotas POST sem corpo — `/pause`, `/resume`,
+   * `/cancel` e a de auditoria —, que a exigência de `Content-Type` não
+   * alcança porque não há corpo para tipar. */
   const origin = req.headers.origin;
-  if (typeof origin === 'string' && origin.length > 0 && origin !== 'null') {
+  if (typeof origin === 'string' && origin.length > 0) {
     if (origin !== `http://${req.headers.host ?? ''}`) {
       sendJson(res, 403, {
         error: 'Origem não permitida. O painel só aceita chamadas da própria página.',

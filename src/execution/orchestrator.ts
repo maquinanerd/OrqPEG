@@ -1350,6 +1350,16 @@ async function repairCi(
   const headShaBefore = run.checks?.headSha ?? '';
   const startedAt = nowIso();
 
+  /* O reparo de CI escreve código na mesma branch que segue para o merge, e
+     por isso é governado pelas mesmas Skills. A conferência vem antes de
+     abrir o diretório do ciclo: parar aqui não deixa artefato de um ciclo que
+     não aconteceu. */
+  const skillsForRepair = verifyRunSkills(run);
+  if (!skillsForRepair.ok) {
+    run = save(ctx, stopRunBySkillMutation(run, skillsForRepair.error.message));
+    return ok(run);
+  }
+
   const dirResult = createExclusiveDirSync(
     path.join(
       projectArtifactsDir(ctx.project.id),
@@ -1389,14 +1399,17 @@ async function repairCi(
     ],
   });
 
-  const instruction = buildCiRepairInstruction({
-    projectName: ctx.project.name,
-    cycle,
-    maxCycles: ctx.policy.ci.maxRepairCycles,
-    failedChecks,
-    checksSummary: describeChecks(run),
-    testCommands: ctx.policy.commands.tests,
-  });
+  const instruction = withSkills(
+    buildCiRepairInstruction({
+      projectName: ctx.project.name,
+      cycle,
+      maxCycles: ctx.policy.ci.maxRepairCycles,
+      failedChecks,
+      checksSummary: describeChecks(run),
+      testCommands: ctx.policy.commands.tests,
+    }),
+    skillsForRepair.value.claude,
+  );
   writeExclusiveSync(path.join(dir, 'claude-instruction.md'), instruction);
 
   const claude = await ctx.ports.agents.runClaude({
@@ -1944,14 +1957,25 @@ async function correctAfterAudit(
     transition(run, 'RUNNING_CLAUDE', `Correção pós-auditoria ${String(cycle)}.`),
   );
 
-  const instruction = buildMergeCorrectionInstruction({
-    projectName: ctx.project.name,
-    cycle,
-    maxCycles: ctx.policy.mergeAudit.maxCorrectionCycles,
-    requestedBy,
-    reasons,
-    testCommands: ctx.policy.commands.tests,
-  });
+  /* Mesma razão do reparo de CI: este corretor produz um commit novo sobre a
+     branch que vai para o merge, então as Skills da rodada valem aqui também. */
+  const skillsForCorrection = verifyRunSkills(run);
+  if (!skillsForCorrection.ok) {
+    run = save(ctx, stopRunBySkillMutation(run, skillsForCorrection.error.message));
+    return ok(run);
+  }
+
+  const instruction = withSkills(
+    buildMergeCorrectionInstruction({
+      projectName: ctx.project.name,
+      cycle,
+      maxCycles: ctx.policy.mergeAudit.maxCorrectionCycles,
+      requestedBy,
+      reasons,
+      testCommands: ctx.policy.commands.tests,
+    }),
+    skillsForCorrection.value.claude,
+  );
   writeExclusiveSync(path.join(dir, 'claude-instruction.md'), instruction);
 
   const claude = await ctx.ports.agents.runClaude({
@@ -2234,10 +2258,16 @@ function describeFrozenSkills(snapshot: SkillSnapshot | null): string {
 /**
  * Confere as Skills contra o congelado e DEVOLVE as que passaram.
  *
- * Chamada antes de CADA invocação de agente, e não só na retomada: editar uma
- * Skill entre uma tentativa e a seguinte muda as regras no meio da execução,
- * exatamente como editar um prompt — e a tentativa anterior já rodou sob as
- * regras antigas, o que nenhuma correção posterior desfaz.
+ * Chamada antes de cada invocação que PRODUZ ou JULGA o código da branch — o
+ * executor, os três corretores (laço de prompt, reparo de CI e pós-auditoria)
+ * e o revisor —, e não só na retomada: editar uma Skill entre uma tentativa e
+ * a seguinte muda as regras no meio da execução, exatamente como editar um
+ * prompt, e a tentativa anterior já rodou sob as regras antigas.
+ *
+ * As duas auditorias finais de merge ficam de fora de propósito. Elas julgam
+ * o resultado em sessão limpa e independente; injetar nelas o mesmo documento
+ * que orientou quem escreveu o código enfraqueceria justamente a independência
+ * que torna o consenso das duas uma evidência.
  *
  * Devolve o que verificou, em vez de só aprovar, porque quem renderiza precisa
  * usar ESTES objetos. Enquanto a conferência lia o catálogo e o render lia de
@@ -2270,6 +2300,33 @@ function withSkills(instruction: string, skills: readonly LoadedSkill[]): string
  * demais. Uma parada com tratamento próprio seria uma parada que o relatório
  * conta de um jeito diferente.
  */
+/**
+ * Parada por Skill alterada FORA do laço de prompt.
+ *
+ * O reparo de CI e a correção pós-auditoria não são escopados por prompt: não
+ * reabrem prompt aprovado nem consomem orçamento de tentativa. A parada aqui é
+ * da execução, e por isso não passa por `applyLoopGuardStop`, que faria a
+ * escrituração de um prompt que não está em jogo.
+ */
+function stopRunBySkillMutation(run: RunRecord, reason: string): RunRecord {
+  const decision: LoopGuardDecision = {
+    allowed: false,
+    severity: severityOf('SKILL_CHANGED_DURING_RUN'),
+    trigger: 'SKILL_CHANGED_DURING_RUN',
+    reason,
+    evidence: { frozenSkills: run.skills },
+    nextActions: ['OPEN_REPORT', 'START_NEW_RUN'],
+  };
+
+  /* O trabalho é preservado: branch, PR e worktree continuam intactos. */
+  return {
+    ...transition(run, 'LOOP_GUARD_TRIGGERED', `SKILL_CHANGED_DURING_RUN: ${reason}`, {
+      trigger: 'SKILL_CHANGED_DURING_RUN',
+    }),
+    lastLoopGuard: decision,
+  };
+}
+
 function stopBySkillMutation(
   ctx: Context,
   run: RunRecord,

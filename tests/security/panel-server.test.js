@@ -255,8 +255,13 @@ test('startPanelServer recusa host não-loopback', async () => {
   assert.equal(result.error.code, 'CONFIG_INVALID');
 });
 
-test('encerra o servidor', async () => {
+/* Encerramento é teardown, não teste.
+ *
+ * Isto era um `test()` terminando em `assert.ok(true)` — nada ali podia
+ * reprovar. É a mesma forma da asserção que, no teste de Skills, escondeu que
+ * nenhuma Skill chegava ao agente. Um passo de limpeza vestido de teste não
+ * mascara nada aqui, mas deixa o padrão de pé como se fosse aceitável. */
+test.after(async () => {
   if (server) await server.close();
   server = null;
-  assert.ok(true);
 });

@@ -581,7 +581,9 @@ test('rodada real: CI sempre vermelho para com gatilho nomeado, sem repetir para
  *
  * A execução precisa PARAR, com gatilho próprio, e preservar o trabalho.
  */
-test('Skill editada no meio da execução para a rodada com gatilho nomeado', async () => {
+test('Skill editada no meio da execução para a rodada com gatilho nomeado', async (t) => {
+  if (!gitDisponivel) return t.skip('git não disponível nesta máquina');
+
   const repo = repositorioDescartavel();
   const shaValidado = git(repo, ['rev-parse', 'HEAD']).trim();
   const skillDir = skillDocumental();
@@ -667,7 +669,9 @@ for (const [caso, patch] of [
   ['o status, que era a autorização para ativar', { status: 'draft' }],
   ['os agentes compatíveis, que autorizavam o uso', { compatibleAgents: ['codex'] }],
 ]) {
-  test(`manifesto alterado durante a execução para a rodada: ${caso}`, async () => {
+  test(`manifesto alterado durante a execução para a rodada: ${caso}`, async (t) => {
+    if (!gitDisponivel) return t.skip('git não disponível nesta máquina');
+
     const repo = repositorioDescartavel();
     const shaValidado = git(repo, ['rev-parse', 'HEAD']).trim();
     const skillDir = skillDocumental();

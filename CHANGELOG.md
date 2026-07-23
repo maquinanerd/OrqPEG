@@ -58,7 +58,16 @@ Fechamento do escopo do OrqPEG 1.0. Tudo aqui existe para uma finalidade só:
   quebrado.
 - O congelado vai para `RunRecord.skills` com id, versão e hash — não o texto.
   O conteúdo é relido do catálogo e conferido contra o hash antes de cada uso.
-- Bloco renderizado entra na instrução do executor, do corretor e do revisor.
+- Bloco renderizado entra na instrução de quem produz ou julga o código da
+  branch: executor, os três corretores (laço de prompt, reparo de CI e correção
+  pós-auditoria) e revisor. As duas auditorias finais de merge ficam de fora de
+  propósito — elas julgam em sessão limpa, e entregar a elas o documento que
+  orientou quem escreveu o código enfraqueceria a independência do consenso.
+- O congelamento cobre o `SKILL.md` **e** o manifesto (`manifestHash`): `name` é
+  renderizado no bloco entregue ao agente, e `status`/`compatibleAgents` são a
+  autorização que permitiu ativar a Skill. A conferência devolve as Skills que
+  verificou, e o render usa esses objetos — o catálogo é lido uma vez só, sem
+  janela entre conferir e usar.
 - Gatilho novo `SKILL_CHANGED_DURING_RUN`: editar uma Skill no meio da execução
   para a rodada. É **hard stop** declarado e **não admite override**, pela mesma
   razão de `PROMPT_CHANGED_DURING_RUN` — a tentativa anterior já rodou sob o
