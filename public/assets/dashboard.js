@@ -1,9 +1,12 @@
 /* ==========================================================================
-   OrqPEG — dashboard (frame Figma "OrqPEG / Master Canvas", node 2:2).
+   OrqPEG — console de orquestração.
 
-   Liga a composição do Figma aos dados reais do orquestrador. Nenhum valor
-   demonstrativo do desenho sobrevive aqui: 6, 27, 22, 3, 72%, "Run #ORQ-0042"
-   e os nomes de projeto eram referência de composição.
+   Liga a composição da tela aos dados reais do orquestrador. Nenhum valor
+   demonstrativo sobrevive aqui: tudo em tela vem da API do painel.
+
+   A linguagem visual está em assets/tokens.css e documentada em
+   docs/DESIGN-SYSTEM.md. Este arquivo não decide aparência — ele decide
+   quais classes e quais atributos de estado o markup recebe.
 
    Restrições respeitadas:
      - JavaScript de navegador puro, sem framework e sem dependência externa;
@@ -99,8 +102,16 @@
   }
 
   function postJson(url, payload) {
+    return sendJson('POST', url, payload);
+  }
+
+  function putJson(url, payload) {
+    return sendJson('PUT', url, payload);
+  }
+
+  function sendJson(method, url, payload) {
     return fetch(url, {
-      method: 'POST',
+      method: method,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify(payload || {}),
@@ -122,9 +133,9 @@
   /* ----------------------------------------------------------------------
      2. Domínio: RunState → estágio visual
 
-     As três pílulas do Figma (Discovery / Execution / Approved) são um recorte
-     de composição. Os 26 RunState reais do OrqPEG são agrupados aqui, mais
-     "blocked" e "idle", que o desenho não cobria mas o domínio exige.
+     Os 26 RunState reais do OrqPEG são agrupados em cinco estágios visuais:
+     discovery, execution, approved, blocked e idle. Cada estágio tem um par
+     sólido/suave em tokens.css — nenhum introduz cor nova.
      ---------------------------------------------------------------------- */
 
   var STAGE_BY_STATE = {
@@ -241,7 +252,7 @@
   };
 
   /* ----------------------------------------------------------------------
-     4. Renderização — StatGrid (Figma 2:30 … 2:45)
+     4. Renderização — StatGrid
      ---------------------------------------------------------------------- */
 
   function renderStats(home) {
@@ -275,7 +286,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     5. Renderização — ProjectList (Figma 2:48 … 2:87)
+     5. Renderização — ProjectList
      ---------------------------------------------------------------------- */
 
   function renderProjectList(home) {
@@ -333,7 +344,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     6. Renderização — ProjectHeader (Figma 2:88 … 2:100)
+     6. Renderização — ProjectHeader
      ---------------------------------------------------------------------- */
 
   function renderProjectHeader(project) {
@@ -382,7 +393,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     7. Renderização — RunSelector (Figma 2:111)
+     7. Renderização — RunSelector
      ---------------------------------------------------------------------- */
 
   function renderRunSelector() {
@@ -407,7 +418,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     8. Renderização — ExecutionTimeline (Figma 2:119 … 2:145)
+     8. Renderização — ExecutionTimeline
      ---------------------------------------------------------------------- */
 
   var STAGE_ICON = {
@@ -474,7 +485,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     9. Renderização — AgentConsole (Figma 2:146 … 2:163)
+     9. Renderização — AgentConsole
      ---------------------------------------------------------------------- */
 
   function renderConsole(run) {
@@ -564,7 +575,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     11. Renderização — CurrentStageCard + GateChecklist (Figma 2:165 … 2:182)
+     11. Renderização — CurrentStageCard + GateChecklist
      ---------------------------------------------------------------------- */
 
   function renderStageCard(run) {
@@ -607,7 +618,7 @@
     var fill = $('stage-progress-fill');
     /* Escrita via CSSOM, não atributo style em markup: a CSP permite e o
        markup segue sem estilo inline. */
-    fill.style.setProperty('--fig-progress', String(Math.max(0, Math.min(100, percent)) / 100));
+    fill.style.setProperty('--op-progress', String(Math.max(0, Math.min(100, percent)) / 100));
     if (ariaValue === null) {
       bar.removeAttribute('aria-valuenow');
       bar.setAttribute('aria-valuetext', 'indisponível');
@@ -657,7 +668,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     12. Renderização — ApprovalCard (Figma 2:183 … 2:207)
+     12. Renderização — ApprovalCard
      ---------------------------------------------------------------------- */
 
   function renderApproval(run) {
@@ -774,19 +785,48 @@
     });
   }
 
+  /**
+   * Fileira que leva a uma página.
+   *
+   * Prompt, execução anterior e merge têm página própria no painel. Antes
+   * eram texto morto: o operador via o identificador e não tinha como abrir o
+   * que ele nomeia. `<a>` de verdade, não <li> com onclick — assim funciona
+   * clique do meio, "abrir em nova aba" e navegação por teclado.
+   */
+  function linkRow(href, label, value) {
+    var item = document.createElement('li');
+    var link = document.createElement('a');
+    link.className = 'list-row';
+    link.href = href;
+    link.appendChild(el('span', 'list-row-label', label));
+    link.appendChild(el('span', 'list-row-value', value));
+    item.appendChild(link);
+    return item;
+  }
+
+  function promptHref(projectId, promptId) {
+    return (
+      'prompt.html?id=' + encodeURIComponent(projectId) + '&prompt=' + encodeURIComponent(promptId)
+    );
+  }
+
+  function runHref(projectId, runId) {
+    return 'run.html?id=' + encodeURIComponent(projectId) + '&run=' + encodeURIComponent(runId);
+  }
+
   function renderPrompts(run) {
     var list = $('prompt-list');
     clear(list);
     var prompts = run && Array.isArray(run.prompts) ? run.prompts : [];
     show($('prompt-list-empty'), prompts.length === 0);
     prompts.forEach(function (prompt) {
-      var item = document.createElement('li');
-      item.className = 'list-row';
-      item.appendChild(el('span', 'list-row-label', prompt.promptId));
-      item.appendChild(
-        el('span', 'list-row-value', prompt.status + ' • ' + prompt.attempts + ' tentativa(s)'),
+      list.appendChild(
+        linkRow(
+          promptHref(state.projectId, prompt.promptId),
+          prompt.promptId,
+          prompt.status + ' • ' + plural(prompt.attempts, 'tentativa', 'tentativas'),
+        ),
       );
-      list.appendChild(item);
     });
   }
 
@@ -820,13 +860,13 @@
     clear(list);
     show($('history-list-empty'), state.runs.length === 0);
     state.runs.forEach(function (run) {
-      var item = document.createElement('li');
-      item.className = 'list-row';
-      item.appendChild(el('span', 'list-row-label', run.runId));
-      item.appendChild(
-        el('span', 'list-row-value', labelOf(run.state) + ' • ' + fullTime(run.updatedAt)),
+      list.appendChild(
+        linkRow(
+          runHref(state.projectId, run.runId),
+          run.runId,
+          labelOf(run.state) + ' • ' + fullTime(run.updatedAt),
+        ),
       );
-      list.appendChild(item);
     });
   }
 
@@ -879,21 +919,15 @@
     clear(merges);
     show($('merge-list-empty'), home.recentMerges.length === 0);
     home.recentMerges.forEach(function (merge) {
-      var item = document.createElement('li');
-      item.className = 'list-row';
-      item.appendChild(
-        el('span', 'list-row-label', merge.projectId + ' · ' + merge.runId),
-      );
-      item.appendChild(
-        el(
-          'span',
-          'list-row-value',
+      merges.appendChild(
+        linkRow(
+          runHref(merge.projectId, merge.runId),
+          merge.projectId + ' · ' + merge.runId,
           (merge.prNumber ? 'PR #' + merge.prNumber + ' · ' : '') +
             (merge.mergeSha ? merge.mergeSha.slice(0, 10) : 'sem sha') +
             ' · ' + fullTime(merge.at),
         ),
       );
-      merges.appendChild(item);
     });
   }
 
@@ -942,16 +976,151 @@
   ];
 
   var projectDialogReturnFocus = null;
+  var projectDialogMode = 'create';
 
-  function openProjectDialog() {
+  /**
+   * Um diálogo, dois modos.
+   *
+   * Os campos de cadastrar e de editar são os mesmos sete; duplicar o
+   * formulário só garantiria que um dos dois ficasse para trás na próxima
+   * mudança. A diferença real é o identificador: ele nomeia o diretório de
+   * estado do projeto e por isso não muda depois de criado — no modo edição
+   * o campo é somente-leitura.
+   */
+  function openProjectDialog(mode, project) {
+    projectDialogMode = mode === 'edit' ? 'edit' : 'create';
     projectDialogReturnFocus = document.activeElement;
+
     PROJECT_FIELDS.forEach(function (field) {
-      $(field[0]).value = '';
+      var value = projectDialogMode === 'edit' && project ? project[field[1]] : '';
+      $(field[0]).value = value === null || value === undefined ? '' : String(value);
     });
+
+    var editing = projectDialogMode === 'edit';
+    $('np-id').readOnly = editing;
+    $('project-dialog-title').textContent = editing ? 'Editar projeto' : 'Cadastrar projeto';
+    $('project-dialog-body').textContent = editing
+      ? 'A edição altera apenas o cadastro no OrqPEG. Nenhum arquivo do repositório é criado, movido ou alterado, e o identificador não muda.'
+      : 'O cadastro apenas registra o projeto no OrqPEG. Nenhum arquivo do repositório é criado, movido ou alterado.';
+    $('project-submit').textContent = editing ? 'Salvar' : 'Cadastrar';
+
     show($('project-error'), false);
     show($('project-backdrop'), true);
     show($('project-dialog'), true);
-    $('np-id').focus();
+    (editing ? $('np-name') : $('np-id')).focus();
+  }
+
+  /** Carrega o cadastro completo antes de abrir a edição: a lista da home traz
+      resumo, não os sete campos. */
+  function editCurrentProject() {
+    if (!state.projectId) return;
+    var button = $('btn-edit-project');
+    button.disabled = true;
+    getJson('/api/projects/' + encodeURIComponent(state.projectId))
+      .then(function (payload) {
+        button.disabled = false;
+        openProjectDialog('edit', payload.project);
+      })
+      .catch(function (error) {
+        button.disabled = false;
+        announceAlert('Não foi possível carregar o projeto: ' + error.message);
+      });
+  }
+
+  /**
+   * Remoção do cadastro.
+   *
+   * Passa pelo mesmo fluxo governado das demais ações sensíveis: exige
+   * justificativa e confirmação explícita. O texto diz o que a rota realmente
+   * faz — remove o registro, não o repositório — porque a diferença entre as
+   * duas coisas é a única que importa para quem clica.
+   */
+  function removeCurrentProject() {
+    if (!state.projectId) return;
+    var projectId = state.projectId;
+
+    confirmAction(
+      'Remover o cadastro de "' + projectId + '"?',
+      'Apenas o registro no OrqPEG é removido. O repositório local, os commits e as branches não são tocados. O histórico de execuções deste projeto deixa de aparecer no painel.',
+      true,
+      function () {
+        return fetch('/api/projects/' + encodeURIComponent(projectId), {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        })
+          .then(function (response) {
+            return response.json().then(function (body) {
+              if (!response.ok) throw new Error(body && body.error ? body.error : 'Falha ' + response.status);
+              return body;
+            });
+          })
+          .then(function () {
+            /* O projeto removido não pode continuar selecionado: loadHome
+               escolhe o próximo sozinho quando o estado está limpo. */
+            state.projectId = null;
+            state.runId = null;
+            state.run = null;
+            announce('Cadastro removido: ' + projectId + '.');
+            return loadHome();
+          });
+      },
+    );
+  }
+
+  /** Ensaio: valida o cadastro e descreve o que uma execução faria. */
+  function runDryRun() {
+    if (!state.projectId) return;
+    var button = $('btn-dry-run');
+    button.disabled = true;
+    activateTab('prompts');
+    $('dry-run-note').textContent = 'Executando ensaio…';
+    show($('dry-run-plan'), false);
+
+    getJson('/api/projects/' + encodeURIComponent(state.projectId) + '/dry-run')
+      .then(function (payload) {
+        button.disabled = false;
+        renderDryRun(payload.plan);
+        announce('Ensaio concluído.');
+      })
+      .catch(function (error) {
+        button.disabled = false;
+        show($('dry-run-plan'), false);
+        $('dry-run-note').textContent = 'Ensaio recusado: ' + error.message;
+        announceAlert('Ensaio recusado: ' + error.message);
+      });
+  }
+
+  function renderDryRun(plan) {
+    var list = $('dry-run-plan');
+    clear(list);
+
+    var lista = function (values) {
+      return values && values.length ? values.join(' · ') : 'nenhum';
+    };
+
+    [
+      ['Prompts', plan.promptCount + ' — ' + lista(plan.prompts.map(function (p) { return p.id; }))],
+      ['Branch prevista', plan.branchName],
+      ['Diretório de trabalho', plan.workingDirectory],
+      ['Worktree', plan.worktreePath || 'não usado'],
+      ['Instalação', lista(plan.installCommands)],
+      ['Testes', lista(plan.testCommands)],
+      ['Política de git', lista(plan.gitPolicy)],
+      ['Política de PR', lista(plan.pullRequestPolicy)],
+      ['Política de merge', lista(plan.mergePolicy)],
+      ['Gates', lista(plan.gates.map(function (g) { return g.index + '. ' + g.title; }))],
+      ['Hash da política', plan.policyEffectiveHash || 'não materializada'],
+      ['Guarda de API', plan.apiGuard.blocked ? 'BLOQUEADA — ' + lista(plan.apiGuard.presentKeys) : 'livre'],
+      ['Avisos', lista(plan.warnings)],
+    ].forEach(function (row) {
+      list.appendChild(el('dt', null, row[0]));
+      list.appendChild(el('dd', null, row[1]));
+    });
+
+    $('dry-run-note').textContent =
+      'Ensaio de ' + plan.project.name + '. Nada foi executado: nenhum agente chamado, nenhuma branch criada, nenhum arquivo tocado.';
+    show(list, true);
   }
 
   function closeProjectDialog() {
@@ -973,21 +1142,32 @@
 
     var box = $('project-error');
     var submit = $('project-submit');
+    var editing = projectDialogMode === 'edit';
     submit.disabled = true;
 
-    postJson('/api/projects', payload)
-      .then(function (created) {
+    /* No modo edição o identificador não viaja: a rota o lê da URL, e mandá-lo
+       no corpo daria a impressão de que ele poderia mudar. */
+    var request = editing
+      ? (function () {
+          var id = payload.id;
+          delete payload.id;
+          return putJson('/api/projects/' + encodeURIComponent(id), payload);
+        })()
+      : postJson('/api/projects', payload);
+
+    request
+      .then(function (saved) {
         submit.disabled = false;
         closeProjectDialog();
-        state.projectId = (created && created.project && created.project.id) || payload.id;
-        announce('Projeto cadastrado: ' + payload.name + '.');
+        state.projectId = (saved && saved.project && saved.project.id) || state.projectId;
+        announce(editing ? 'Projeto atualizado.' : 'Projeto cadastrado: ' + payload.name + '.');
         return loadHome();
       })
       .catch(function (error) {
         submit.disabled = false;
         box.textContent = error.message;
         show(box, true);
-        announceAlert('Cadastro recusado: ' + error.message);
+        announceAlert((editing ? 'Edição' : 'Cadastro') + ' recusada: ' + error.message);
       });
   }
 
@@ -1012,6 +1192,30 @@
     document.querySelectorAll('.console-action').forEach(function (button) {
       button.disabled = !state.projectId;
     });
+
+    renderProjectTools(active);
+  }
+
+  /**
+   * Controles do cadastro do projeto.
+   *
+   * Editar e remover agem sobre o registro, não sobre a execução — por isso
+   * dependem só de haver projeto selecionado. Remover é bloqueado enquanto
+   * houver execução viva: apagar o cadastro sob uma execução em curso deixa
+   * a execução órfã, sem quem responda por ela.
+   */
+  function renderProjectTools(hasActiveRun) {
+    var has = Boolean(state.projectId);
+
+    $('btn-edit-project').disabled = !has;
+    $('btn-dry-run').disabled = !has;
+    $('btn-remove-project').disabled = !has || hasActiveRun;
+    $('btn-remove-project').title = hasActiveRun
+      ? 'Não é possível remover o cadastro com execução em curso.'
+      : 'Remover o cadastro do projeto';
+
+    var link = $('link-project');
+    link.href = has ? 'project.html?id=' + encodeURIComponent(state.projectId) : 'painel-classico.html';
   }
 
   /* ----------------------------------------------------------------------
@@ -1114,8 +1318,8 @@
   /* ----------------------------------------------------------------------
      15b. Estados explícitos da execução
 
-     O Figma desenhava um único estado feliz. O domínio tem oito que o operador
-     precisa distinguir, e cada um muda o que ele pode fazer.
+     O domínio tem oito estados que o operador precisa distinguir, e cada um
+     muda o que ele pode fazer.
      ---------------------------------------------------------------------- */
 
   var RUN_STATUS = {
@@ -1244,8 +1448,18 @@
       loadHome();
     });
 
-    $('sidebar-new-project').addEventListener('click', openProjectDialog);
-    $('empty-new-project').addEventListener('click', openProjectDialog);
+    /* Envolvido: passar o manipulador direto entregaria o objeto de evento
+       como primeiro argumento, que agora é o modo do diálogo. */
+    $('sidebar-new-project').addEventListener('click', function () {
+      openProjectDialog('create', null);
+    });
+    $('empty-new-project').addEventListener('click', function () {
+      openProjectDialog('create', null);
+    });
+
+    $('btn-edit-project').addEventListener('click', editCurrentProject);
+    $('btn-remove-project').addEventListener('click', removeCurrentProject);
+    $('btn-dry-run').addEventListener('click', runDryRun);
     $('project-cancel').addEventListener('click', closeProjectDialog);
     $('project-dialog').addEventListener('submit', submitProject);
 

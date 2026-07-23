@@ -3,31 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dashboard — OrqPEG</title>
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <title>Console — OrqPEG</title>
   <link rel="stylesheet" href="assets/tokens.css">
   <link rel="stylesheet" href="assets/dashboard.css">
 </head>
-<body class="mat" data-page="dashboard">
+<body class="app" data-page="dashboard">
 
 <a class="skip-link" href="#workspace">Ir para o conteúdo</a>
 
-<!-- Cabeçalho de apresentação — Figma 2:4 … 2:7 -->
-<div class="canvas-head">
-  <p class="brand-pill">ORQPEG DESIGN SYSTEM</p>
-  <h1 class="canvas-title">Operational orchestration interface</h1>
-  <p class="canvas-meta" id="canvas-meta">Painel local • carregando…</p>
-</div>
+<!-- ====================================================================
+     Topbar — identidade, contexto da sessão e estado do transporte.
+     ==================================================================== -->
+<header class="topbar">
+  <p class="wordmark">
+    <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#logo"></use></svg>
+    OrqPEG
+  </p>
+
+  <span class="topbar-sep" aria-hidden="true"></span>
+  <h1 class="topbar-title">Console de orquestração</h1>
+
+  <p class="topbar-meta" id="canvas-meta">Painel local • carregando…</p>
+
+  <a class="topbar-link" href="painel-classico.html">Painel clássico</a>
+
+  <div class="transport" id="transport" data-status="down" role="status" aria-live="polite">
+    <span class="transport-dot" aria-hidden="true"></span>
+    <span class="transport-text" id="transport-text">Sem conexão</span>
+  </div>
+</header>
 
 <div class="shell">
 
   <!-- ==================================================================
-       GlobalRail — Figma 2:9 … 2:28
+       Rail — navegação global
        ================================================================== -->
   <nav class="rail" aria-label="Navegação principal">
-    <a class="rail-logo" href="painel-classico.html" aria-label="Painel clássico do OrqPEG">
-      <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#logo"></use></svg>
-    </a>
-
     <ul class="rail-items" role="list">
       <li><button type="button" class="rail-item" data-view="resumo" aria-current="page">
         <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#project"></use></svg>
@@ -71,30 +84,29 @@
   </nav>
 
   <!-- ==================================================================
-       ProjectSidebar — Figma 2:29 … 2:87
+       Sidebar — estatísticas e execuções
        ================================================================== -->
   <aside class="sidebar" aria-labelledby="h-sidebar">
     <h2 class="sr-only" id="h-sidebar">Projetos e execuções</h2>
 
-    <!-- StatGrid — Figma 2:30 … 2:45 -->
     <ul class="stat-grid" role="list" id="stat-grid" aria-busy="true">
       <li class="stat" data-stat="projects">
-        <span class="stat-dot stat-dot--lime" aria-hidden="true"></span>
+        <span class="stat-dot" aria-hidden="true"></span>
         <span class="stat-label">Projetos</span>
         <span class="stat-value" data-field="value">—</span>
       </li>
       <li class="stat" data-stat="agents">
-        <span class="stat-dot stat-dot--coral" aria-hidden="true"></span>
+        <span class="stat-dot" aria-hidden="true"></span>
         <span class="stat-label">Agentes</span>
         <span class="stat-value" data-field="value">—</span>
       </li>
       <li class="stat" data-stat="active">
-        <span class="stat-dot stat-dot--cyan" aria-hidden="true"></span>
+        <span class="stat-dot" aria-hidden="true"></span>
         <span class="stat-label">Em curso</span>
         <span class="stat-value" data-field="value">—</span>
       </li>
       <li class="stat" data-stat="pending">
-        <span class="stat-dot stat-dot--lavender" aria-hidden="true"></span>
+        <span class="stat-dot" aria-hidden="true"></span>
         <span class="stat-label">Aprovações</span>
         <span class="stat-value" data-field="value">—</span>
       </li>
@@ -112,7 +124,6 @@
       </span>
     </div>
 
-    <!-- ProjectList — Figma 2:48 … 2:87 -->
     <div class="project-list-wrap">
       <ul class="project-list" role="list" id="project-list" aria-busy="true"></ul>
 
@@ -128,11 +139,10 @@
   </aside>
 
   <!-- ==================================================================
-       Workspace — Figma 2:88 … 2:163
+       Workspace
        ================================================================== -->
   <main class="workspace" id="workspace" tabindex="-1">
 
-    <!-- ProjectHeader — Figma 2:88 … 2:100 -->
     <header class="project-header">
       <p class="project-monogram" id="project-monogram" aria-hidden="true">··</p>
 
@@ -156,7 +166,6 @@
       </div>
     </header>
 
-    <!-- Ações + RunSelector + WorkspaceTabs — Figma 2:101 … 2:118 -->
     <div class="workspace-bar">
       <div class="header-actions" role="group" aria-label="Ações da execução">
         <button type="button" class="header-action" data-action="start" title="Iniciar execução" disabled>
@@ -188,7 +197,25 @@
         </select>
       </p>
 
-      <div class="tabs" role="tablist" aria-label="Seções do workspace">
+      <!-- Controles do projeto. Escopo diferente das ações à esquerda: aquelas
+           agem sobre a execução corrente, estas sobre o cadastro. -->
+      <div class="project-tools" role="group" aria-label="Controles do projeto">
+        <a class="tool-btn" id="link-project" href="painel-classico.html">
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#project"></use></svg>
+          Detalhes
+        </a>
+        <button type="button" class="tool-btn" id="btn-dry-run" disabled>
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#shield"></use></svg>
+          Ensaio
+        </button>
+        <button type="button" class="tool-btn" id="btn-edit-project" disabled>Editar</button>
+        <button type="button" class="tool-btn tool-btn--danger" id="btn-remove-project" disabled>
+          Remover
+        </button>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Seções do workspace">
         <button type="button" class="tab" role="tab" id="tab-resumo"
                 aria-selected="true" aria-controls="panel-resumo" data-view="resumo">Resumo</button>
         <button type="button" class="tab" role="tab" id="tab-agentes" tabindex="-1"
@@ -201,12 +228,10 @@
                 aria-selected="false" aria-controls="panel-historico" data-view="historico">Histórico</button>
         <button type="button" class="tab" role="tab" id="tab-sistema" tabindex="-1"
                 aria-selected="false" aria-controls="panel-sistema" data-view="sistema">Sistema</button>
-      </div>
     </div>
 
     <hr class="workspace-divider">
 
-    <!-- ExecutionTimeline — Figma 2:119 … 2:145 -->
     <section class="timeline-section" id="panel-resumo" role="tabpanel"
              aria-labelledby="tab-resumo" tabindex="0">
       <h3 class="sr-only">Linha do tempo da execução</h3>
@@ -221,39 +246,38 @@
       <p class="state-note state-note--error" id="timeline-error" hidden></p>
     </section>
 
-    <!-- AgentConsole — Figma 2:146 … 2:163 -->
     <section class="console" aria-labelledby="h-console">
-      <div class="console-actions" role="group" aria-label="Atalhos do console">
-        <button type="button" class="console-action" data-console="logs" title="Registros" disabled>
-          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#logs"></use></svg>
-          <span class="sr-only">Registros</span>
-        </button>
-        <button type="button" class="console-action" data-console="report" title="Relatório" disabled>
-          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#report"></use></svg>
-          <span class="sr-only">Relatório</span>
-        </button>
-        <button type="button" class="console-action" data-console="audit" title="Auditoria" disabled>
-          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#audit"></use></svg>
-          <span class="sr-only">Auditoria</span>
-        </button>
-        <button type="button" class="console-action" data-console="pr" title="Pull request" disabled>
-          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#pr"></use></svg>
-          <span class="sr-only">Pull request</span>
-        </button>
-        <button type="button" class="console-action" data-console="worktree" title="Worktree" disabled>
-          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#worktree"></use></svg>
-          <span class="sr-only">Worktree</span>
-        </button>
-        <button type="button" class="console-action" data-console="diagnostics" title="Diagnóstico" disabled>
-          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#diagnostics"></use></svg>
-          <span class="sr-only">Diagnóstico</span>
-        </button>
-      </div>
-
       <div class="console-head">
         <h3 class="console-title" id="h-console">Agente Orquestrador</h3>
         <span class="console-dot" id="console-dot" aria-hidden="true"></span>
         <span class="console-status" id="console-status">desconectado</span>
+
+        <div class="console-actions" role="group" aria-label="Atalhos do console">
+          <button type="button" class="console-action" data-console="logs" title="Registros" disabled>
+            <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#logs"></use></svg>
+            <span class="sr-only">Registros</span>
+          </button>
+          <button type="button" class="console-action" data-console="report" title="Relatório" disabled>
+            <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#report"></use></svg>
+            <span class="sr-only">Relatório</span>
+          </button>
+          <button type="button" class="console-action" data-console="audit" title="Auditoria" disabled>
+            <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#audit"></use></svg>
+            <span class="sr-only">Auditoria</span>
+          </button>
+          <button type="button" class="console-action" data-console="pr" title="Pull request" disabled>
+            <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#pr"></use></svg>
+            <span class="sr-only">Pull request</span>
+          </button>
+          <button type="button" class="console-action" data-console="worktree" title="Worktree" disabled>
+            <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#worktree"></use></svg>
+            <span class="sr-only">Worktree</span>
+          </button>
+          <button type="button" class="console-action" data-console="diagnostics" title="Diagnóstico" disabled>
+            <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#diagnostics"></use></svg>
+            <span class="sr-only">Diagnóstico</span>
+          </button>
+        </div>
       </div>
 
       <div class="console-log" id="console-log" role="log" aria-live="polite"
@@ -286,6 +310,15 @@
       <h3 class="panel-title">Prompts da execução</h3>
       <ol class="prompt-list" role="list" id="prompt-list"></ol>
       <p class="state-note" id="prompt-list-empty" hidden>Nenhum prompt nesta execução.</p>
+
+      <!-- O ensaio descreve o que UMA execução faria com o cadastro de agora:
+           quais prompts, em qual branch, sob quais gates. Não toca em nada. -->
+      <h3 class="panel-title panel-title--spaced">Ensaio (dry-run)</h3>
+      <p class="state-note" id="dry-run-note">
+        Nenhum ensaio executado. O ensaio valida o cadastro e mostra o que uma
+        execução faria, sem chamar agente, criar branch ou tocar no repositório.
+      </p>
+      <dl class="artifact-list" id="dry-run-plan" hidden></dl>
     </section>
 
     <section class="tab-panel" id="panel-artefatos" role="tabpanel"
@@ -302,7 +335,7 @@
       <p class="state-note" id="history-list-empty" hidden>Nenhuma execução anterior.</p>
     </section>
 
-    <!-- Sistema: o que não pertence a um projeto só. Existe porque o dashboard
+    <!-- Sistema: o que não pertence a um projeto só. Existe porque o console
          virou a home e precisa cobrir o que a home anterior cobria. -->
     <section class="tab-panel" id="panel-sistema" role="tabpanel"
              aria-labelledby="tab-sistema" tabindex="0" hidden>
@@ -328,29 +361,29 @@
   </main>
 
   <!-- ==================================================================
-       ContextPanel — Figma 2:164 … 2:207
+       Painel de contexto — etapa atual e decisão pendente
        ================================================================== -->
   <aside class="context" aria-labelledby="h-context">
     <h2 class="sr-only" id="h-context">Etapa atual e aprovação</h2>
 
-    <!-- CurrentStageCard — Figma 2:165 … 2:182 -->
     <section class="stage-card" id="stage-card" aria-labelledby="h-stage">
       <p class="card-eyebrow">Etapa atual</p>
       <h3 class="stage-title" id="h-stage">Sem execução ativa</h3>
 
       <p class="stage-pills">
-        <span class="pill pill--stage" id="stage-state">—</span>
-        <span class="pill pill--progress" id="stage-progress-pill">—</span>
+        <span class="pill pill--stage-idle" id="stage-state">—</span>
+        <span class="pill" id="stage-progress-pill">—</span>
       </p>
 
-      <p class="stage-progress-label">Progresso da execução</p>
-      <p class="stage-progress-value" id="stage-progress-value">—</p>
+      <div class="stage-progress-head">
+        <p class="stage-progress-label">Progresso da execução</p>
+        <p class="stage-progress-value" id="stage-progress-value">—</p>
+      </div>
       <div class="progress-track" role="progressbar" id="stage-progress-bar"
            aria-valuemin="0" aria-valuemax="100" aria-labelledby="h-stage">
         <span class="progress-fill" id="stage-progress-fill"></span>
       </div>
 
-      <!-- GateChecklist — Figma 2:174 … 2:182 -->
       <h4 class="checklist-title">Gates de mesclagem</h4>
       <ul class="checklist" role="list" id="gate-checklist"></ul>
       <p class="state-note state-note--onaccent" id="gate-checklist-empty" hidden>
@@ -358,7 +391,6 @@
       </p>
     </section>
 
-    <!-- ApprovalCard — Figma 2:183 … 2:207 -->
     <section class="approval" id="approval-card" aria-labelledby="h-approval">
       <h3 class="approval-title" id="h-approval">Nenhuma decisão pendente</h3>
       <p class="approval-subtitle" id="approval-subtitle">
@@ -380,12 +412,6 @@
       </div>
     </section>
   </aside>
-</div>
-
-<!-- Indicador de transporte — canto inferior do shell -->
-<div class="transport" id="transport" data-status="down" role="status" aria-live="polite">
-  <span class="transport-dot" aria-hidden="true"></span>
-  <span class="transport-text" id="transport-text">Sem conexão</span>
 </div>
 
 <!-- Anúncios não visuais para leitores de tela -->
@@ -415,7 +441,7 @@
 <form class="dialog dialog--wide" id="project-dialog" role="dialog" aria-modal="true"
       aria-labelledby="project-dialog-title" hidden>
   <h2 class="dialog-title" id="project-dialog-title">Cadastrar projeto</h2>
-  <p class="dialog-body">
+  <p class="dialog-body" id="project-dialog-body">
     O cadastro apenas registra o projeto no OrqPEG. Nenhum arquivo do repositório
     é criado, movido ou alterado.
   </p>

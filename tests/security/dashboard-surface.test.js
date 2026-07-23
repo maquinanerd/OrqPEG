@@ -213,6 +213,7 @@ test('nenhum recurso externo: o painel é offline por construção', () => {
     ['index.html', 'html'],
     ['assets/dashboard.css', 'css'],
     ['assets/tokens.css', 'css'],
+    ['assets/styles.css', 'css'],
     ['assets/dashboard.js', 'js'],
     ['assets/event-stream.js', 'js'],
   ];
@@ -345,13 +346,145 @@ test('a API do painel não devolve segredo nem variável de ambiente', async () 
   assert.equal(JSON.stringify(home.apiGuard).includes('sk-'), false);
 });
 
-test('os tokens do dashboard não vazaram para a folha das páginas anteriores', () => {
+/*
+ * Camada de tokens única.
+ *
+ * O painel já teve duas identidades ao mesmo tempo: a folha do dashboard
+ * carregava uma paleta própria (prefixo `--fig-`) e styles.css carregava
+ * outra. Trocar de página trocava de produto. Agora existe uma camada só,
+ * assets/tokens.css, e as três asserções abaixo prendem isso:
+ *
+ *   1. a identidade anterior não voltou por nenhuma porta;
+ *   2. styles.css não redeclara valor de cor — só aponta para o token;
+ *   3. quem usa styles.css carrega tokens.css antes, senão cada `var(--op-*)`
+ *      resolve para nada e a página abre sem cor nenhuma.
+ */
+test('a identidade anterior não sobreviveu em nenhuma folha', () => {
+  for (const file of ['assets/tokens.css', 'assets/dashboard.css', 'assets/styles.css']) {
+    assert.equal(
+      read(file).includes('--fig-'),
+      false,
+      `${file} ainda carrega token da identidade removida`,
+    );
+  }
+  assert.equal(read('assets/dashboard.js').includes('--fig-'), false);
+});
+
+test('styles.css consome os tokens do sistema em vez de declarar os próprios', () => {
   const legacy = read('assets/styles.css');
-  assert.equal(
-    legacy.includes('--fig-'),
-    false,
-    'tokens do Figma em styles.css mudariam a aparência das páginas antigas',
+  const root = legacy.slice(legacy.indexOf(':root {'), legacy.indexOf('\n}', legacy.indexOf(':root {')));
+
+  // Nenhum literal de cor no bloco de tokens: cada nome é apelido de um --op-*.
+  const literais = root.match(/:\s*(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\))/g) ?? [];
+  assert.deepEqual(
+    literais,
+    [],
+    `styles.css volta a declarar cor própria: ${literais.join(', ')} — isso recria a segunda paleta`,
   );
+  assert.match(root, /var\(--op-/, 'o bloco :root precisa apontar para a camada de tokens');
+});
+
+test('o painel é claro em toda página, sem inversão pelo tema do sistema', () => {
+  const tokens = read('assets/tokens.css');
+
+  // Um console de operação que muda de fundo conforme a configuração do
+  // sistema operacional é um console que ninguém reconhece de relance.
+  assert.equal(
+    /prefers-color-scheme\s*:\s*dark/.test(stripComments(tokens, 'css')),
+    false,
+    'tokens.css voltou a definir tema escuro',
+  );
+  assert.match(tokens, /color-scheme:\s*light/, 'tokens.css precisa fixar o esquema claro');
+
+  for (const page of ['index.html', 'painel-classico.html', 'project.html', 'run.html', 'prompt.html', 'settings.html']) {
+    assert.match(
+      read(page),
+      /<meta name="color-scheme" content="light">/,
+      `${page} não fixa o esquema claro: o navegador desenharia campo e seletor escuros`,
+    );
+  }
+});
+
+/*
+ * Altura do documento.
+ *
+ * O console é uma janela de altura fixa e cada coluna rola no próprio eixo.
+ * `overflow-y: auto` recorta o desenho mas não impede que a altura de layout
+ * do conteúdo suba pela árvore: sem contenção, o documento reportava
+ * scrollHeight de 2534 com viewport de 950 e a página ganhava mil e
+ * quinhentos pixels de vazio abaixo do aplicativo.
+ */
+test('as colunas que rolam por dentro são contidas, senão a página ganha vazio', () => {
+  const css = read('assets/dashboard.css');
+  const regra = css.match(/\.sidebar,\s*\.workspace,\s*\.context\s*\{[^}]*\}/);
+
+  assert.notEqual(regra, null, 'a regra de contenção das colunas sumiu');
+  assert.match(regra[0], /contain:\s*paint/, 'as colunas precisam de contain: paint');
+
+  // E a faixa estreita precisa devolver a rolagem: empilhado, a página inteira
+  // rola e conter as colunas esconderia o conteúdo abaixo da dobra.
+  assert.match(
+    css,
+    /contain:\s*none/,
+    'o empilhamento estreito precisa desfazer a contenção, senão o conteúdo fica inalcançável',
+  );
+});
+
+test('o console expõe os controles do cadastro do projeto', () => {
+  const html = read('index.html');
+  const js = read('assets/dashboard.js');
+
+  // Sem estes, o painel mostra projeto mas não deixa administrar nenhum.
+  for (const id of ['btn-edit-project', 'btn-remove-project', 'btn-dry-run', 'link-project']) {
+    assert.match(html, new RegExp(`id="${id}"`), `controle de projeto ausente: ${id}`);
+  }
+
+  // E os controles precisam chegar nas rotas que existem de verdade.
+  assert.match(js, /putJson\('\/api\/projects\/'/, 'a edição não chama PUT /api/projects/:id');
+  assert.match(js, /method:\s*'DELETE'/, 'a remoção não chama DELETE /api/projects/:id');
+  assert.match(js, /\/dry-run'/, 'o ensaio não chama GET /api/projects/:id/dry-run');
+
+  // Remover cadastro é destrutivo: passa pelo fluxo com justificativa.
+  assert.match(
+    js,
+    /function removeCurrentProject\(\)[\s\S]{0,900}confirmAction\([\s\S]{0,400}?true,/,
+    'a remoção precisa exigir confirmação com justificativa',
+  );
+});
+
+test('prompt, execução anterior e merge levam à página que os descreve', () => {
+  const js = read('assets/dashboard.js');
+
+  // Fileira que nomeia um destino sem levar a ele é beco sem saída — era o
+  // estado anterior das três listas.
+  assert.match(js, /function linkRow\(/);
+  assert.match(js, /'prompt\.html\?id='/, 'prompt não leva a prompt.html');
+  assert.match(js, /'run\.html\?id='/, 'execução anterior não leva a run.html');
+  assert.match(js, /'project\.html\?id='/, 'o projeto não leva a project.html');
+
+  // <a href> de verdade: clique do meio, nova aba e teclado precisam funcionar.
+  assert.match(js, /link\.href\s*=\s*href/);
+
+  // Todo identificador que entra numa URL é escapado.
+  for (const fn of ['promptHref', 'runHref']) {
+    const corpo = js.slice(js.indexOf('function ' + fn), js.indexOf('function ' + fn) + 320);
+    assert.match(corpo, /encodeURIComponent/, `${fn} monta URL sem escapar o identificador`);
+  }
+});
+
+test('toda página que usa styles.css carrega tokens.css antes', () => {
+  const pages = ['painel-classico.html', 'project.html', 'run.html', 'prompt.html', 'settings.html'];
+
+  for (const page of pages) {
+    const html = read(page);
+    if (!html.includes('assets/styles.css')) continue;
+
+    const tokens = html.indexOf('assets/tokens.css');
+    const styles = html.indexOf('assets/styles.css');
+
+    assert.notEqual(tokens, -1, `${page} usa styles.css sem carregar tokens.css: abriria sem cor`);
+    assert.equal(tokens < styles, true, `${page} carrega tokens.css depois de styles.css`);
+  }
 });
 
 test('encerra o painel', async () => {

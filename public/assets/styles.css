@@ -1,81 +1,91 @@
 /* ==========================================================================
-   OrqPEG — folha de estilo do painel local.
+   OrqPEG — folha de estilo das páginas de detalhe do painel.
    Sem dependência externa: nenhuma fonte, nenhum CDN, nenhum framework.
 
-   Linguagem visual: papel claro, superfícies brancas, verde institucional,
-   bordas finas, cantos quase retos, alta densidade informacional.
-   O painel é exclusivamente claro: não existe tema escuro.
+   Estrutura própria, identidade compartilhada: esta folha define o layout das
+   páginas anteriores ao console, mas TODA a cor, a tipografia e a geometria
+   vêm de assets/tokens.css. Não existe paleta paralela — havia uma, e ela
+   fazia o painel ter duas caras dependendo da página em que se estava.
+
+   Exige assets/tokens.css carregado antes. As páginas que usam esta folha
+   seguem o mesmo par de temas do console, claro e escuro.
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
-   1. Tokens
+   1. Ponte de tokens
+
+   Os nomes `--orq-*` continuam existindo porque 229 declarações abaixo os
+   usam; o que mudou é que nenhum deles carrega mais um valor próprio. Cada um
+   é um apelido para o token do sistema que cumpre aquele papel.
    -------------------------------------------------------------------------- */
 
 :root {
-  color-scheme: light;
-
   /* Papel e superfícies. */
-  --orq-page: #eeeeeb;
-  --orq-page-secondary: #f4f4f1;
+  --orq-page: var(--op-canvas);
+  --orq-page-secondary: var(--op-sunken);
 
-  --orq-surface: #ffffff;
-  --orq-surface-soft: #f7f8f5;
-  --orq-surface-green: #edf2eb;
+  --orq-surface: var(--op-surface);
+  --orq-surface-soft: var(--op-raised);
+  --orq-surface-green: var(--op-accent-soft);
 
   /* Texto. */
-  --orq-text: #1c221d;
-  --orq-text-secondary: #4e574e;
-  --orq-text-muted: #747c74;
-  --orq-text-subtle: #929892;
+  --orq-text: var(--op-fg);
+  --orq-text-secondary: var(--op-fg-secondary);
+  --orq-text-muted: var(--op-fg-muted);
+  --orq-text-subtle: var(--op-fg-muted);
 
-  /* Verde institucional — dessaturado de propósito: identifica sem gritar. */
-  --orq-green: #526b49;
-  --orq-green-dark: #33482e;
-  --orq-green-light: #e8efe5;
-  --orq-green-border: #c2d2bd;
+  /* O que era "verde institucional" agora é o acento único do sistema: azul de
+     interação. Uma cor de marca a mais é uma cor de estado a menos. */
+  --orq-green: var(--op-accent);
+  /* Seis dos oito usos de `green-dark` são cor de TEXTO — link, título de
+     cartão, rótulo forte. O estado de pressão não serve para isso: é escuro
+     por definição e some sobre fundo escuro. O acento é o valor calibrado
+     para texto nos dois temas; quem precisa mesmo do press o chama direto. */
+  --orq-green-dark: var(--op-accent);
+  --orq-green-light: var(--op-accent-soft);
+  --orq-green-border: var(--op-accent-line);
 
   /* Traços. */
-  --orq-border: #d4d8d1;
-  --orq-border-soft: #e5e8e2;
-  --orq-border-strong: #bfc6bc;
+  --orq-border: var(--op-line-strong);
+  --orq-border-soft: var(--op-line);
+  --orq-border-strong: var(--op-line-loud);
 
-  /* Semântica de estado — quatro tons discretos. A cor informa o estado; ela
-     não decora e não disputa atenção com o conteúdo. */
-  --orq-success: #446b45;
-  --orq-success-soft: #eef4ed;
+  /* Semântica de estado. */
+  --orq-success: var(--op-ok);
+  --orq-success-soft: var(--op-ok-soft);
 
-  --orq-warning: #856426;
-  --orq-warning-soft: #f8f4e9;
+  --orq-warning: var(--op-warn);
+  --orq-warning-soft: var(--op-warn-soft);
 
-  --orq-danger: #8f4a42;
-  --orq-danger-soft: #f9efed;
+  --orq-danger: var(--op-danger);
+  --orq-danger-soft: var(--op-danger-soft);
 
-  --orq-info: #4e666e;
-  --orq-info-soft: #eef2f3;
+  --orq-info: var(--op-info);
+  --orq-info-soft: var(--op-info-soft);
 
-  /* Estados de execução — mapeados sobre a paleta acima, sem cores novas. */
-  --status-approved: var(--orq-success);
-  --status-running: var(--orq-info);
-  --status-waiting: var(--orq-warning);
-  --status-failed: var(--orq-danger);
-  --status-pending: var(--orq-text-muted);
-  --status-audit: var(--orq-green-dark);
+  /* Estados de execução — os mesmos nomes que o console usa. */
+  --status-approved: var(--op-state-approved);
+  --status-running: var(--op-state-execution);
+  --status-waiting: var(--op-state-waiting);
+  --status-failed: var(--op-state-blocked);
+  --status-pending: var(--op-neutral);
+  --status-audit: var(--op-accent-alt);
 
-  --status-approved-bg: var(--orq-success-soft);
-  --status-running-bg: var(--orq-info-soft);
-  --status-waiting-bg: var(--orq-warning-soft);
-  --status-failed-bg: var(--orq-danger-soft);
-  --status-pending-bg: var(--orq-surface-soft);
-  --status-audit-bg: var(--orq-green-light);
+  --status-approved-bg: var(--op-state-approved-soft);
+  --status-running-bg: var(--op-state-execution-soft);
+  --status-waiting-bg: var(--op-state-waiting-soft);
+  --status-failed-bg: var(--op-state-blocked-soft);
+  --status-pending-bg: var(--op-neutral-soft);
+  --status-audit-bg: var(--op-accent-alt-soft);
 
-  --focus: var(--orq-green-dark);
+  --focus: var(--op-focus-color);
 
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  --font-ui: var(--op-font);
+  --font-mono: var(--op-font-mono);
 
-  --radius: 3px;
-  --radius-sm: 2px;
-  --gap: 12px;
+  --radius: var(--op-radius-sm);
+  --radius-sm: var(--op-radius-xs);
+  --gap: var(--op-space-4);
   --maxw: 1560px;
 }
 
@@ -364,7 +374,9 @@ a:hover { text-decoration: underline; }
 
 .crumbs a { color: var(--orq-text-secondary); }
 .crumbs svg { width: 12px; height: 12px; }
-.crumbs .sep { color: var(--orq-border-strong); }
+/* Traço de borda como cor de texto não alcança contraste de leitura — e a
+   barra da trilha é lida, não é ornamento. */
+.crumbs .sep { color: var(--orq-text-muted); }
 
 /* --------------------------------------------------------------------------
    Masthead editorial
@@ -774,13 +786,18 @@ a:hover { text-decoration: underline; }
 .btn--primary {
   background: var(--orq-green);
   border-color: var(--orq-green);
-  color: #ffffff;
+  color: var(--op-accent-fg);
   font-weight: 600;
 }
 
 .btn--primary:hover:not(:disabled) {
-  background: var(--orq-green-dark);
-  border-color: var(--orq-green-dark);
+  background: var(--op-accent-hover);
+  border-color: var(--op-accent-hover);
+}
+
+.btn--primary:active:not(:disabled) {
+  background: var(--op-accent-press);
+  border-color: var(--op-accent-press);
 }
 
 .btn--danger {
@@ -873,10 +890,10 @@ select { cursor: pointer; height: 26px; padding: 0 6px; }
   flex: none;
 }
 
-.chip--approved { color: var(--status-approved); background: var(--status-approved-bg); border-color: #bcd6bb; }
-.chip--running { color: var(--status-running); background: var(--status-running-bg); border-color: #bcccd0; }
-.chip--waiting { color: var(--status-waiting); background: var(--status-waiting-bg); border-color: #ddcda2; }
-.chip--failed { color: var(--status-failed); background: var(--status-failed-bg); border-color: #e0b6ae; }
+.chip--approved { color: var(--status-approved); background: var(--status-approved-bg); border-color: var(--status-approved); }
+.chip--running { color: var(--status-running); background: var(--status-running-bg); border-color: var(--status-running); }
+.chip--waiting { color: var(--status-waiting); background: var(--status-waiting-bg); border-color: var(--status-waiting); }
+.chip--failed { color: var(--status-failed); background: var(--status-failed-bg); border-color: var(--status-failed); }
 .chip--pending { color: var(--status-pending); background: var(--status-pending-bg); border-color: var(--orq-border); }
 .chip--audit { color: var(--status-audit); background: var(--status-audit-bg); border-color: var(--orq-green-border); }
 
@@ -1109,8 +1126,8 @@ td.empty,
   white-space: nowrap;
 }
 
-.tag--warn { color: var(--orq-warning); background: var(--orq-warning-soft); border-color: #ddcda2; }
-.tag--danger { color: var(--orq-danger); background: var(--orq-danger-soft); border-color: #e0b6ae; }
+.tag--warn { color: var(--orq-warning); background: var(--orq-warning-soft); border-color: var(--orq-warning); }
+.tag--danger { color: var(--orq-danger); background: var(--orq-danger-soft); border-color: var(--orq-danger); }
 .tag--none { font-family: var(--font-ui); color: var(--orq-text-subtle); background: transparent; border-style: dashed; }
 
 /* --------------------------------------------------------------------------
@@ -1324,10 +1341,10 @@ dialog {
   color: var(--orq-text);
   padding: 0;
   width: min(640px, 94vw);
-  box-shadow: 0 8px 28px rgba(28, 34, 29, .18);
+  box-shadow: var(--op-shadow-overlay);
 }
 
-dialog::backdrop { background: rgba(28, 34, 29, .35); }
+dialog::backdrop { background: var(--op-scrim); }
 
 .dialog-head,
 .dialog-foot {

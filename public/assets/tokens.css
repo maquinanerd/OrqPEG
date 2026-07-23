@@ -1,232 +1,274 @@
 /* ==========================================================================
-   OrqPEG — tokens do dashboard, derivados do Figma.
+   OrqPEG — camada de tokens do painel.
 
-   Origem: https://www.figma.com/design/CCyLaVcligzX9pmCJgqruV
-   Página: OrqPEG — System & Dashboard
-   Frame:  OrqPEG / Master Canvas (node 2:2, 1920 x 1240)
+   Esta folha é a única fonte de verdade de cor, tipografia, espaço, raio e
+   movimento. Nenhuma outra folha do painel declara valor cru que exista aqui.
 
-   Todos os valores abaixo foram lidos do MCP do Figma, não estimados a partir
-   da imagem. O arquivo do Figma não define variáveis nem estilos compartilhados
-   (`get_variable_defs` devolve `{}`), então esta folha É a camada de tokens do
-   sistema; não existe fonte anterior a ela.
+   ---------------------------------------------------------------------------
+   PRINCÍPIOS
 
-   Rastreabilidade completa em docs/FIGMA-IMPLEMENTATION-MAP.md.
+   1. O painel é claro. Só claro.
+      Não existe tema escuro nem inversão por `prefers-color-scheme`. Um
+      console de operação que muda de fundo conforme a configuração do sistema
+      operacional é um console que ninguém reconhece de relance.
 
-   Esta folha declara apenas custom properties. Ela não estiliza nenhum
-   seletor e não colide com public/assets/styles.css, que serve as páginas
-   anteriores com outra linguagem visual.
+   2. Cromatismo é informação, não decoração.
+      Fundo, borda e texto são acromáticos. Matiz só aparece onde significa
+      alguma coisa: estado da execução, resultado de gate, prioridade,
+      transporte. Uma tela sem incidente é uma tela cinza.
+
+   3. Um acento só.
+      Azul é interação — seleção, foco, ação primária. Nada mais é azul.
+
+   4. Sinal na borda, não no preenchimento.
+      Estado se mostra por régua lateral, ponto ou etiqueta discreta. Cartão
+      inteiro tingido de vermelho ou verde destrói hierarquia: quando tudo
+      grita, nada informa.
+
+   5. Geometria apertada.
+      Raio de 3 a 10 px, fio de 1 px, grade de 4 px. É instrumento de
+      operação, não cartão de aplicativo.
+
+   6. Tamanho de leitura de verdade.
+      Corpo em 13 px. Densidade se ganha com espaço e régua, não encolhendo
+      a letra até o limite da legibilidade.
+   ---------------------------------------------------------------------------
    ========================================================================== */
 
 :root {
+  /* Fixo, não `light dark`: o painel não acompanha o tema do sistema. Isto
+     também faz o navegador desenhar campo, seletor e barra de rolagem nativos
+     na variante clara. */
   color-scheme: light;
 
   /* ------------------------------------------------------------------------
-     1. Cor
+     1. Superfícies
 
-     Treze sólidas. A contagem em comentário é o número de nós do frame que
-     usam o valor — ela indica o peso real da cor no desenho.
+     Escada de elevação. No claro ela sobe ficando mais branca: o fundo da
+     aplicação é o tom mais acinzentado e o cartão é o branco puro.
      ---------------------------------------------------------------------- */
+  --op-canvas: #eef1f5;        /* fundo da aplicação, workspace              */
+  --op-sunken: #f4f6f9;        /* poço: log do console, trilhos              */
+  --op-surface: #ffffff;       /* painéis                                    */
+  --op-raised: #ffffff;        /* cartões sobre painel                       */
+  --op-overlay: #ffffff;       /* diálogo, menu, tooltip                     */
 
-  /* Escuros. */
-  --fig-canvas: #0a0a09;      /*  1 — fundo do frame                        */
-  --fig-ink: #0e0e0d;         /* 71 — rail, texto primário, botão de recusa  */
-  --fig-ink-raised: #1b1b18;  /*  4 — sidebar, cartão de projeto em repouso  */
-  --fig-ink-soft: #252521;    /*  7 — stat card, faixa de tarefa em escuro   */
-
-  /* Claros. */
-  --fig-mat: #b5ba9c;         /*  1 — Reference Backdrop (apresentação)      */
-  --fig-paper: #f6f5f2;       /*  5 — App Shell, Context Panel, campo, bolha */
-  --fig-surface: #ffffff;     /*    — cartões, console, botões claros        */
-  --fig-hairline: #e0e0d6;    /*  5 — divisores e borda do Run Selector      */
-
-  /* Texto. */
-  --fig-text: var(--fig-ink);
-  --fig-text-muted: #75756e;  /* 27 — legendas e metadados                   */
-  --fig-text-on-dark: var(--fig-paper);
-  --fig-text-on-accent: var(--fig-ink);
-
-  /* Acentos. Cada um carrega significado de estado; nenhum é decorativo. */
-  --fig-lime: #dbfa47;        /*  6 — selecionado, aprovado, ação primária   */
-  --fig-lime-deep: #c7e83b;   /*  1 — faixa de tarefa sobre lime             */
-  --fig-lavender: #a896f0;    /*  4 — em execução, etapa atual, prioridade média */
-  --fig-coral: #ff5e61;       /*  4 — bloqueio, prioridade alta, ambiente local  */
-  --fig-cyan: #78dbde;        /*  2 — descoberta, enfileirado, prioridade baixa  */
+  /* Estados de superfície aplicados por cima, não como cor nova. */
+  --op-hover: rgba(15, 24, 36, 0.045);
+  --op-active: rgba(15, 24, 36, 0.08);
+  --op-scrim: rgba(15, 24, 36, 0.4);
 
   /* ------------------------------------------------------------------------
-     2. Semântica de execução
-
-     Mapeada sobre os cinco acentos acima: o dashboard não introduz cor nova.
-     Os nomes seguem o domínio do OrqPEG (RunState), não o do desenho.
+     2. Traço
      ---------------------------------------------------------------------- */
-  --fig-state-discovery: var(--fig-cyan);
-  --fig-state-execution: var(--fig-lavender);
-  --fig-state-approved: var(--fig-lime);
-  --fig-state-blocked: var(--fig-coral);
-  --fig-state-idle: var(--fig-text-muted);
+  --op-line: #e4e9ef;          /* divisor interno, quase invisível           */
+  --op-line-strong: #d2dae3;   /* borda de cartão e campo                    */
+  --op-line-loud: #b3bfcc;     /* borda em foco/hover                        */
 
   /* ------------------------------------------------------------------------
-     3. Tipografia
+     3. Texto
 
-     Inter em quatro pesos. Sem arquivo de fonte embarcado: a CSP do painel é
-     default-src 'self' e o projeto não versiona binários. Onde a Inter estiver
-     instalada o resultado é idêntico ao desenho; onde não estiver, a pilha
-     degrada para métricas próximas.
+     Três níveis. Mais que isso vira ruído e ninguém acerta qual usar.
      ---------------------------------------------------------------------- */
-  --fig-font: Inter, 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-  --fig-font-mono: ui-monospace, 'Cascadia Mono', 'Consolas', 'Liberation Mono', monospace;
-
-  --fig-weight-regular: 400;
-  --fig-weight-medium: 500;
-  --fig-weight-semibold: 600;
-  --fig-weight-bold: 700;
-
-  /* Os dezesseis tamanhos presentes no frame. O dominante é 11 px (49 nós),
-     o que define a densidade informacional do painel. */
-  --fig-size-3xs: 8px;
-  --fig-size-2xs: 9px;
-  --fig-size-xs: 10px;
-  --fig-size-sm: 11px;
-  --fig-size-base: 12px;
-  --fig-size-md: 13px;
-  --fig-size-lg: 14px;
-  --fig-size-xl: 16px;
-  --fig-size-2xl: 17px;
-  --fig-size-3xl: 18px;
-  --fig-size-4xl: 21px;
-  --fig-size-5xl: 24px;
-  --fig-size-6xl: 27px;
-  --fig-size-7xl: 28px;
-  --fig-size-8xl: 30px;
-  --fig-size-9xl: 38px;
-
-  /* 131 dos 132 nós de texto usam line-height normal; nenhum usa tracking. */
-  --fig-leading: normal;
-  --fig-leading-tight: 1.15;
-  --fig-leading-body: 1.45;
+  --op-fg: #10161d;            /* título, valor, conteúdo                    */
+  --op-fg-secondary: #4c5a68;  /* rótulo, metadado                           */
+  /* Calibrado para 4.6:1 contra as 21 superfícies que o painel produz: as três
+     opacas (branco, --op-canvas, --op-sunken) e cada uma delas coberta por
+     cada tinta semântica a 12%. O pior caso é legenda dentro de caixa de
+     aviso, e é ele que fixa este valor. */
+  --op-fg-muted: #56606c;      /* legenda, placeholder, desabilitado         */
+  --op-fg-inverse: #ffffff;    /* texto sobre acento sólido                  */
 
   /* ------------------------------------------------------------------------
-     4. Raio
+     4. Acento
+
+     Azul é interação. `soft` e `line` são o mesmo azul rebaixado para uso em
+     fundo e borda sem virar bloco chapado.
      ---------------------------------------------------------------------- */
-  --fig-radius-xs: 10px;   /* faixa de tarefa                    */
-  --fig-radius-sm: 12px;   /* linha de arquivo                   */
-  --fig-radius-md: 14px;   /* pílula, Run Selector, campo         */
-  --fig-radius-lg: 16px;   /* cartão de evento, botão, bolha      */
-  --fig-radius-xl: 18px;   /* stat card, bolha do operador        */
-  --fig-radius-2xl: 22px;  /* cartão de projeto, console, contexto*/
-  --fig-radius-3xl: 28px;  /* App Shell, Global Rail              */
-  --fig-radius-mat: 56px;  /* Reference Backdrop                  */
-  --fig-radius-full: 999px;
+  --op-accent: #1959bd;
+  --op-accent-hover: #1f6feb;
+  --op-accent-press: #144da3;
+  --op-accent-fg: #ffffff;     /* texto sobre acento sólido                  */
+  --op-accent-soft: rgba(25, 89, 189, 0.12);
+  --op-accent-line: rgba(25, 89, 189, 0.35);
 
   /* ------------------------------------------------------------------------
-     5. Borda e sombra
+     5. Semântica de estado
 
-     O frame inteiro tem uma borda (Run Selector) e uma sombra (backdrop e
-     shell). Nada além disso.
+     Seis matizes, todos rebaixados o bastante para conviver na mesma tela.
+     Cada um tem par sólido/suave: o sólido é para ponto, régua e TEXTO; o
+     suave é para o fundo da etiqueta.
+
+     O sólido é a cor do texto sobre o próprio suave — é assim que a etiqueta
+     funciona. Por isso cada par foi calibrado junto: alpha de 0,12 e matiz
+     escuro o bastante para o par bater 4.5:1 sobre qualquer superfície clara,
+     inclusive o cartão selecionado (#e4ebf8, que é --op-accent-soft resolvido
+     sobre branco) — o pior caso. Aumentar o alpha escurece o fundo e derruba
+     o contraste.
      ---------------------------------------------------------------------- */
-  --fig-border-width: 1px;
-  --fig-border: var(--fig-border-width) solid var(--fig-hairline);
-  --fig-shadow: 0 18px 36px rgba(0, 0, 0, 0.14);
+  --op-ok: #166c2e;
+  --op-ok-soft: rgba(22, 108, 46, 0.12);
+
+  --op-warn: #7f5500;
+  --op-warn-soft: rgba(127, 85, 0, 0.12);
+
+  --op-danger: #ad2c29;
+  --op-danger-soft: rgba(173, 44, 41, 0.12);
+
+  --op-info: #1959bd;          /* deliberadamente igual ao acento: "em curso"
+                                  é a mesma ideia de "ativo"                  */
+  --op-info-soft: rgba(25, 89, 189, 0.12);
+
+  --op-neutral: #535f6c;
+  --op-neutral-soft: rgba(83, 95, 108, 0.12);
+
+  --op-accent-alt: #0c6964;    /* descoberta / enfileirado                   */
+  --op-accent-alt-soft: rgba(12, 105, 100, 0.12);
 
   /* ------------------------------------------------------------------------
-     6. Espaçamento
+     6. Estados de execução
 
-     O frame é plano e sem auto-layout: a escala abaixo foi derivada das
-     distâncias que se repetem entre as coordenadas absolutas dos 218 nós.
+     Mapeados sobre a paleta acima. O painel não introduz cor nova: se um
+     estado novo aparecer, ele reusa um destes ou o sistema está errado.
      ---------------------------------------------------------------------- */
-  --fig-space-1: 4px;
-  --fig-space-2: 8px;
-  --fig-space-3: 10px;
-  --fig-space-4: 12px;
-  --fig-space-5: 14px;
-  --fig-space-6: 18px;
-  --fig-space-7: 20px;
-  --fig-space-8: 22px;   /* padding padrão de painel */
-  --fig-space-9: 24px;   /* padding do shell         */
-  --fig-space-10: 34px;
-  --fig-space-11: 38px;
-  --fig-space-12: 52px;
+  --op-state-discovery: var(--op-accent-alt);
+  --op-state-discovery-soft: var(--op-accent-alt-soft);
+  --op-state-execution: var(--op-info);
+  --op-state-execution-soft: var(--op-info-soft);
+  --op-state-approved: var(--op-ok);
+  --op-state-approved-soft: var(--op-ok-soft);
+  --op-state-blocked: var(--op-danger);
+  --op-state-blocked-soft: var(--op-danger-soft);
+  --op-state-waiting: var(--op-warn);
+  --op-state-waiting-soft: var(--op-warn-soft);
+  --op-state-idle: var(--op-neutral);
+  --op-state-idle-soft: var(--op-neutral-soft);
 
   /* ------------------------------------------------------------------------
-     7. Dimensões estruturais
+     7. Tipografia
 
-     Larguras fixas do desenho. São tratadas como mínimos pelo layout
-     responsivo, não como valores imutáveis.
+     Sem arquivo de fonte embarcado: a CSP do painel é default-src 'self' e o
+     projeto não versiona binários. A pilha começa em Inter, cai para as
+     variáveis do Windows e termina em system-ui.
      ---------------------------------------------------------------------- */
-  --fig-frame-w: 1920px;
-  --fig-frame-h: 1240px;
-  --fig-shell-w: 1600px;
-  --fig-shell-h: 900px;
-  --fig-rail-w: 88px;
-  --fig-sidebar-w: 340px;
-  --fig-context-w: 348px;
-  --fig-workspace-min: 560px;
+  --op-font: Inter, 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system,
+    'Helvetica Neue', Arial, sans-serif;
+  --op-font-mono: ui-monospace, 'Cascadia Code', 'Cascadia Mono', Consolas,
+    'SF Mono', 'Liberation Mono', Menlo, monospace;
 
-  --fig-rail-item: 48px;
-  --fig-stat-w: 132px;
-  --fig-stat-h: 78px;
-  --fig-project-card-h: 116px;
-  --fig-event-card-h: 78px;
-  --fig-console-h: 310px;
-  --fig-pill-h: 28px;
-  --fig-button-h: 38px;
-  --fig-input-h: 40px;
-  --fig-avatar: 42px;
-  --fig-header-action: 40px;
-  --fig-timeline-icon: 36px;
+  --op-weight-regular: 400;
+  --op-weight-medium: 500;
+  --op-weight-semibold: 600;
+  --op-weight-bold: 700;
+
+  /* Sete tamanhos. A escala anterior tinha dezesseis, o que garantia que
+     ninguém soubesse qual escolher. */
+  --op-text-micro: 11px;       /* etiqueta, contador                         */
+  --op-text-caption: 12px;     /* metadado, legenda                          */
+  --op-text-body: 13px;        /* corpo — o tamanho padrão do painel         */
+  --op-text-body-lg: 14px;     /* corpo em área de leitura                   */
+  --op-text-title: 16px;       /* título de painel                           */
+  --op-text-heading: 20px;     /* título de seção                            */
+  --op-text-display: 26px;     /* nome do projeto                            */
+  --op-text-metric: 30px;      /* número de estatística                      */
+
+  --op-leading-tight: 1.2;
+  --op-leading-snug: 1.35;
+  --op-leading-body: 1.55;
+
+  --op-tracking-wide: 0.04em;  /* só em caixa-alta pequena                   */
 
   /* ------------------------------------------------------------------------
-     8. Movimento
-
-     Não há transição declarada no Figma — um canvas estático não as expressa.
-     Os valores abaixo são a extensão mínima necessária para que estado mude
-     sem salto. Todos são zerados sob prefers-reduced-motion (§10).
+     8. Espaço — grade de 4 px
      ---------------------------------------------------------------------- */
-  --fig-duration-instant: 90ms;
-  --fig-duration-fast: 140ms;
-  --fig-duration-base: 200ms;
-  --fig-duration-slow: 320ms;
-  --fig-ease: cubic-bezier(0.2, 0, 0.2, 1);
-  --fig-ease-out: cubic-bezier(0, 0, 0.2, 1);
-
-  --fig-transition: var(--fig-duration-fast) var(--fig-ease);
+  --op-space-1: 4px;
+  --op-space-2: 6px;
+  --op-space-3: 8px;
+  --op-space-4: 12px;
+  --op-space-5: 16px;
+  --op-space-6: 20px;
+  --op-space-7: 24px;
+  --op-space-8: 32px;
+  --op-space-9: 40px;
+  --op-space-10: 48px;
 
   /* ------------------------------------------------------------------------
-     9. Camadas
-
-     Faixa reservada e contígua: nada no dashboard usa z-index literal.
+     9. Raio e traço
      ---------------------------------------------------------------------- */
-  --fig-z-base: 0;
-  --fig-z-sticky: 10;
-  --fig-z-rail: 20;
-  --fig-z-dropdown: 30;
-  --fig-z-banner: 40;
-  --fig-z-dialog: 50;
-  --fig-z-toast: 60;
+  --op-radius-xs: 3px;
+  --op-radius-sm: 5px;
+  --op-radius-md: 7px;
+  --op-radius-lg: 10px;
+  --op-radius-full: 999px;
+
+  --op-border-width: 1px;
+  --op-border: var(--op-border-width) solid var(--op-line-strong);
+  --op-border-subtle: var(--op-border-width) solid var(--op-line);
+
+  /* Sombra só para o que flutua de verdade. Painel ancorado não tem sombra. */
+  --op-shadow-overlay: 0 16px 48px rgba(15, 24, 36, 0.16), 0 2px 8px rgba(15, 24, 36, 0.08);
+  --op-shadow-popover: 0 6px 20px rgba(15, 24, 36, 0.12);
 
   /* ------------------------------------------------------------------------
-     10. Foco
-
-     Ausente no Figma. Derivado do lime de acento, que é a cor de ação do
-     sistema, com contorno duplo para permanecer visível sobre o rail escuro e
-     sobre o papel claro.
+     10. Dimensões estruturais
      ---------------------------------------------------------------------- */
-  --fig-focus-width: 2px;
-  --fig-focus-offset: 2px;
-  --fig-focus-color: var(--fig-lime);
-  --fig-focus-contrast: var(--fig-ink);
+  --op-rail-w: 52px;
+  --op-sidebar-w: 300px;
+  --op-context-w: 336px;
+  --op-workspace-min: 520px;
+  --op-topbar-h: 44px;
+
+  --op-control-h: 28px;        /* botão de ícone, etiqueta                   */
+  --op-control-h-md: 32px;     /* botão de texto, campo, seletor             */
+
+  /* ------------------------------------------------------------------------
+     11. Movimento
+
+     Curto o bastante para não fazer esperar, longo o bastante para não
+     piscar. Tudo é zerado sob prefers-reduced-motion (§14).
+     ---------------------------------------------------------------------- */
+  --op-duration-instant: 80ms;
+  --op-duration-fast: 130ms;
+  --op-duration-base: 200ms;
+  --op-duration-slow: 320ms;
+  --op-ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --op-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --op-transition: var(--op-duration-fast) var(--op-ease);
+
+  /* ------------------------------------------------------------------------
+     12. Camadas — faixa reservada e contígua
+     ---------------------------------------------------------------------- */
+  --op-z-base: 0;
+  --op-z-sticky: 10;
+  --op-z-rail: 20;
+  --op-z-dropdown: 30;
+  --op-z-banner: 40;
+  --op-z-dialog: 50;
+  --op-z-toast: 60;
+
+  /* ------------------------------------------------------------------------
+     13. Foco
+
+     Anel único no acento, com halo branco para permanecer visível também
+     sobre superfície tingida.
+     ---------------------------------------------------------------------- */
+  --op-focus-width: 2px;
+  --op-focus-offset: 2px;
+  --op-focus-color: var(--op-accent);
+  --op-focus-halo: #ffffff;
 }
 
 /* --------------------------------------------------------------------------
-   Movimento reduzido.
+   14. Movimento reduzido.
 
    Zera a duração em vez de remover a transição: as regras que dependem de
    transitionend continuam disparando, e nada anima.
    -------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --fig-duration-instant: 0ms;
-    --fig-duration-fast: 0ms;
-    --fig-duration-base: 0ms;
-    --fig-duration-slow: 0ms;
+    --op-duration-instant: 0ms;
+    --op-duration-fast: 0ms;
+    --op-duration-base: 0ms;
+    --op-duration-slow: 0ms;
   }
 }
