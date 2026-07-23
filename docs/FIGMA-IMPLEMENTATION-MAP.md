@@ -273,3 +273,56 @@ ponto em que deixariam o workspace abaixo de 560 px de largura útil.
 | Botões Aprovar / Recusar | estáticos | `POST /api/projects/:id/runs/:runId/override` com confirmação |
 
 Nenhum valor do desenho permanece como constante no código.
+
+## 7. Contrato do transporte
+
+O desenho não expressa transporte, mas o dashboard depende dele para não exibir
+estado velho. O contrato implementado:
+
+| Elemento | Valor | Motivo |
+| --- | --- | --- |
+| Endpoint | `GET /api/events` | Já existia; segue sendo SSE, não WebSocket |
+| Tipos de evento | `run-update`, `log`, `heartbeat` | Sempre nomeados pelo servidor |
+| Identificador | `id:` monotônico, a partir de 1 | Torna a retomada possível |
+| Retomada | `Last-Event-ID` e `?lastEventId=` | Cabeçalho para a reconexão nativa; query para a reabertura manual |
+| Backlog | 500 eventos em memória | Teto que impede vazamento |
+| Truncamento | evento `backlog-truncated` | Buraco declarado em vez de silencioso |
+| Reconexão sugerida | `retry: 3000` | Volta antes de o polling precisar cobrir |
+| Heartbeat | 25 s, **sem `id:`** | Numerar heartbeat faria o cursor avançar sobre nada |
+| Rede de segurança | polling de 5 s | Cobre o intervalo em que o SSE está fora; não é o transporte |
+
+Estados visíveis do transporte: `live`, `reconnecting`, `polling`, `down`.
+
+O defeito corrigido: o servidor sempre nomeou os eventos, e o cliente escutava
+apenas `source.onmessage`, que só dispara para quadros anônimos. Nenhum evento
+de dado chegava ao navegador. O painel exibia "Tempo real" logo após `onopen` e
+vivia inteiramente do polling. O cliente novo (`public/assets/event-stream.js`)
+registra um listener por tipo, deduplica por cursor e é compartilhado pelo
+dashboard e pelas quatro páginas anteriores.
+
+## 8. Governança do console
+
+O painel não pode transformar o OrqPEG em um agente autônomo irrestrito. O campo
+do console tem quatro modos e **em nenhum deles existe canal de prompt livre** —
+o OrqPEG não expõe endpoint que aceite instrução arbitrária para o agente, e o
+dashboard não inventa um.
+
+| Modo | Quando | Comportamento |
+| --- | --- | --- |
+| `blocked` | Nenhuma execução selecionada | Campo desabilitado |
+| `readonly` | Execução encerrada | Campo desabilitado; histórico não aceita instrução |
+| `limited` | Execução em curso sob política congelada | Campo desabilitado; a explicação diz por quê |
+| `authorized` | Loop Guard ou gate pediu decisão humana | Campo aceita **justificativa**, não instrução |
+
+No modo `authorized`, o texto digitado é a justificativa de uma autorização
+manual e vai para `POST /api/projects/:id/runs/:runId/override`, que valida no
+servidor contra a política congelada da execução. Toda ação sensível
+(cancelamento, autorização, auditoria) passa por diálogo de confirmação, e a
+justificativa tem tamanho mínimo exigido antes de sair do cliente.
+
+## 9. Cobertura de teste
+
+| Arquivo | Cobre |
+| --- | --- |
+| `tests/integration/dashboard-event-stream.test.js` | Evento nomeado e identificado, `retry:`, retomada por cabeçalho e por query, ausência de duplicata, cliente novo sem backlog, cursor ilegível, heartbeat anônimo, teto do backlog, aviso de truncamento, cliente morto no meio da escrita |
+| `tests/security/dashboard-surface.test.js` | Arquivos servidos e tipo correto, páginas anteriores preservadas, traversal pelos caminhos novos, CSP sem `unsafe-inline`, ausência de estilo/script inline, ausência de origem externa, ausência de injeção de HTML, quatro modos de governança, confirmação de ação sensível, validação de identificador da URL, `promptId` hostil (traversal e injeção de comando) recusado antes do disco, ausência de vazamento de segredo, isolamento dos tokens |

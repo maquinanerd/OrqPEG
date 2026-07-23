@@ -152,15 +152,38 @@ export function createEventHub(): EventHub {
 
   return {
     subscribe(req, res) {
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-store',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
+      /*
+       * Um cliente pode morrer entre o aceite da conexão e a primeira escrita —
+       * aba fechada, recarga, proxy que desistiu. Escrever sem proteção fazia a
+       * exceção subir até o tratador de requisição e virar erro 500 registrado,
+       * para um socket que simplesmente não existe mais. A assinatura desiste em
+       * silêncio: não há cliente a quem reportar.
+       */
+      let alive = true;
+      const write = (payload: string): boolean => {
+        if (!alive) return false;
+        try {
+          res.write(payload);
+          return true;
+        } catch {
+          alive = false;
+          return false;
+        }
+      };
 
-      res.write(`retry: ${RETRY_MS}\n\n`);
-      res.write(': conectado ao OrqPEG\n\n');
+      try {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-store',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+      } catch {
+        return;
+      }
+
+      write(`retry: ${RETRY_MS}\n\n`);
+      write(': conectado ao OrqPEG\n\n');
 
       const cursor = readCursor(req);
       if (cursor > 0) {
@@ -172,7 +195,7 @@ export function createEventHub(): EventHub {
            * backlog. Reemitir só o que sobrou entregaria um estado com buraco
            * silencioso, então o servidor é explícito e o cliente recarrega.
            */
-          res.write(
+          write(
             frame(
               {
                 type: 'log',
@@ -188,10 +211,11 @@ export function createEventHub(): EventHub {
         }
 
         for (const event of backlog) {
-          if (event.id > cursor) res.write(frame(event, event.id));
+          if (event.id > cursor) write(frame(event, event.id));
         }
       }
 
+      if (!alive) return;
       clients.add(res);
 
       const remove = (): void => {
