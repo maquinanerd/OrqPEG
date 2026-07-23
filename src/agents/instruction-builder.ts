@@ -389,6 +389,74 @@ const CLAUDE_CI_REPAIR_FALLBACK = [
   'encontrou e pare. Uma parada honesta é melhor que um verde falso.',
 ].join('\n');
 
+export interface MergeCorrectionInstructionInput {
+  projectName: string;
+  cycle: number;
+  maxCycles: number;
+  requestedBy: string[];
+  reasons: string[];
+  testCommands: string[];
+}
+
+/**
+ * Instrução da correção pedida pelas auditorias finais.
+ *
+ * Diferente do reparo de CI: aqui o código passou no CI e falhou no julgamento
+ * humano-substituto. O escopo continua estreito pelo mesmo motivo — cada
+ * commit novo invalida as duas auditorias e obriga a refazê-las, então ampliar
+ * o diff custa duas auditorias de IA e um ciclo do orçamento.
+ */
+export function buildMergeCorrectionInstruction(
+  input: MergeCorrectionInstructionInput,
+): string {
+  return render('CLAUDE-MERGE-CORRECTION.md', CLAUDE_MERGE_CORRECTION_FALLBACK, {
+    PROJECT_NAME: input.projectName,
+    CYCLE: String(input.cycle),
+    MAX_CYCLES: String(input.maxCycles),
+    REQUESTED_BY: formatList(input.requestedBy, 'Auditor não identificado.'),
+    REASONS: formatList(input.reasons, 'Nenhum motivo listado.'),
+    TEST_COMMANDS: formatList(input.testCommands, 'Nenhum comando de teste configurado.'),
+  });
+}
+
+const CLAUDE_MERGE_CORRECTION_FALLBACK = [
+  '# Correção pós-auditoria — {{PROJECT_NAME}}',
+  '',
+  'O código já passou na revisão de prompt, nos testes e no CI. As auditorias',
+  'finais, que decidem o merge, pediram mudanças.',
+  '',
+  'Ciclo {{CYCLE}} de {{MAX_CYCLES}}. Esgotado o orçamento, a execução para sem',
+  'merge e passa para revisão humana.',
+  '',
+  '## Quem pediu',
+  '',
+  '{{REQUESTED_BY}}',
+  '',
+  '## O que foi apontado',
+  '',
+  '{{REASONS}}',
+  '',
+  '## Antes de terminar',
+  '',
+  'Rode localmente e garanta que passam:',
+  '',
+  '{{TEST_COMMANDS}}',
+  '',
+  '## Escopo',
+  '',
+  'PERMITIDO: corrigir exatamente o que foi apontado acima.',
+  '',
+  'PROIBIDO: refatorar o que não foi apontado, renomear, reorganizar arquivos,',
+  'ou aproveitar a viagem para melhorias.',
+  '',
+  'Cada commit seu invalida as DUAS auditorias e obriga a refazê-las sobre o',
+  'novo SHA. Um diff maior que o necessário custa um ciclo inteiro do orçamento.',
+  '',
+  'Se discordar de um apontamento ou julgá-lo impossível de atender, NÃO',
+  'contorne: explique e pare. Uma parada com motivo é melhor que uma mudança',
+  'que finge atender.',
+].join('\n');
+
 function render(templateFile: string, fallback: string, markers: MarkerMap): string {
   const template = loadTemplate(templateFile) ?? fallback;
   return `${applyMarkers(template, markers).trimEnd()}\n`;

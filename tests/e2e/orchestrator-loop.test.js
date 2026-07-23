@@ -941,6 +941,107 @@ test('CI reprovado interrompe antes da auditoria final', async () => {
   );
 });
 
+/*
+ * Orçamento da auditoria final.
+ *
+ * O par "auditor pede mudança / executor corrige" é um laço como qualquer
+ * outro, e o mais caro de todos: cada volta gasta DUAS auditorias de IA e
+ * invalida toda a evidência anterior, porque o head SHA muda.
+ */
+test('auditor pedindo mudanças consome o orçamento e para em MERGE_CORRECTION_BUDGET_EXHAUSTED', async () => {
+  const project = makeProject();
+
+  // O Claude nunca aprova e sempre aponta ação concreta: é o caso corrigível.
+  const { result, spy } = await execute(project, {
+    claudeAuditOverrides: {
+      verdict: 'CHANGES_REQUIRED',
+      requiredActions: ['Tratar o caso de borda do parser.'],
+      blockingIssues: [
+        { severity: 'blocking', title: 'Borda', description: 'Entrada vazia quebra.' },
+      ],
+    },
+  });
+
+  assert.equal(result.value.state, 'BLOCKED');
+  assert.equal(result.value.lastLoopGuard.trigger, 'MERGE_CORRECTION_BUDGET_EXHAUSTED');
+  assert.equal(spy.merged, false, 'orçamento esgotado nunca mergeia');
+
+  // Exatamente o limite: nem uma correção a mais.
+  assert.equal(result.value.mergeCorrectionCycles, 2);
+  assert.equal(result.value.mergeCorrections.length, 2);
+  assert.deepEqual(
+    result.value.mergeCorrections.map((c) => c.cycle),
+    [1, 2],
+    'os ciclos são numerados e nenhum sobrescreve o outro',
+  );
+
+  // Cada correção produziu um commit próprio, preservado.
+  const correcoes = result.value.commits.filter((c) => c.promptId.startsWith('merge-correction-'));
+  assert.equal(correcoes.length, 2);
+
+  // A evidência antiga não sobrevive: nada continua afirmando aprovação.
+  assert.equal(result.value.consensus.reached, false);
+  for (const review of result.value.mergeReviews) {
+    if (review.auditor === 'claude') continue;
+    assert.ok(
+      review.invalidated === true || result.value.consensus.reached === false,
+      'aprovação anterior não pode sobreviver a um head novo',
+    );
+  }
+
+  // A PR e a branch foram preservadas para revisão humana.
+  assert.ok(result.value.pullRequest, 'a PR não é fechada');
+  assert.ok(result.value.branchName, 'a branch não é apagada');
+});
+
+test('artefatos de correção pós-auditoria são append-only, um diretório por ciclo', async () => {
+  const project = makeProject();
+  const { result } = await execute(project, {
+    claudeAuditOverrides: {
+      verdict: 'CHANGES_REQUIRED',
+      requiredActions: ['Corrigir a validação.'],
+    },
+  });
+
+  const raiz = path.join(
+    HOME, 'data', 'projects', project.id, 'artifacts', result.value.runId, 'merge-corrections',
+  );
+  assert.deepEqual(
+    fs.readdirSync(raiz).sort(),
+    ['cycle-001', 'cycle-002'],
+    'um diretório por ciclo, nenhum sobrescrito',
+  );
+  for (const ciclo of ['cycle-001', 'cycle-002']) {
+    const pedido = JSON.parse(
+      fs.readFileSync(path.join(raiz, ciclo, 'requested-changes.json'), 'utf8'),
+    );
+    assert.ok(pedido.reasons.length > 0, 'o motivo do pedido fica registrado');
+    assert.ok(pedido.requestedBy.includes('claude'));
+  }
+});
+
+test('bloqueio estrutural NÃO consome o orçamento de correção', async () => {
+  const project = makeProject();
+
+  // Codex ausente na auditoria é bloqueio de gate, não pedido de mudança:
+  // corrigir código não resolveria, e gastar ciclos aqui seria desperdício.
+  const { result, spy } = await execute(project, {
+    codexAudit: () => ({
+      ok: false,
+      error: { code: 'TOOL_MISSING', message: 'Codex CLI não encontrado.' },
+    }),
+  });
+
+  assert.equal(result.value.state, 'BLOCKED');
+  assert.equal(result.value.mergeCorrectionCycles, 0, 'nenhum ciclo foi consumido');
+  assert.equal(
+    spy.claudeCalls.filter((r) => r === 'corrector').length,
+    0,
+    'nenhuma correção foi tentada',
+  );
+  assert.equal(spy.merged, false);
+});
+
 /* ------------------------------------------------------------------------ */
 /* Política do projeto e segurança                                           */
 /* ------------------------------------------------------------------------ */

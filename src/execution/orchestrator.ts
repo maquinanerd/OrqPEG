@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import type {
   AttemptSummary,
   CiRepairRecord,
+  MergeCorrectionRecord,
   EffectiveExecutionPolicySnapshot,
   GlobalConfig,
   Logger,
@@ -65,6 +66,7 @@ import {
   buildClaudeCorrectionInstruction,
   buildClaudeExecutionInstruction,
   buildCiRepairInstruction,
+  buildMergeCorrectionInstruction,
   buildClaudeMergeAuditInstruction,
   buildCodexMergeAuditInstruction,
   buildCodexPromptReviewInstruction,
@@ -1455,22 +1457,79 @@ function finishCiRepair(
 /* Etapa 4 — auditorias finais, consenso, gates e merge                       */
 /* ------------------------------------------------------------------------- */
 
+/**
+ * Auditorias finais com orçamento de correção.
+ *
+ * Quando os auditores pedem mudanças, corrigir é legítimo — mas não
+ * indefinidamente. Cada correção muda o head SHA, e mudar o head invalida
+ * TODA a evidência anterior: as duas aprovações, o consenso, os gates e a
+ * confiança foram emitidos sobre um código que já não existe. Sem teto, o par
+ * "auditor pede / executor corrige" gira sem convergir, gastando duas
+ * auditorias de IA por volta.
+ */
 async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<RunRecord>> {
   let run = input;
+
+  for (;;) {
+    const round = await auditRound(ctx, run);
+    if (!round.ok) return round;
+    run = round.value.run;
+
+    if (round.value.outcome !== 'CHANGES_REQUESTED') return ok(run);
+
+    const limit = Math.max(0, ctx.policy.mergeAudit.maxCorrectionCycles);
+    if (run.mergeCorrectionCycles >= limit) {
+      run = save(
+        ctx,
+        applyMergeCorrectionStop(ctx, run, limit, round.value.requestedBy, round.value.reasons),
+      );
+      return ok(run);
+    }
+
+    const corrected = await correctAfterAudit(
+      ctx,
+      run,
+      run.mergeCorrectionCycles + 1,
+      round.value.requestedBy,
+      round.value.reasons,
+    );
+    if (!corrected.ok) return corrected;
+    run = corrected.value;
+
+    /* A correção pode ter parado por conta própria (testes locais, agente,
+       push). Só voltamos a auditar se ela realmente produziu um head novo. */
+    if (run.state === 'CI_FAILED' || isStopState(run.state)) return ok(run);
+  }
+}
+
+interface AuditRoundResult {
+  run: RunRecord;
+  outcome: 'DONE' | 'CHANGES_REQUESTED';
+  requestedBy: Array<'claude' | 'codex'>;
+  reasons: string[];
+}
+
+async function auditRound(
+  ctx: Context,
+  input: RunRecord,
+): Promise<Result<AuditRoundResult>> {
+  let run = input;
   const { project, config, ports, logger } = ctx;
+  const done = (r: RunRecord): Result<AuditRoundResult> =>
+    ok({ run: r, outcome: 'DONE', requestedBy: [], reasons: [] });
 
   if (!ctx.policy.merge.enabled || ctx.policy.merge.mode !== 'dual_ai_consensus') {
     run = save(
       ctx,
       transition(run, 'COMPLETED', 'Merge automático desabilitado para este projeto.'),
     );
-    return ok(run);
+    return done(run);
   }
 
   const pr = run.pullRequest;
   if (!pr) {
     run = save(ctx, transition(run, 'BLOCKED', 'Sem pull request: auditoria final não se aplica.'));
-    return ok(run);
+    return done(run);
   }
 
   // Releitura da PR: o head SHA precisa ser o valor atual, não o do momento da
@@ -1644,12 +1703,29 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
       ...consensus.reasons,
       ...gateReport.failedGates.map((id) => `gate reprovado: ${id}`),
     ];
+
+    /*
+     * Distinguir "auditor pediu mudanças" de "bloqueio estrutural".
+     *
+     * Um pedido de mudança é corrigível pelo executor e merece um ciclo do
+     * orçamento. Um gate de CI vermelho, conflito de merge ou thread não
+     * resolvida não se resolve editando código aqui — insistir gastaria duas
+     * auditorias por volta para chegar ao mesmo lugar.
+     */
+    const requestedBy = auditorsRequestingChanges(claudeFinal, codexFinal);
+    if (requestedBy.length > 0) {
+      logger.warn(
+        `Auditoria pediu mudanças (${requestedBy.join(', ')}). ${reasons.slice(0, 3).join(' | ')}`,
+      );
+      return ok({ run, outcome: 'CHANGES_REQUESTED', requestedBy, reasons });
+    }
+
     logger.warn(`Merge NÃO autorizado. ${reasons.join(' | ')}`);
     run = save(
       ctx,
       transition(run, 'BLOCKED', `Merge não autorizado: ${reasons.slice(0, 5).join(' | ')}`),
     );
-    return ok(run);
+    return done(run);
   }
 
   /* --- Merge ----------------------------------------------------------- */
@@ -1671,7 +1747,7 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
       ...transition(run, 'BLOCKED', `Merge não executado: ${merged.error.message}`),
       lastError: merged.error,
     });
-    return ok(run);
+    return done(run);
   }
 
   run = save(ctx, {
@@ -1679,7 +1755,256 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
     mergeOutcome: merged.value,
   });
   logger.info(`Merge concluído. SHA: ${merged.value.mergeSha ?? 'desconhecido'}`);
+  return done(run);
+}
+
+/** Auditores que pediram mudanças corrigíveis, com ação concreta declarada. */
+function auditorsRequestingChanges(
+  claude: MergeReviewRecord | null,
+  codex: MergeReviewRecord | null,
+): Array<'claude' | 'codex'> {
+  const out: Array<'claude' | 'codex'> = [];
+  for (const record of [claude, codex]) {
+    if (!record || record.invalidated) continue;
+    const review = record.review;
+    if (!review) continue;
+    if (review.verdict === 'APPROVED_FOR_MERGE') continue;
+    /* Sem ação concreta não há o que corrigir: encaminhar um "não aprovo" vago
+       produziria correção às cegas, exatamente o que o Loop Guard recusa na
+       revisão de prompt. */
+    const hasAction =
+      review.requiredActions.length > 0 || review.blockingIssues.length > 0;
+    if (hasAction) out.push(record.auditor);
+  }
+  return out;
+}
+
+/** Parada nomeada do orçamento de auditoria. Não mergeia, preserva tudo. */
+function applyMergeCorrectionStop(
+  ctx: Context,
+  run: RunRecord,
+  limit: number,
+  requestedBy: Array<'claude' | 'codex'>,
+  reasons: string[],
+): RunRecord {
+  const reason =
+    `O orçamento de ${String(limit)} ciclo(s) de correção após auditoria foi consumido e os ` +
+    'auditores continuam pedindo mudanças. A PR, a branch e o worktree foram preservados para revisão humana.';
+  ctx.logger.warn(`MERGE_CORRECTION_BUDGET_EXHAUSTED — ${reason}`);
+
+  const decision: LoopGuardDecision = {
+    allowed: false,
+    severity: severityOf('MERGE_CORRECTION_BUDGET_EXHAUSTED'),
+    trigger: 'MERGE_CORRECTION_BUDGET_EXHAUSTED',
+    reason,
+    evidence: { limit, cycles: run.mergeCorrectionCycles, requestedBy, reasons: reasons.slice(0, 5) },
+    nextActions: ['OPEN_REPORT', 'MARK_FOR_MANUAL_REVIEW'],
+  };
+
+  return {
+    ...transition(run, 'BLOCKED', `MERGE_CORRECTION_BUDGET_EXHAUSTED: ${reason}`, {
+      trigger: 'MERGE_CORRECTION_BUDGET_EXHAUSTED',
+    }),
+    lastLoopGuard: decision,
+  };
+}
+
+/**
+ * Um ciclo de correção pedido pelas auditorias finais.
+ *
+ * Produz um commit novo sobre a mesma branch e, com ele, um head SHA novo —
+ * o que obriga a invalidar toda a evidência anterior antes de auditar de novo.
+ */
+async function correctAfterAudit(
+  ctx: Context,
+  input: RunRecord,
+  cycle: number,
+  requestedBy: Array<'claude' | 'codex'>,
+  reasons: string[],
+): Promise<Result<RunRecord>> {
+  let run = input;
+  const headShaBefore = run.pullRequest?.headSha ?? '';
+  const startedAt = nowIso();
+  const issueFingerprint = stableHash(reasons.map((r) => r.toLowerCase().trim()).sort());
+
+  const dirResult = createExclusiveDirSync(
+    path.join(
+      projectArtifactsDir(ctx.project.id),
+      run.runId,
+      'merge-corrections',
+      `cycle-${String(cycle).padStart(3, '0')}`,
+    ),
+  );
+  if (!dirResult.ok) {
+    run = save(ctx, transition(run, 'FAILED', dirResult.error.message));
+    return dirResult;
+  }
+  const dir = dirResult.value;
+  writeExclusiveSync(
+    path.join(dir, 'requested-changes.json'),
+    `${JSON.stringify({ cycle, requestedBy, reasons, headShaBefore, startedAt }, null, 2)}\n`,
+  );
+
+  run = save(ctx, {
+    ...run,
+    mergeCorrectionCycles: cycle,
+    mergeCorrections: [
+      ...run.mergeCorrections,
+      {
+        cycle,
+        headShaBefore,
+        requestedBy,
+        issueFingerprint,
+        startedAt,
+        finishedAt: null,
+        outcome: 'AGENT_FAILED',
+        headShaAfter: null,
+      },
+    ],
+  });
+
+  /* A evidência antiga morre ANTES da correção começar: se o processo cair no
+     meio, o que fica no disco não pode continuar afirmando que o código está
+     aprovado. */
+  run = save(
+    ctx,
+    invalidateMergeApprovals(
+      run,
+      `Ciclo de correção ${String(cycle)} solicitado por ${requestedBy.join(', ')}.`,
+    ),
+  );
+
+  run = save(
+    ctx,
+    transition(run, 'RUNNING_CLAUDE', `Correção pós-auditoria ${String(cycle)}.`),
+  );
+
+  const instruction = buildMergeCorrectionInstruction({
+    projectName: ctx.project.name,
+    cycle,
+    maxCycles: ctx.policy.mergeAudit.maxCorrectionCycles,
+    requestedBy,
+    reasons,
+    testCommands: ctx.policy.commands.tests,
+  });
+  writeExclusiveSync(path.join(dir, 'claude-instruction.md'), instruction);
+
+  const claude = await ctx.ports.agents.runClaude({
+    role: 'corrector',
+    config: ctx.config,
+    cwd: ctx.workingDir,
+    instruction,
+    timeoutMs: ctx.config.agents.claudeTimeoutSeconds * 1000,
+    model: ctx.policy.agents.claudeModel,
+    artifactDir: dir,
+    readOnly: false,
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+  });
+  if (!claude.ok) {
+    run = save(ctx, {
+      ...finishMergeCorrection(run, cycle, 'AGENT_FAILED', null),
+      ...transition(run, 'BLOCKED', `O executor falhou na correção pós-auditoria ${String(cycle)}.`),
+      lastError: claude.error,
+    });
+    return ok(run);
+  }
+
+  const changed = await ctx.ports.git.changedFiles(ctx.workingDir);
+  if (!changed.ok) return changed;
+  if (changed.value.length === 0) {
+    run = save(
+      ctx,
+      transition(
+        finishMergeCorrection(run, cycle, 'NO_CHANGES', null),
+        'BLOCKED',
+        `A correção pós-auditoria ${String(cycle)} não alterou nenhum arquivo: não há o que reauditar.`,
+      ),
+    );
+    return ok(run);
+  }
+
+  run = save(ctx, transition(run, 'RUNNING_TESTS', 'Validando a correção pós-auditoria.'));
+  const tests = await ctx.ports.tests.run({
+    commands: ctx.policy.commands.tests,
+    cwd: ctx.workingDir,
+    timeoutSeconds: ctx.policy.commands.timeoutSeconds,
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+  });
+  writeExclusiveSync(path.join(dir, 'tests.json'), `${JSON.stringify(tests, null, 2)}\n`);
+  run = save(ctx, { ...run, finalTests: tests });
+
+  if (!tests.passed) {
+    run = save(
+      ctx,
+      transition(
+        finishMergeCorrection(run, cycle, 'TESTS_FAILED', null),
+        'BLOCKED',
+        `A correção pós-auditoria ${String(cycle)} reprovou nos testes locais.`,
+      ),
+    );
+    return ok(run);
+  }
+
+  const patch = await ctx.ports.git.diffPatch(ctx.workingDir);
+  if (patch.ok) writeExclusiveSync(path.join(dir, 'diff.patch'), patch.value);
+
+  const staged = await ctx.ports.git.addPaths(ctx.workingDir, changed.value);
+  if (!staged.ok) return staged;
+
+  const message =
+    `${ctx.policy.git.commitMessagePrefix} ${ctx.project.id}: correção pós-auditoria ${String(cycle)}`.trim();
+  const commit = await ctx.ports.git.commit(ctx.workingDir, message);
+  if (!commit.ok) return commit;
+
+  run = save(ctx, {
+    ...run,
+    commits: [
+      ...run.commits,
+      { promptId: `merge-correction-${String(cycle)}`, sha: commit.value, message, at: nowIso() },
+    ],
+  });
+
+  run = save(ctx, transition(run, 'PUSHING', 'Enviando a correção pós-auditoria.'));
+  const pushed = await ctx.ports.git.push(
+    ctx.workingDir,
+    ctx.policy.repository.remote,
+    run.branchName ?? '',
+    false,
+  );
+  if (!pushed.ok) {
+    run = save(ctx, {
+      ...finishMergeCorrection(run, cycle, 'AGENT_FAILED', commit.value),
+      ...transition(run, 'BLOCKED', 'Falha ao enviar a correção pós-auditoria.'),
+      lastError: pushed.error,
+    });
+    return ok(run);
+  }
+
+  run = save(ctx, finishMergeCorrection(run, cycle, 'CORRECTED', commit.value));
+
+  /* Head novo exige CI novo: auditar sobre um commit cujo CI não rodou seria
+     aprovar sem a evidência que o próprio gate exige. */
+  if (ctx.policy.pullRequest.waitForChecks && run.pullRequest) {
+    const ci = await runCiLoop(ctx, run, run.pullRequest.number);
+    if (!ci.ok) return ci;
+    run = ci.value;
+  }
+
   return ok(run);
+}
+
+function finishMergeCorrection(
+  run: RunRecord,
+  cycle: number,
+  outcome: MergeCorrectionRecord['outcome'],
+  headShaAfter: string | null,
+): RunRecord {
+  return {
+    ...run,
+    mergeCorrections: run.mergeCorrections.map((entry) =>
+      entry.cycle === cycle ? { ...entry, outcome, headShaAfter, finishedAt: nowIso() } : entry,
+    ),
+  };
 }
 
 function toRecord(
