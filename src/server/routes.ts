@@ -37,6 +37,7 @@ import type { GrantOverrideOutput } from '../execution/override';
 import {
   executionRelevantProjectConfigHash,
   materializeLegacyPolicySnapshot,
+  parseRoundPolicyOverrides,
   requireEffectivePolicy,
 } from '../execution/effective-policy';
 import { withLock } from '../state/locks';
@@ -749,7 +750,9 @@ async function handleMaterializePolicy(ctx: RouteContext): Promise<void> {
           projectContextHash: current.projectContextHash ?? '',
           projectConfigHash:
             current.projectConfigHash ?? materialized.value.sources.projectConfigHash,
-          roundConfigHash: null,
+          /* Execução legada não declarou rodada; o hash acompanha a política
+             materializada em vez de repetir `null` numa segunda fonte. */
+          roundConfigHash: materialized.value.sources.roundConfigHash,
         },
       };
       const saved = saveRun(updated);
@@ -955,14 +958,39 @@ async function handleStartRun(ctx: RouteContext): Promise<void> {
   const id = requireId(ctx, 0);
   if (id === null) return;
 
-  const body = await readJsonBody<{ dryRun?: boolean; resumeRunId?: string }>(ctx.req);
-  const dryRun = body.ok ? body.value.dryRun === true : false;
-  const resumeRunId = body.ok ? body.value.resumeRunId ?? null : null;
+  const body = await readJsonBody<{
+    dryRun?: boolean;
+    resumeRunId?: string;
+    roundConfig?: unknown;
+  }>(ctx.req);
+  if (!body.ok) {
+    sendJson(ctx.res, 400, { error: body.error.message });
+    return;
+  }
+  const dryRun = body.value.dryRun === true;
+  const resumeRunId = body.value.resumeRunId ?? null;
+
+  const roundConfig = parseRoundPolicyOverrides(body.value.roundConfig);
+  if (!roundConfig.ok) {
+    sendJson(ctx.res, 400, { error: roundConfig.error.message, details: roundConfig.error.details });
+    return;
+  }
+  /* Retomada usa a política congelada da execução original. Aceitar uma rodada
+     aqui prometeria um efeito que não acontece; recusar diz onde está o
+     conflito em vez de deixar o operador descobrir pelo relatório. */
+  if (roundConfig.value !== null && resumeRunId !== null) {
+    sendJson(ctx.res, 409, {
+      error:
+        'Não é possível declarar "roundConfig" ao retomar: a execução retomada roda sob a política congelada quando ela começou. Inicie uma nova execução para aplicar outra rodada.',
+    });
+    return;
+  }
 
   const started = startRunInBackground({
     projectId: id,
     dryRun,
     resumeRunId,
+    roundConfig: roundConfig.value,
     config: ctx.deps.config,
     logger: ctx.deps.logger,
     events: ctx.deps.events,
@@ -972,7 +1000,12 @@ async function handleStartRun(ctx: RouteContext): Promise<void> {
     sendJson(ctx.res, 409, { error: started.error.message });
     return;
   }
-  sendJson(ctx.res, 202, { started: true, dryRun, projectId: id });
+  sendJson(ctx.res, 202, {
+    started: true,
+    dryRun,
+    projectId: id,
+    roundId: roundConfig.value?.roundId ?? null,
+  });
 }
 
 async function handlePause(ctx: RouteContext): Promise<void> {

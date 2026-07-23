@@ -24,6 +24,17 @@ Fechamento do escopo do OrqPEG 1.0. Tudo aqui existe para uma finalidade só:
   comparável entre execuções; `integrityHash` sela o snapshot inteiro,
   `sourceMetadata` inclusive.
 - Camada global opcional em `GlobalConfig.loopGuard`.
+- Camada de rodada declarada em `roundConfig`, no corpo de
+  `POST /api/projects/:id/run`. A rodada é propriedade da execução e não do
+  cadastro: dois disparos do mesmo projeto podem ter tetos diferentes sem que
+  nada em disco mude. Com o campo declarado, `roundConfigHash` passa a valer
+  em `effectivePolicy.sources` e em `sourceSnapshots`; omitido, permanece
+  `null` — "esta execução não tem rodada", que não é "rodada vazia".
+- A fronteira da rodada **recusa** em vez de corrigir: campo desconhecido,
+  tipo errado, valor fora de faixa e `roundId` fora do alfabeto de
+  identificadores devolvem `400` nomeando o campo. `roundConfig` junto de
+  `resumeRunId` devolve `409`, porque a retomada roda sob a política congelada
+  quando a execução começou.
 - `POST /api/projects/:id/runs/:runId/materialize-policy` para execuções
   legadas, com confirmação explícita e marca de procedência.
 

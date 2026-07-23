@@ -9,7 +9,12 @@ import type {
 } from '../types';
 import { fail, ok } from '../utils/errors';
 import { nowIso } from '../utils/time';
-import { normalizeLoopGuardConfig, validateLoopGuardConfig } from './loop-guard-config';
+import {
+  defaultLoopGuardConfig,
+  normalizeLoopGuardConfig,
+  validateLoopGuardConfig,
+} from './loop-guard-config';
+import { validateIdentifier } from '../security/path-guard';
 import { stableHash } from './fingerprints';
 
 /**
@@ -59,7 +64,14 @@ export interface ResolvePolicyInput {
   roundConfig: RoundPolicyOverrides | null;
 }
 
-/** Camada de rodada. Ainda não há origem para ela; o formato nasce pronto. */
+/**
+ * Camada de rodada. A origem é o corpo da requisição que cria a execução.
+ *
+ * A rodada é propriedade da execução, não do cadastro: dois disparos do mesmo
+ * projeto na mesma tarde podem ter tetos diferentes sem que nada em disco mude.
+ * É por isso que ela não é lida de arquivo — se fosse, editar o arquivo entre
+ * dois disparos reescreveria retroativamente a intenção do primeiro.
+ */
 export interface RoundPolicyOverrides {
   roundId: string;
   loopGuard?: Partial<LoopGuardConfig>;
@@ -67,6 +79,180 @@ export interface RoundPolicyOverrides {
   maxReviewerRetries?: number;
   continueAfterApproval?: boolean;
   stopOnBlocked?: boolean;
+}
+
+/** Campos aceitos na raiz de `roundConfig`. */
+const ROUND_KNOWN_KEYS: ReadonlySet<string> = new Set([
+  'roundId',
+  'loopGuard',
+  'maxAttemptsPerPrompt',
+  'maxReviewerRetries',
+  'continueAfterApproval',
+  'stopOnBlocked',
+]);
+
+/** Chaves de `loopGuard` em que `null` é declaração explícita de "sem teto". */
+const NULLABLE_LOOP_GUARD_KEYS: ReadonlySet<string> = new Set([
+  'maxChangedFilesPerPrompt',
+  'maxChangedLinesPerPrompt',
+]);
+
+/**
+ * Lê a camada de rodada vinda do corpo da requisição.
+ *
+ * Recusa em vez de corrigir, ao contrário de `normalizeLoopGuardConfig`. A
+ * diferença é a origem: aquela lê disco, onde ninguém está presente para ser
+ * avisado, e o mal menor é assumir o padrão; esta lê uma requisição que um
+ * operador acabou de mandar, e clampar em silêncio congelaria uma política
+ * diferente da que ele pediu — exatamente o que este módulo existe para evitar.
+ *
+ * Campo desconhecido também é recusado. Ele não teria efeito nenhum sobre a
+ * política e ainda assim entraria em `roundConfigHash`, produzindo duas rodadas
+ * com hashes distintos e comportamento idêntico.
+ */
+export function parseRoundPolicyOverrides(value: unknown): Result<RoundPolicyOverrides | null> {
+  /* Ausência é ausência: "esta execução não tem rodada", não "rodada vazia". */
+  if (value === undefined || value === null) return ok(null);
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return fail(
+      'VALIDATION_FAILED',
+      'roundConfig: esperado um objeto declarando ao menos "roundId".',
+    );
+  }
+  const raw = value as Record<string, unknown>;
+
+  const unknown = Object.keys(raw).filter((key) => !ROUND_KNOWN_KEYS.has(key));
+  if (unknown.length > 0) {
+    return fail(
+      'VALIDATION_FAILED',
+      `roundConfig: campo(s) não reconhecido(s): ${unknown.join(', ')}.`,
+      { unknownKeys: unknown },
+    );
+  }
+
+  const rawRoundId = raw['roundId'];
+  if (typeof rawRoundId !== 'string') {
+    return fail(
+      'VALIDATION_FAILED',
+      'roundConfig.roundId: obrigatório. Uma rodada sem identidade não é rastreável no relatório.',
+    );
+  }
+  /* Mesmo alfabeto dos demais identificadores: o `roundId` aparece em nome de
+     artefato e em log, e um valor livre aqui vazaria para o disco. */
+  const roundId = validateIdentifier(rawRoundId, 'roundConfig.roundId');
+  if (!roundId.ok) return roundId;
+
+  const attempts = optionalRoundInteger(raw, 'maxAttemptsPerPrompt', 1);
+  if (!attempts.ok) return attempts;
+  const retries = optionalRoundInteger(raw, 'maxReviewerRetries', 0);
+  if (!retries.ok) return retries;
+  const continueAfterApproval = optionalRoundBoolean(raw, 'continueAfterApproval');
+  if (!continueAfterApproval.ok) return continueAfterApproval;
+  const stopOnBlocked = optionalRoundBoolean(raw, 'stopOnBlocked');
+  if (!stopOnBlocked.ok) return stopOnBlocked;
+  const loopGuard = parseRoundLoopGuard(raw['loopGuard']);
+  if (!loopGuard.ok) return loopGuard;
+
+  /* Chave só entra quando foi declarada. `stableStringify` serializa
+     `undefined` como `null`, então um campo presente-e-indefinido mudaria o
+     hash sem mudar a política. */
+  const round: RoundPolicyOverrides = { roundId: roundId.value };
+  if (loopGuard.value !== undefined) round.loopGuard = loopGuard.value;
+  if (attempts.value !== undefined) round.maxAttemptsPerPrompt = attempts.value;
+  if (retries.value !== undefined) round.maxReviewerRetries = retries.value;
+  if (continueAfterApproval.value !== undefined) {
+    round.continueAfterApproval = continueAfterApproval.value;
+  }
+  if (stopOnBlocked.value !== undefined) round.stopOnBlocked = stopOnBlocked.value;
+
+  return ok(round);
+}
+
+function optionalRoundInteger(
+  raw: Record<string, unknown>,
+  field: string,
+  minimum: number,
+): Result<number | undefined> {
+  const entry = raw[field];
+  if (entry === undefined) return ok(undefined);
+  if (typeof entry !== 'number' || !Number.isInteger(entry) || entry < minimum) {
+    return fail(
+      'VALIDATION_FAILED',
+      `roundConfig.${field}: deve ser um inteiro maior ou igual a ${String(minimum)}.`,
+      { value: entry },
+    );
+  }
+  return ok(entry);
+}
+
+function optionalRoundBoolean(
+  raw: Record<string, unknown>,
+  field: string,
+): Result<boolean | undefined> {
+  const entry = raw[field];
+  if (entry === undefined) return ok(undefined);
+  if (typeof entry !== 'boolean') {
+    return fail('VALIDATION_FAILED', `roundConfig.${field}: deve ser true ou false.`, {
+      value: entry,
+    });
+  }
+  return ok(entry);
+}
+
+/**
+ * Valida o `loopGuard` da rodada contra o formato do padrão do produto.
+ *
+ * O objeto vazio vira `undefined`: `{roundId}` e `{roundId, loopGuard: {}}`
+ * descrevem a mesma política e precisam produzir o mesmo `roundConfigHash`.
+ */
+function parseRoundLoopGuard(value: unknown): Result<Partial<LoopGuardConfig> | undefined> {
+  if (value === undefined) return ok(undefined);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return fail('VALIDATION_FAILED', 'roundConfig.loopGuard: deve ser um objeto.');
+  }
+
+  const defaults = defaultLoopGuardConfig() as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (entry === undefined) continue;
+    if (!(key in defaults)) {
+      return fail('VALIDATION_FAILED', `roundConfig.loopGuard.${key}: campo não reconhecido.`, {
+        key,
+      });
+    }
+    if (entry === null) {
+      if (!NULLABLE_LOOP_GUARD_KEYS.has(key)) {
+        return fail(
+          'VALIDATION_FAILED',
+          `roundConfig.loopGuard.${key}: não aceita null. Omita o campo para herdar a camada de baixo.`,
+          { key },
+        );
+      }
+      out[key] = null;
+      continue;
+    }
+    const expected = typeof defaults[key];
+    if (typeof entry !== expected) {
+      return fail(
+        'VALIDATION_FAILED',
+        `roundConfig.loopGuard.${key}: esperado ${expected}, recebido ${typeof entry}.`,
+        { key },
+      );
+    }
+    if (expected === 'number' && (!Number.isInteger(entry) || (entry as number) < 0)) {
+      return fail(
+        'VALIDATION_FAILED',
+        `roundConfig.loopGuard.${key}: deve ser um inteiro não negativo.`,
+        { key, value: entry },
+      );
+    }
+    out[key] = entry;
+  }
+
+  if (Object.keys(out).length === 0) return ok(undefined);
+  return ok(out as Partial<LoopGuardConfig>);
 }
 
 /**

@@ -458,7 +458,7 @@ Endpoints da API do painel:
 | GET | `/api/projects/{id}/runs/{runId}/consensus` | Situação do consenso |
 | GET | `/api/projects/{id}/runs/{runId}/report` | Relatório da execução |
 | GET | `/api/projects/{id}/dry-run` | Plano simulado |
-| POST | `/api/projects/{id}/run` | Iniciar execução |
+| POST | `/api/projects/{id}/run` | Iniciar execução (aceita `roundConfig`) |
 | POST | `/api/projects/{id}/pause` | Solicitar pausa |
 | POST | `/api/projects/{id}/resume` | Retomar |
 | POST | `/api/projects/{id}/cancel` | Cancelamento seguro |
@@ -553,6 +553,30 @@ padrões do produto → configuração global → projeto → rodada
 A partir daí, guard, painel, autorização de override, retomada, relatórios e
 dry-run leem desse snapshot. O cadastro do projeto continua servindo para
 identidade e caminhos; nunca para limites.
+
+A camada de rodada é declarada no corpo de `POST /api/projects/{id}/run`:
+
+```json
+{
+  "roundConfig": {
+    "roundId": "rodada-1",
+    "maxAttemptsPerPrompt": 5,
+    "loopGuard": { "maxCiRepairCycles": 1 }
+  }
+}
+```
+
+Ela é propriedade da execução, não do cadastro: dois disparos do mesmo projeto
+na mesma tarde podem ter tetos diferentes sem que nada em disco mude. Omitir o
+campo mantém `roundConfigHash` em `null` — "esta execução não tem rodada", que
+não é o mesmo que "rodada vazia".
+
+A fronteira **recusa** em vez de corrigir. Campo desconhecido, tipo errado,
+valor fora de faixa e `roundId` inválido devolvem `400` nomeando o campo; um
+valor clampado em silêncio congelaria uma política diferente da pedida. Declarar
+`roundConfig` junto de `resumeRunId` devolve `409`: a retomada roda sob a
+política congelada quando a execução começou, e aceitar a rodada ali prometeria
+um efeito que não acontece.
 
 Isso existe por um motivo concreto: antes, editar o `project.json` alterava
 retroativamente uma execução já iniciada — e aumentar

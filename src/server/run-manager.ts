@@ -1,6 +1,7 @@
 import type { GlobalConfig, Logger, Result, RunRecord } from '../types';
 import { fail, ok } from '../utils/errors';
 import { runProject } from '../execution/orchestrator';
+import type { RoundPolicyOverrides } from '../execution/effective-policy';
 import { createDefaultPorts } from '../execution/default-ports';
 import type { EventHub } from './events';
 
@@ -26,6 +27,8 @@ export interface StartRunInput {
   projectId: string;
   dryRun: boolean;
   resumeRunId: string | null;
+  /** Camada de rodada já validada. Ausente é o mesmo que `null`: sem rodada. */
+  roundConfig?: RoundPolicyOverrides | null;
   config: GlobalConfig;
   logger: Logger;
   events: EventHub;
@@ -52,6 +55,7 @@ export function startRunInBackground(input: StartRunInput): Result<{ started: tr
     projectId: input.projectId,
     dryRun: input.dryRun,
     resumeRunId: input.resumeRunId,
+    roundConfig: input.roundConfig ?? null,
     config: input.config,
     logger,
     ports: createDefaultPorts(),

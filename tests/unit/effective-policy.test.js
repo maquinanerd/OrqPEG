@@ -26,6 +26,8 @@ const {
   assertEffectivePolicySnapshot,
   materializeLegacyPolicySnapshot,
   executionRelevantProjectConfigHash,
+  parseRoundPolicyOverrides,
+  roundConfigHashOf,
   hasPolicySnapshot,
 } = require('../../dist/execution/effective-policy');
 const { createRun, saveRun, loadRun } = require('../../dist/state/run-state');
@@ -779,6 +781,165 @@ test('materializar sobre execução que já tem política congelada é recusado'
 
   // E o registro segue com a política original intacta.
   assert.equal(run.effectivePolicy.sourceMetadata.materializedFromLegacyRun, undefined);
+});
+
+/* ------------------------------------------------------------------------ */
+/* Origem da camada de rodada                                                */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * A camada de rodada agora tem origem: o corpo da requisição que cria a
+ * execução. O que estes testes vigiam é a fronteira — ela recusa em vez de
+ * corrigir, porque um valor clampado em silêncio congelaria uma política
+ * diferente da que o operador pediu.
+ */
+
+test('ausência de rodada é null, não rodada vazia', () => {
+  for (const entrada of [undefined, null]) {
+    const lido = parseRoundPolicyOverrides(entrada);
+    assert.equal(lido.ok, true);
+    assert.equal(lido.value, null);
+  }
+});
+
+test('rodada válida atravessa a fronteira e passa a governar a política', () => {
+  const { projeto, globalConfig } = cenarioDeCamadas();
+
+  const lido = parseRoundPolicyOverrides({
+    roundId: 'rodada-7',
+    maxAttemptsPerPrompt: 9,
+    loopGuard: { maxRepeatedReviewFingerprints: 6, maxChangedFilesPerPrompt: null },
+  });
+  assert.equal(lido.ok, true, lido.ok ? '' : lido.error.message);
+
+  const resolvido = resolveEffectiveExecutionPolicy({
+    globalConfig,
+    projectConfig: projeto,
+    roundConfig: lido.value,
+  });
+  assert.equal(resolvido.ok, true, resolvido.ok ? '' : resolvido.error.message);
+
+  assert.equal(
+    typeof resolvido.value.sources.roundConfigHash,
+    'string',
+    'com origem ligada, roundConfigHash deixa de ser null',
+  );
+  assert.equal(resolvido.value.sourceMetadata.roundId, 'rodada-7');
+  assert.equal(resolvido.value.loopGuard.maxAttemptsPerPrompt, 9);
+  assert.equal(resolvido.value.loopGuard.maxRepeatedReviewFingerprints, 6);
+  assert.equal(
+    resolvido.value.loopGuard.maxChangedFilesPerPrompt,
+    null,
+    'null na rodada é declaração explícita de "sem teto"',
+  );
+});
+
+test('roundId é obrigatório: uma rodada sem identidade não é rastreável', () => {
+  const semId = parseRoundPolicyOverrides({ maxAttemptsPerPrompt: 3 });
+  assert.equal(semId.ok, false);
+  assert.match(semId.error.message, /roundId/);
+});
+
+test('roundId passa pelo mesmo alfabeto dos demais identificadores', () => {
+  for (const valor of ['../fuga', 'rodada com espaco', '', 'con', 'a'.repeat(101)]) {
+    const lido = parseRoundPolicyOverrides({ roundId: valor });
+    assert.equal(lido.ok, false, `"${valor}" deveria ser recusado`);
+  }
+  assert.equal(parseRoundPolicyOverrides({ roundId: 'rodada-1.2_final' }).ok, true);
+});
+
+test('campo não reconhecido é recusado em vez de ignorado', () => {
+  const raiz = parseRoundPolicyOverrides({ roundId: 'r1', maxAttemptsPorPrompt: 3 });
+  assert.equal(raiz.ok, false, 'um typo mudaria o hash sem mudar a política');
+  assert.match(raiz.error.message, /não reconhecido/i);
+
+  const dentro = parseRoundPolicyOverrides({
+    roundId: 'r1',
+    loopGuard: { maxClaudeCallsPorPrompt: 3 },
+  });
+  assert.equal(dentro.ok, false);
+  assert.match(dentro.error.message, /loopGuard\.maxClaudeCallsPorPrompt/);
+});
+
+test('valor fora de faixa é recusado, não clampado', () => {
+  const zero = parseRoundPolicyOverrides({ roundId: 'r1', maxAttemptsPerPrompt: 0 });
+  assert.equal(zero.ok, false, 'clampar para 1 congelaria política diferente da pedida');
+
+  const fracionario = parseRoundPolicyOverrides({ roundId: 'r1', maxReviewerRetries: 1.5 });
+  assert.equal(fracionario.ok, false);
+
+  const negativo = parseRoundPolicyOverrides({
+    roundId: 'r1',
+    loopGuard: { maxClaudeCallsPerPrompt: -1 },
+  });
+  assert.equal(negativo.ok, false);
+});
+
+test('tipo errado é recusado em cada camada do objeto', () => {
+  assert.equal(parseRoundPolicyOverrides('rodada-1').ok, false, 'string não é objeto');
+  assert.equal(parseRoundPolicyOverrides([{ roundId: 'r1' }]).ok, false, 'array não é objeto');
+  assert.equal(
+    parseRoundPolicyOverrides({ roundId: 'r1', continueAfterApproval: 'sim' }).ok,
+    false,
+  );
+  assert.equal(parseRoundPolicyOverrides({ roundId: 'r1', loopGuard: 3 }).ok, false);
+  assert.equal(
+    parseRoundPolicyOverrides({ roundId: 'r1', loopGuard: { enabled: 1 } }).ok,
+    false,
+    'booleano não aceita número',
+  );
+});
+
+test('null só é aceito onde significa "sem teto"', () => {
+  const semTeto = parseRoundPolicyOverrides({
+    roundId: 'r1',
+    loopGuard: { maxChangedLinesPerPrompt: null },
+  });
+  assert.equal(semTeto.ok, true, semTeto.ok ? '' : semTeto.error.message);
+
+  const naoNulavel = parseRoundPolicyOverrides({
+    roundId: 'r1',
+    loopGuard: { maxClaudeCallsPerPrompt: null },
+  });
+  assert.equal(naoNulavel.ok, false, 'null aqui seria confundido com "herdar"');
+  assert.match(naoNulavel.error.message, /Omita o campo/);
+});
+
+test('rodadas com a mesma política produzem o mesmo hash', () => {
+  const semLoopGuard = parseRoundPolicyOverrides({ roundId: 'r1' });
+  const loopGuardVazio = parseRoundPolicyOverrides({ roundId: 'r1', loopGuard: {} });
+  assert.equal(semLoopGuard.ok && loopGuardVazio.ok, true);
+  assert.equal(
+    roundConfigHashOf(semLoopGuard.value),
+    roundConfigHashOf(loopGuardVazio.value),
+    'um loopGuard vazio descreve a mesma política e não pode gerar outro hash',
+  );
+
+  const ordemA = parseRoundPolicyOverrides({
+    roundId: 'r1',
+    maxAttemptsPerPrompt: 5,
+    loopGuard: { maxCiRepairCycles: 3, maxClaudeCallsPerPrompt: 2 },
+  });
+  const ordemB = parseRoundPolicyOverrides(
+    reordenarChaves({
+      roundId: 'r1',
+      maxAttemptsPerPrompt: 5,
+      loopGuard: { maxCiRepairCycles: 3, maxClaudeCallsPerPrompt: 2 },
+    }),
+  );
+  assert.equal(ordemA.ok && ordemB.ok, true);
+  assert.equal(
+    roundConfigHashOf(ordemA.value),
+    roundConfigHashOf(ordemB.value),
+    'a ordem das chaves no JSON não tem significado',
+  );
+
+  const outra = parseRoundPolicyOverrides({ roundId: 'r1', maxAttemptsPerPrompt: 6 });
+  assert.notEqual(
+    roundConfigHashOf(ordemA.value),
+    roundConfigHashOf(outra.value),
+    'política diferente precisa de hash diferente',
+  );
 });
 
 /* ------------------------------------------------------------------------ */

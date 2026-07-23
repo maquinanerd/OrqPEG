@@ -106,6 +106,7 @@ import {
   executionRelevantProjectConfigHash,
   resolveEffectiveExecutionPolicy,
 } from './effective-policy';
+import type { RoundPolicyOverrides } from './effective-policy';
 import { renderPullRequestBody } from './pr-body';
 import type { OrchestratorPorts } from './ports';
 
@@ -123,6 +124,15 @@ export interface RunOptions {
   projectId: string;
   dryRun: boolean;
   resumeRunId?: string | null;
+  /**
+   * Camada de rodada desta execução, já validada pela fronteira.
+   *
+   * Só tem efeito quando a execução é NOVA. Numa retomada a política vem
+   * congelada de `run.effectivePolicy`, e aceitar uma rodada aqui seria
+   * prometer um efeito que não acontece — a fronteira recusa a combinação
+   * antes de chegar neste ponto.
+   */
+  roundConfig?: RoundPolicyOverrides | null;
   config: GlobalConfig;
   logger: Logger;
   ports: OrchestratorPorts;
@@ -235,13 +245,14 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
       `Retomando execução ${run.runId} no estado ${run.state}, sob a política congelada em ${policy.capturedAt}.`,
     );
   } else {
+    const roundConfig = options.roundConfig ?? null;
     const resolved = resolveEffectiveExecutionPolicy({
       globalConfig: config,
       projectConfig: project,
       declaredProjectLoopGuard: readDeclaredLoopGuard(project.id),
-      /* Ainda não há camada de rodada. Ausência é `null` explícito — não uma
-         configuração inventada com valores neutros. */
-      roundConfig: null,
+      /* Ausência continua sendo `null` explícito — não uma configuração
+         inventada com valores neutros. */
+      roundConfig,
     });
     if (!resolved.ok) return resolved;
     policy = resolved.value;
@@ -251,11 +262,19 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
       dryRun: options.dryRun,
       prompts,
       effectivePolicy: policy,
-      sourceSnapshots: captureSourceSnapshots(project, prompts),
+      /* O hash vem da política já resolvida em vez de ser recalculado aqui:
+         duas derivações do mesmo dado divergem no dia em que só uma delas for
+         atualizada. */
+      sourceSnapshots: captureSourceSnapshots(
+        project,
+        prompts,
+        policy.sources.roundConfigHash,
+      ),
     });
     logger.info(
       `Nova execução ${run.runId} com ${String(prompts.length)} prompt(s), ` +
-        `política ${policy.effectiveHash} congelada.`,
+        `política ${policy.effectiveHash} congelada` +
+        (roundConfig === null ? ' (sem rodada).' : ` na rodada ${roundConfig.roundId}.`),
     );
   }
 
@@ -2099,6 +2118,7 @@ function snapshotPrompts(prompts: readonly PromptFile[]): Map<string, string> {
 function captureSourceSnapshots(
   project: ProjectConfig,
   prompts: readonly PromptFile[],
+  roundConfigHash: string | null,
 ): RunSourceSnapshots {
   const promptHashes: Record<string, string> = {};
   for (const [id, hash] of snapshotPrompts(prompts)) promptHashes[id] = hash;
@@ -2114,7 +2134,7 @@ function captureSourceSnapshots(
     ),
     projectContextHash: contextRaw.ok ? contentHash(contextRaw.value) : '',
     projectConfigHash: executionRelevantProjectConfigHash(project),
-    roundConfigHash: null,
+    roundConfigHash,
   };
 }
 
