@@ -1138,9 +1138,39 @@ function describeCi(run: RunRecord | null): string | null {
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
+/**
+ * Corpo presente exige `Content-Type: application/json`.
+ *
+ * É a terceira barreira contra CSRF, e a que fecha a forma sem preflight:
+ * `text/plain`, `application/x-www-form-urlencoded` e `multipart/form-data`
+ * fazem da requisição uma "simple request", que o navegador entrega direto e
+ * sem perguntar. Com JSON exigido sobra o preflight, que falha porque o painel
+ * não responde CORS nenhum.
+ *
+ * Corpo ausente continua válido: várias rotas (`/pause`, `/cancel`) não têm o
+ * que receber, e exigir cabeçalho de tipo para um corpo que não existe
+ * recusaria chamada legítima sem fechar nenhuma porta.
+ */
+function bodyContentTypeIsAcceptable(req: http.IncomingMessage): boolean {
+  const declared = (req.headers['content-length'] ?? '').toString().trim();
+  const hasBody = req.headers['transfer-encoding'] !== undefined || (declared !== '' && declared !== '0');
+  if (!hasBody) return true;
+
+  const contentType = (req.headers['content-type'] ?? '').toString().toLowerCase();
+  return contentType.split(';')[0]?.trim() === 'application/json';
+}
+
 async function readJsonBody<T>(
   req: http.IncomingMessage,
 ): Promise<{ ok: true; value: T } | { ok: false; error: { message: string } }> {
+  if (!bodyContentTypeIsAcceptable(req)) {
+    req.resume();
+    return {
+      ok: false,
+      error: { message: 'Corpo da requisição exige Content-Type: application/json.' },
+    };
+  }
+
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;

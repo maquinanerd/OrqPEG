@@ -143,6 +143,71 @@ test('aceita Host localhost', async () => {
   assert.equal(res.status, 200);
 });
 
+/* ------------------------------------------------------------------------ */
+/* CSRF                                                                      */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * A validação de `Host` acima cobre DNS rebinding, não CSRF: numa requisição
+ * disparada por outra página o `Host` é justamente o do painel, e ela passava.
+ * Como a porta padrão é fixa e documentada, qualquer site aberto enquanto o
+ * painel roda alcançava criação de projeto, alteração de `merge.mode`, disparo
+ * de execução e concessão de override — a resposta ficava opaca para o
+ * atacante, mas o efeito acontecia.
+ */
+
+test('recusa POST de origem cruzada declarada em Origin', async () => {
+  const res = await request('/api/projects', {
+    method: 'POST',
+    headers: { Origin: 'https://evil.example.com', 'Content-Type': 'application/json' },
+    body: '{"id":"x"}',
+  });
+  assert.equal(res.status, 403);
+  assert.match(res.body, /origem/i);
+});
+
+test('recusa POST marcado como cross-site pelo navegador', async () => {
+  const res = await request('/api/projects', {
+    method: 'POST',
+    headers: { 'Sec-Fetch-Site': 'cross-site', 'Content-Type': 'application/json' },
+    body: '{"id":"x"}',
+  });
+  assert.equal(res.status, 403);
+});
+
+test('recusa corpo que não seja application/json', async () => {
+  /* `text/plain` faz da requisição uma "simple request": o navegador a entrega
+     sem preflight. Fechar esse tipo é o que elimina a forma do ataque que não
+     depende de cabeçalho nenhum. */
+  const res = await request('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: '{"id":"x"}',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body, /application\/json/);
+});
+
+test('aceita POST da própria página', async () => {
+  const res = await request('/api/projects', {
+    method: 'POST',
+    headers: {
+      Origin: `http://127.0.0.1:${port}`,
+      'Sec-Fetch-Site': 'same-origin',
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  });
+  assert.notEqual(res.status, 403, 'a defesa não pode recusar a própria página do painel');
+});
+
+test('leitura de origem cruzada continua passando: GET não muda estado', async () => {
+  const res = await request('/api/home', {
+    headers: { Origin: 'https://evil.example.com', 'Sec-Fetch-Site': 'cross-site' },
+  });
+  assert.equal(res.status, 200, 'a resposta é opaca para o atacante e nada é alterado');
+});
+
 test('rota inexistente devolve 404 em JSON', async () => {
   const res = await request('/api/inexistente');
   assert.equal(res.status, 404);

@@ -11,6 +11,7 @@ import { fail, ok } from '../utils/errors';
 import { nowIso } from '../utils/time';
 import {
   defaultLoopGuardConfig,
+  loopGuardMinimumOf,
   normalizeLoopGuardConfig,
   validateLoopGuardConfig,
 } from './loop-guard-config';
@@ -97,6 +98,13 @@ const NULLABLE_LOOP_GUARD_KEYS: ReadonlySet<string> = new Set([
   'maxChangedLinesPerPrompt',
 ]);
 
+/* Mínimos dos campos de rodada que ficam fora de `loopGuard`. A recusa na
+   fronteira e o `Math.max` da composição leem daqui pelo mesmo motivo da
+   tabela em `loop-guard-config`: se divergissem, a fronteira aceitaria um
+   valor que a composição depois corrigiria sem dizer nada. */
+const ROUND_ATTEMPTS_MINIMUM = 1;
+const ROUND_REVIEWER_RETRIES_MINIMUM = 0;
+
 /**
  * Lê a camada de rodada vinda do corpo da requisição.
  *
@@ -143,9 +151,9 @@ export function parseRoundPolicyOverrides(value: unknown): Result<RoundPolicyOve
   const roundId = validateIdentifier(rawRoundId, 'roundConfig.roundId');
   if (!roundId.ok) return roundId;
 
-  const attempts = optionalRoundInteger(raw, 'maxAttemptsPerPrompt', 1);
+  const attempts = optionalRoundInteger(raw, 'maxAttemptsPerPrompt', ROUND_ATTEMPTS_MINIMUM);
   if (!attempts.ok) return attempts;
-  const retries = optionalRoundInteger(raw, 'maxReviewerRetries', 0);
+  const retries = optionalRoundInteger(raw, 'maxReviewerRetries', ROUND_REVIEWER_RETRIES_MINIMUM);
   if (!retries.ok) return retries;
   const continueAfterApproval = optionalRoundBoolean(raw, 'continueAfterApproval');
   if (!continueAfterApproval.ok) return continueAfterApproval;
@@ -241,12 +249,19 @@ function parseRoundLoopGuard(value: unknown): Result<Partial<LoopGuardConfig> | 
         { key },
       );
     }
-    if (expected === 'number' && (!Number.isInteger(entry) || (entry as number) < 0)) {
-      return fail(
-        'VALIDATION_FAILED',
-        `roundConfig.loopGuard.${key}: deve ser um inteiro não negativo.`,
-        { key, value: entry },
-      );
+    if (expected === 'number') {
+      /* O mínimo vem da MESMA tabela que a normalização usa para corrigir. Um
+         mínimo próprio aqui aceitaria o valor que `normalizeLoopGuardConfig`
+         depois corrigiria em silêncio — o clamp que esta fronteira existe para
+         impedir. */
+      const minimum = loopGuardMinimumOf(key) ?? 0;
+      if (!Number.isInteger(entry) || (entry as number) < minimum) {
+        return fail(
+          'VALIDATION_FAILED',
+          `roundConfig.loopGuard.${key}: deve ser um inteiro maior ou igual a ${String(minimum)}.`,
+          { key, value: entry, minimum },
+        );
+      }
     }
     out[key] = entry;
   }
@@ -365,11 +380,11 @@ export function resolveEffectiveExecutionPolicy(
   const loopGuard: EffectiveLoopGuardPolicy = {
     ...loopGuardConfig,
     maxAttemptsPerPrompt: Math.max(
-      1,
+      ROUND_ATTEMPTS_MINIMUM,
       roundConfig?.maxAttemptsPerPrompt ?? execution.maxAttemptsPerPrompt,
     ),
     maxReviewerRetries: Math.max(
-      0,
+      ROUND_REVIEWER_RETRIES_MINIMUM,
       roundConfig?.maxReviewerRetries ?? execution.maxReviewerRetries,
     ),
     continueAfterApproval:

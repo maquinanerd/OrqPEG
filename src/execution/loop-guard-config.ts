@@ -48,6 +48,43 @@ export function defaultLoopGuardConfig(): LoopGuardConfig {
 }
 
 /**
+ * Mínimo viável de cada campo numérico, declarado em um lugar só.
+ *
+ * A tabela existe porque dois consumidores precisam do mesmo número por
+ * motivos opostos: `normalizeLoopGuardConfig` **corrige** o valor lido do disco
+ * para o mínimo, e a fronteira de rodada **recusa** o valor que a requisição
+ * mandou abaixo dele. Enquanto cada um carregava a própria cópia, a fronteira
+ * aceitava `maxClaudeCallsPerPrompt: 0` e a normalização o corrigia para 1
+ * depois — um clamp silencioso, que é exatamente o que a recusa existe para
+ * impedir.
+ */
+export const LOOP_GUARD_MINIMUMS = {
+  maxClaudeCallsPerPrompt: 1,
+  maxCodexCallsPerPrompt: 1,
+  maxTotalAgentCallsPerPrompt: 2,
+  maxPromptDurationMinutes: 1,
+  maxRunDurationMinutes: 1,
+  maxConsecutiveNoProgress: 1,
+  maxRepeatedReviewFingerprints: 2,
+  maxRepeatedTestFailureFingerprints: 2,
+  maxChangedFilesPerPrompt: 1,
+  maxChangedLinesPerPrompt: 1,
+  maxManualOverridesPerPrompt: 0,
+  maxCiRepairCycles: 0,
+  maxMergeCorrectionCycles: 0,
+  ciPollIntervalSeconds: 5,
+  ciPollMaxIntervalSeconds: 5,
+  ciWaitTimeoutMinutes: 1,
+  maxReviewFormatRetries: 0,
+} as const;
+
+/** Mínimo declarado para um campo, ou `null` quando o campo não é numérico. */
+export function loopGuardMinimumOf(field: string): number | null {
+  const table = LOOP_GUARD_MINIMUMS as Readonly<Record<string, number | undefined>>;
+  return table[field] ?? null;
+}
+
+/**
  * Normaliza a configuração vinda do disco.
  *
  * Valores ausentes assumem o padrão. Valores fora de faixa são corrigidos para
@@ -59,38 +96,52 @@ export function normalizeLoopGuardConfig(value: unknown): LoopGuardConfig {
   if (!value || typeof value !== 'object') return defaults;
   const raw = value as Record<string, unknown>;
 
+  const M = LOOP_GUARD_MINIMUMS;
+
   return {
     enabled: bool(raw['enabled'], defaults.enabled),
 
-    maxClaudeCallsPerPrompt: int(raw['maxClaudeCallsPerPrompt'], defaults.maxClaudeCallsPerPrompt, 1),
-    maxCodexCallsPerPrompt: int(raw['maxCodexCallsPerPrompt'], defaults.maxCodexCallsPerPrompt, 1),
+    maxClaudeCallsPerPrompt: int(
+      raw['maxClaudeCallsPerPrompt'],
+      defaults.maxClaudeCallsPerPrompt,
+      M.maxClaudeCallsPerPrompt,
+    ),
+    maxCodexCallsPerPrompt: int(
+      raw['maxCodexCallsPerPrompt'],
+      defaults.maxCodexCallsPerPrompt,
+      M.maxCodexCallsPerPrompt,
+    ),
     maxTotalAgentCallsPerPrompt: int(
       raw['maxTotalAgentCallsPerPrompt'],
       defaults.maxTotalAgentCallsPerPrompt,
-      2,
+      M.maxTotalAgentCallsPerPrompt,
     ),
 
     maxPromptDurationMinutes: int(
       raw['maxPromptDurationMinutes'],
       defaults.maxPromptDurationMinutes,
-      1,
+      M.maxPromptDurationMinutes,
     ),
-    maxRunDurationMinutes: int(raw['maxRunDurationMinutes'], defaults.maxRunDurationMinutes, 1),
+    maxRunDurationMinutes: int(
+      raw['maxRunDurationMinutes'],
+      defaults.maxRunDurationMinutes,
+      M.maxRunDurationMinutes,
+    ),
 
     maxConsecutiveNoProgress: int(
       raw['maxConsecutiveNoProgress'],
       defaults.maxConsecutiveNoProgress,
-      1,
+      M.maxConsecutiveNoProgress,
     ),
     maxRepeatedReviewFingerprints: int(
       raw['maxRepeatedReviewFingerprints'],
       defaults.maxRepeatedReviewFingerprints,
-      2,
+      M.maxRepeatedReviewFingerprints,
     ),
     maxRepeatedTestFailureFingerprints: int(
       raw['maxRepeatedTestFailureFingerprints'],
       defaults.maxRepeatedTestFailureFingerprints,
-      2,
+      M.maxRepeatedTestFailureFingerprints,
     ),
 
     detectDiffOscillation: bool(raw['detectDiffOscillation'], defaults.detectDiffOscillation),
@@ -104,35 +155,51 @@ export function normalizeLoopGuardConfig(value: unknown): LoopGuardConfig {
     maxChangedFilesPerPrompt: nullableInt(
       raw['maxChangedFilesPerPrompt'],
       defaults.maxChangedFilesPerPrompt,
-      1,
+      M.maxChangedFilesPerPrompt,
     ),
     maxChangedLinesPerPrompt: nullableInt(
       raw['maxChangedLinesPerPrompt'],
       defaults.maxChangedLinesPerPrompt,
-      1,
+      M.maxChangedLinesPerPrompt,
     ),
 
     maxManualOverridesPerPrompt: int(
       raw['maxManualOverridesPerPrompt'],
       defaults.maxManualOverridesPerPrompt,
-      0,
+      M.maxManualOverridesPerPrompt,
     ),
-    maxCiRepairCycles: int(raw['maxCiRepairCycles'], defaults.maxCiRepairCycles, 0),
+    maxCiRepairCycles: int(
+      raw['maxCiRepairCycles'],
+      defaults.maxCiRepairCycles,
+      M.maxCiRepairCycles,
+    ),
     maxMergeCorrectionCycles: int(
       raw['maxMergeCorrectionCycles'],
       defaults.maxMergeCorrectionCycles,
-      0,
+      M.maxMergeCorrectionCycles,
     ),
 
-    ciPollIntervalSeconds: int(raw['ciPollIntervalSeconds'], defaults.ciPollIntervalSeconds, 5),
+    ciPollIntervalSeconds: int(
+      raw['ciPollIntervalSeconds'],
+      defaults.ciPollIntervalSeconds,
+      M.ciPollIntervalSeconds,
+    ),
     ciPollMaxIntervalSeconds: int(
       raw['ciPollMaxIntervalSeconds'],
       defaults.ciPollMaxIntervalSeconds,
-      5,
+      M.ciPollMaxIntervalSeconds,
     ),
-    ciWaitTimeoutMinutes: int(raw['ciWaitTimeoutMinutes'], defaults.ciWaitTimeoutMinutes, 1),
+    ciWaitTimeoutMinutes: int(
+      raw['ciWaitTimeoutMinutes'],
+      defaults.ciWaitTimeoutMinutes,
+      M.ciWaitTimeoutMinutes,
+    ),
 
-    maxReviewFormatRetries: int(raw['maxReviewFormatRetries'], defaults.maxReviewFormatRetries, 0),
+    maxReviewFormatRetries: int(
+      raw['maxReviewFormatRetries'],
+      defaults.maxReviewFormatRetries,
+      M.maxReviewFormatRetries,
+    ),
   };
 }
 

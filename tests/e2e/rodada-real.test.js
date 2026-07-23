@@ -280,7 +280,10 @@ function portasComGitReal(repoPath, options = {}) {
       agents: {
         async runClaude(input) {
           spy.claude.push(input.role);
-          if (input.instruction.includes('Clareza mínima')) spy.skillsNoPrompt += 1;
+          /* Conta pelo CORPO da Skill, não pelo nome. O nome também aparece na
+             declaração `<id>@<versão>`, então casar por ele contaria uma
+             instrução que apenas cita a Skill sem carregar o conteúdo dela. */
+          if (input.instruction.includes('Prefira nomes explícitos')) spy.skillsNoPrompt += 1;
           if (input.role === 'merge-auditor') return agentResult('{}');
           /*
            * Efeito real no repositório, em arquivo RASTREADO.
@@ -472,8 +475,25 @@ test('rodada real: pacote importado, Skill carregada, dois prompts, dois commits
     'nada mudou nas Skills durante a execução',
   );
 
-  // E o conteúdo da Skill de fato chegou ao prompt do agente.
-  assert.ok(spy.skillsNoPrompt >= 0);
+  /* LACUNA CONHECIDA — a Skill NÃO chega ao agente hoje.
+   *
+   * `renderSkillsForAgent`, `resolveDeclaredSkills` e `assertSkillsUnchanged`
+   * não são chamadas em lugar nenhum de `src/`: o orquestrador não referencia
+   * Skills. O que este teste exercita é o MÓDULO de Skills, invocado direto
+   * daqui, e não a integração com a execução.
+   *
+   * A asserção anterior era `spy.skillsNoPrompt >= 0` — sempre verdadeira para
+   * uma contagem, e por isso incapaz de revelar a lacuna. Enquanto a integração
+   * não existir, o teste afirma o que é verdade e falha no dia em que a
+   * situação mudar, para que ninguém precise descobrir isso de novo por acaso.
+   */
+  assert.equal(
+    spy.skillsNoPrompt,
+    0,
+    'uma Skill chegou ao agente: a integração passou a existir — troque esta asserção por > 0',
+  );
+
+  /* O renderizador funciona; é só ninguém que o chama. */
   const bloco = renderSkillsForAgent(skills.value.claude);
   assert.match(bloco, /Prefira nomes explícitos/);
 });

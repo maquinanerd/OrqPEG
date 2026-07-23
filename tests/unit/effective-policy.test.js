@@ -42,6 +42,10 @@ const { grantManualOverride, consumeOverride } = require('../../dist/execution/o
 const { createPromptBudget } = require('../../dist/execution/loop-guard');
 const { defaultGlobalConfig } = require('../../dist/config/global-config');
 const {
+  LOOP_GUARD_MINIMUMS,
+  defaultLoopGuardConfig,
+} = require('../../dist/execution/loop-guard-config');
+const {
   ensureDataLayout,
   runStatePath,
   setOrqpegRootForTesting,
@@ -873,6 +877,83 @@ test('valor fora de faixa é recusado, não clampado', () => {
     loopGuard: { maxClaudeCallsPerPrompt: -1 },
   });
   assert.equal(negativo.ok, false);
+});
+
+/**
+ * A regressão que este teste vigia: a fronteira aceitava qualquer inteiro não
+ * negativo enquanto `normalizeLoopGuardConfig` impunha mínimos por campo. O
+ * resultado era o clamp silencioso que a recusa existe para impedir —
+ * `maxClaudeCallsPerPrompt: 0` passava e virava 1 depois, sem aviso nenhum.
+ */
+test('cada campo de loopGuard é recusado abaixo do SEU mínimo, não de zero', () => {
+  for (const [campo, minimo] of Object.entries(LOOP_GUARD_MINIMUMS)) {
+    if (minimo === 0) continue;
+
+    const abaixo = parseRoundPolicyOverrides({
+      roundId: 'r1',
+      loopGuard: { [campo]: minimo - 1 },
+    });
+    assert.equal(
+      abaixo.ok,
+      false,
+      `${campo}: ${String(minimo - 1)} deveria ser recusado — a normalização o corrigiria para ${String(minimo)}`,
+    );
+    assert.match(abaixo.error.message, new RegExp(`maior ou igual a ${String(minimo)}`));
+
+    const noLimite = parseRoundPolicyOverrides({
+      roundId: 'r1',
+      loopGuard: { [campo]: minimo },
+    });
+    assert.equal(noLimite.ok, true, `${campo}: o próprio mínimo é válido`);
+  }
+});
+
+/**
+ * Um campo numérico novo em `defaultLoopGuardConfig()` sem entrada na tabela
+ * cairia para mínimo 0 na fronteira e para o mínimo real na normalização —
+ * reabrindo exatamente a divergência acima, só que num campo diferente.
+ */
+test('todo campo numérico do Loop Guard declara seu mínimo na tabela', () => {
+  const semMinimo = Object.entries(defaultLoopGuardConfig())
+    .filter(([campo, valor]) => typeof valor === 'number' && !(campo in LOOP_GUARD_MINIMUMS))
+    .map(([campo]) => campo);
+
+  assert.deepEqual(
+    semMinimo,
+    [],
+    'campos numéricos sem mínimo declarado divergiriam entre a recusa e a normalização',
+  );
+});
+
+/** O valor aceito pela fronteira precisa sobreviver intacto ao congelamento. */
+test('o valor aceito na fronteira é o valor congelado, sem correção pelo caminho', () => {
+  const { projeto, globalConfig } = cenarioDeCamadas();
+
+  const lido = parseRoundPolicyOverrides({
+    roundId: 'r1',
+    loopGuard: {
+      maxClaudeCallsPerPrompt: LOOP_GUARD_MINIMUMS.maxClaudeCallsPerPrompt,
+      ciPollIntervalSeconds: LOOP_GUARD_MINIMUMS.ciPollIntervalSeconds,
+      ciPollMaxIntervalSeconds: LOOP_GUARD_MINIMUMS.ciPollMaxIntervalSeconds,
+    },
+  });
+  assert.equal(lido.ok, true, lido.ok ? '' : lido.error.message);
+
+  const resolvido = resolveEffectiveExecutionPolicy({
+    globalConfig,
+    projectConfig: projeto,
+    roundConfig: lido.value,
+  });
+  assert.equal(resolvido.ok, true, resolvido.ok ? '' : resolvido.error.message);
+
+  assert.equal(
+    resolvido.value.loopGuard.maxClaudeCallsPerPrompt,
+    LOOP_GUARD_MINIMUMS.maxClaudeCallsPerPrompt,
+  );
+  assert.equal(
+    resolvido.value.loopGuard.ciPollIntervalSeconds,
+    LOOP_GUARD_MINIMUMS.ciPollIntervalSeconds,
+  );
 });
 
 test('tipo errado é recusado em cada camada do objeto', () => {

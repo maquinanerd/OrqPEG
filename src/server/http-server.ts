@@ -122,6 +122,68 @@ interface HandlerDeps {
   logger: Logger;
 }
 
+/** Métodos que alteram estado e por isso precisam de prova de mesma origem. */
+const STATE_CHANGING_METHODS: ReadonlySet<string> = new Set([
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+]);
+
+/**
+ * Recusa requisição de origem cruzada que mude estado.
+ *
+ * A validação de `Host` acima cobre DNS rebinding, não CSRF — são ataques
+ * diferentes. Numa requisição disparada por outra página o `Host` é justamente
+ * o do painel, então ela passava. Como a porta padrão é fixa e documentada,
+ * qualquer site aberto enquanto o painel roda podia criar projeto, alterar
+ * `merge.mode`, disparar execução e conceder override manual, que o produto
+ * trata como decisão humana deliberada. A resposta ficaria opaca para o
+ * atacante, mas o efeito acontecia.
+ *
+ * Duas barreiras aqui, e uma terceira em `readJsonBody`, porque cada uma cobre
+ * um caso que as outras não cobrem:
+ *
+ *  - `Sec-Fetch-Site` é a mais direta, e a página não consegue forjá-la: quem
+ *    escreve o cabeçalho é o navegador.
+ *  - `Origin` cobre o cliente que não mande `Sec-Fetch-Site`. A comparação é
+ *    contra o `Host` desta requisição, já validado como loopback — incluir a
+ *    porta importa, porque `127.0.0.1:8765` e `127.0.0.1:9999` são origens
+ *    distintas e aceitar qualquer porta reabriria o buraco para outro serviço
+ *    local.
+ *  - Exigir `Content-Type: application/json` elimina a forma sem preflight: um
+ *    corpo `text/plain` é "simple request" e o navegador o envia direto. Com
+ *    JSON exigido sobra o preflight, que falha porque o painel não responde
+ *    CORS nenhum.
+ *
+ * Ausência dos dois cabeçalhos não é bloqueada: é o caso do `curl` e da própria
+ * CLI, que não são navegadores e não carregam cookie de sessão de ninguém.
+ */
+function rejectsCrossOrigin(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  const method = (req.method ?? 'GET').toUpperCase();
+  if (!STATE_CHANGING_METHODS.has(method)) return false;
+
+  const site = req.headers['sec-fetch-site'];
+  if (typeof site === 'string' && site !== 'same-origin' && site !== 'none') {
+    sendJson(res, 403, {
+      error: 'Requisição de origem cruzada recusada. O painel só aceita chamadas da própria página.',
+    });
+    return true;
+  }
+
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && origin.length > 0 && origin !== 'null') {
+    if (origin !== `http://${req.headers.host ?? ''}`) {
+      sendJson(res, 403, {
+        error: 'Origem não permitida. O painel só aceita chamadas da própria página.',
+      });
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function handleRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -133,6 +195,8 @@ async function handleRequest(
     sendJson(res, 403, { error: 'Host não permitido. O painel só aceita acesso local.' });
     return;
   }
+
+  if (rejectsCrossOrigin(req, res)) return;
 
   const url = new URL(req.url ?? '/', 'http://127.0.0.1');
   const pathname = decodeSafe(url.pathname);
