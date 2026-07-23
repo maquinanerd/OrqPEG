@@ -577,6 +577,140 @@ export interface RunSourceSnapshots {
 }
 
 /* ------------------------------------------------------------------------- */
+/* Pacotes curados                                                            */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Pacote de prompts curado FORA do OrqPEG.
+ *
+ * O OrqPEG não planeja projetos. O plano nasce do trabalho da pessoa com um
+ * modelo de conversa, é validado à mão, e só então é importado aqui para ser
+ * executado. Por isso o importador valida e recusa, mas nunca completa,
+ * reescreve ou conserta: um pacote inválido é um pacote inválido, e "corrigido
+ * automaticamente" seria o OrqPEG decidindo o que o autor quis dizer.
+ */
+export interface PackageValidation {
+  /** Só `approved` permite executar. Qualquer outro valor bloqueia. */
+  status: 'approved' | 'draft' | 'rejected';
+  /** Commit do repositório-alvo contra o qual o pacote foi validado. */
+  validatedCommitSha: string;
+  validatedAt: string;
+  validatedBy: string;
+  notes?: string;
+}
+
+/** Skills declaradas por uma rodada, por agente. Formato `<id>@<versão>`. */
+export interface RoundSkillDeclaration {
+  claude: string[];
+  codex: string[];
+}
+
+export interface PackageRound {
+  id: string;
+  name: string;
+  objective: string;
+  order: number;
+  /** Ids de outras rodadas que precisam estar concluídas antes desta. */
+  dependsOn: string[];
+  /** Nomes dos arquivos de prompt, na ordem de execução. */
+  prompts: string[];
+  skills: RoundSkillDeclaration;
+}
+
+export interface PackageExecutionPlan {
+  schemaVersion: 1;
+  packageId: string;
+  name: string;
+  description: string;
+  validation: PackageValidation;
+  branchStrategy: BranchStrategy;
+  pullRequest: {
+    /** Uma PR por rodada é o padrão: a rodada é a unidade de revisão. */
+    perRound: boolean;
+    draftDuringExecution: boolean;
+    waitForChecks: boolean;
+  };
+  /**
+   * Encadear rodadas automaticamente. `false` por padrão: terminar uma rodada
+   * é um bom momento para uma pessoa olhar antes de gastar a próxima.
+   */
+  continueBetweenRounds: boolean;
+  loopGuard?: Partial<LoopGuardConfig>;
+  rounds: Array<{ id: string; order: number; dependsOn: string[] }>;
+}
+
+/** Pacote lido e validado, ainda não importado. */
+export interface CuratedPackage {
+  rootPath: string;
+  plan: PackageExecutionPlan;
+  rounds: PackageRound[];
+  /** Hash do conteúdo inteiro do pacote, para congelamento e comparação. */
+  packageHash: string;
+  documents: {
+    projectContext: string;
+    roadmap: string;
+    validation: string;
+  };
+}
+
+/** Registro de um pacote já importado para a área de dados do projeto. */
+export interface ImportedPackageRecord {
+  packageId: string;
+  name: string;
+  version: string;
+  packageHash: string;
+  sourcePath: string;
+  importedAt: string;
+  validatedCommitSha: string;
+  roundIds: string[];
+}
+
+/* ------------------------------------------------------------------------- */
+/* Skills locais                                                              */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Skill local declarativa.
+ *
+ * Nesta versão a Skill é DOCUMENTO, não código: entra no prompt do agente e
+ * nada mais. Sem marketplace, sem download, sem descoberta automática e sem
+ * execução de script — o que reduziria a Skill a um vetor para rodar código
+ * arbitrário sob a assinatura do usuário.
+ */
+export interface SkillManifest {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  /** Só `approved` pode ser ativada. */
+  status: 'approved' | 'draft' | 'deprecated';
+  compatibleAgents: Array<'claude' | 'codex'>;
+  roles: string[];
+  entrypoint: string;
+  /** Precisa ser `false` nesta versão. `true` é recusado na leitura. */
+  executeScripts: boolean;
+  /** Precisa ser `false` nesta versão. */
+  networkAccess: boolean;
+}
+
+/** Skill carregada do catálogo, com o conteúdo e o hash do documento. */
+export interface LoadedSkill {
+  manifest: SkillManifest;
+  category: string;
+  directory: string;
+  /** Conteúdo do `SKILL.md`, que é o que de fato chega ao agente. */
+  content: string;
+  contentHash: string;
+}
+
+/** Skills congeladas para uma execução, por agente. */
+export interface SkillSnapshot {
+  capturedAt: string;
+  claude: Array<{ id: string; version: string; contentHash: string }>;
+  codex: Array<{ id: string; version: string; contentHash: string }>;
+}
+
+/* ------------------------------------------------------------------------- */
 /* Prompts                                                                    */
 /* ------------------------------------------------------------------------- */
 
