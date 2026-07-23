@@ -60,6 +60,11 @@
     return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 
+  /** Concordância de número. "1 prompts aprovados" é erro visível na tela. */
+  function plural(count, singular, many) {
+    return count + ' ' + (Math.abs(count) === 1 ? singular : many);
+  }
+
   function clockTime(iso) {
     if (!iso) return '--:--';
     var date = new Date(iso);
@@ -300,9 +305,18 @@
 
       var strip = el('div', 'task-strip');
       strip.appendChild(icon(project.activeRunId ? 'play' : 'prompt'));
-      var task = project.activeRunId
-        ? project.promptApproved + ' de ' + project.promptTotal + ' prompts aprovados'
-        : project.promptTotal + ' prompts cadastrados';
+      /* promptTotal vem do disco e promptApproved vem do RunRecord: os dois
+         podem discordar quando um prompt foi removido depois de aprovado.
+         "1 de 0 aprovados" seria numero errado na tela; o painel diz o que
+         sabe sem inventar o denominador. */
+      var task;
+      if (!project.activeRunId) {
+        task = plural(project.promptTotal, 'prompt cadastrado', 'prompts cadastrados');
+      } else if (project.promptTotal >= project.promptApproved) {
+        task = project.promptApproved + ' de ' + project.promptTotal + ' prompts aprovados';
+      } else {
+        task = plural(project.promptApproved, 'prompt aprovado', 'prompts aprovados');
+      }
       strip.appendChild(el('span', 'task-text', task));
 
       var priority = priorityOf(project);
@@ -651,7 +665,7 @@
     var pending = Boolean(run && AWAITING_HUMAN[run.state]);
     card.dataset.pending = String(pending);
 
-    $('approval-title').textContent = pending ? 'Decisão pendente' : 'Nenhuma decisão pendente';
+    $('h-approval').textContent = pending ? 'Decisão pendente' : 'Nenhuma decisão pendente';
     $('approval-subtitle').textContent = pending
       ? 'A execução parou de propósito e aguarda autorização humana: ' + labelOf(run.state) + '.'
       : run
@@ -864,7 +878,13 @@
         renderStats(home);
 
         if (!state.projectId && home.projects.length > 0) {
-          state.projectId = home.projects[0].id;
+          /* Abre no projeto que tem trabalho em curso. Cair num projeto ocioso
+             por acaso de ordenação esconderia justamente o que o painel existe
+             para mostrar. */
+          var comExecucao = home.projects.filter(function (project) {
+            return project.activeRunId;
+          })[0];
+          state.projectId = (comExecucao || home.projects[0]).id;
         }
 
         renderProjectList(home);

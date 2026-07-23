@@ -19,6 +19,15 @@
   box-sizing: border-box;
 }
 
+/* O `display: none` que o navegador dá a [hidden] vem da folha do agente e
+   perde para qualquer regra de classe que declare display. Como o dashboard
+   liga e desliga elementos pelo atributo hidden (badge do rail, faixa de
+   estado, console ao trocar de aba, diálogo), a regra precisa ser reafirmada —
+   senão o elemento continua visível com o atributo marcado. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   height: 100%;
 }
@@ -41,6 +50,14 @@ body {
 .mat {
   background: var(--fig-mat);
   padding: var(--fig-space-9);
+  /* Coluna com a altura da viewport: o shell recebe o que sobra e as quatro
+     colunas rolam por dentro dele, como no desenho. Precisa ser `height` e não
+     `min-height` — com mínimo, o mat cresceria junto com a linha do tempo e
+     nada rolaria por dentro. Abaixo de 900 px o shell estoura o mat de
+     propósito e a página inteira volta a rolar. */
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 @media (min-width: 1800px) {
@@ -117,6 +134,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--fig-space-7);
+  width: 100%;
   max-width: var(--fig-shell-w);
   margin: 0 auto var(--fig-space-11);
   padding: var(--fig-space-5) var(--fig-space-1) 0;
@@ -163,7 +181,12 @@ body {
     minmax(var(--fig-workspace-min), 1fr)
     calc(var(--fig-context-w) + var(--fig-space-9));
   max-width: var(--fig-shell-w);
+  /* O shell é uma janela, não uma folha que estica. Recebe a altura restante da
+     viewport; abaixo de 900 px o min-height vence e a página inteira volta a
+     rolar, que é melhor que espremer quatro colunas. */
+  flex: 1 1 auto;
   min-height: var(--fig-shell-h);
+  width: 100%;
   margin: 0 auto;
   border-radius: var(--fig-radius-3xl);
   background: var(--fig-paper);
@@ -181,6 +204,7 @@ body {
   align-items: center;
   gap: var(--fig-space-6);
   padding: var(--fig-space-9) var(--fig-space-7);
+  min-height: 0;
   background: var(--fig-ink);
   z-index: var(--fig-z-rail);
 }
@@ -306,6 +330,7 @@ body {
   flex-direction: column;
   gap: var(--fig-space-8);
   padding: var(--fig-space-8);
+  min-height: 0;
   background: var(--fig-ink-raised);
   color: var(--fig-text-on-dark);
   overflow-y: auto;
@@ -560,6 +585,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   padding: var(--fig-space-10) var(--fig-space-8) var(--fig-space-8);
   overflow-y: auto;
 }
@@ -1076,6 +1102,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--fig-space-8);
+  min-height: 0;
   padding: var(--fig-space-10) var(--fig-space-9) var(--fig-space-8) 0;
   overflow-y: auto;
 }
@@ -1191,7 +1218,9 @@ body {
   font-weight: var(--fig-weight-bold);
 }
 
-.check-item[data-status='failed'] .check-mark { background: var(--fig-coral); color: var(--fig-ink); }
+/* Tinta escura, não coral: o cartão de etapa já fica coral quando a execução
+   está bloqueada, e marca coral sobre cartão coral desaparece. */
+.check-item[data-status='failed'] .check-mark { background: var(--fig-ink); color: var(--fig-coral); }
 .check-item[data-status='pending'] .check-mark { background: transparent; box-shadow: inset 0 0 0 2px var(--fig-ink); color: var(--fig-ink); }
 .check-item[data-status='skipped'] .check-mark { opacity: 0.45; }
 
@@ -1341,7 +1370,9 @@ body {
 
 .sidebar .state-note { color: var(--fig-text-muted); }
 .state-note--error { color: var(--fig-coral); }
-.state-note--onaccent { color: var(--fig-ink); opacity: 0.72; }
+/* Herda a cor do cartão: o cartão de etapa troca de fundo conforme o estágio,
+   e fixar tinta escura deixava o texto ilegível sobre a variante ociosa. */
+.state-note--onaccent { color: inherit; opacity: 0.72; }
 
 .state-note a { color: inherit; }
 
@@ -1381,6 +1412,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--fig-space-2);
+  width: 100%;
   max-width: var(--fig-shell-w);
   margin: var(--fig-space-5) auto 0;
   padding: 0 var(--fig-space-1);
