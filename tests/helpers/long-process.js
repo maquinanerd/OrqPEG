@@ -137,6 +137,19 @@ function killAllWitnesses() {
   witnesses.length = 0;
 }
 
+/*
+ * Rede de segurança.
+ *
+ * As testemunhas são `unref`adas de propósito — precisam sobreviver ao
+ * encerramento de árvore que o teste exercita. O efeito colateral é que uma
+ * asserção que falhe antes da limpeza deixaria processos para trás. Este
+ * gancho fecha o caso do encerramento normal do arquivo de teste; um `SIGKILL`
+ * no próprio runner, naturalmente, nenhum gancho alcança.
+ */
+process.on('exit', () => {
+  for (const witness of witnesses) witness.kill();
+});
+
 /**
  * Executa o processo longo pelo runner REAL do produto.
  *
