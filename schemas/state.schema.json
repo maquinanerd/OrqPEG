@@ -35,7 +35,20 @@
     "events",
     "lastError",
     "pauseRequested",
-    "cancelRequested"
+    "cancelRequested",
+    "budgets",
+    "overrides",
+    "lastLoopGuard",
+    "ciRepairCycles",
+    "mergeCorrectionCycles",
+    "ciWait",
+    "ciFailureFingerprints",
+    "ciRepairs",
+    "mergeCorrections",
+    "effectivePolicy",
+    "sourceSnapshots",
+    "projectContextHash",
+    "projectConfigHash"
   ],
   "properties": {
     "schemaVersion": {
@@ -60,7 +73,14 @@
     },
     "previousState": {
       "description": "Estado imediatamente anterior; nulo na primeira transição.",
-      "anyOf": [{ "$ref": "#/definitions/RunState" }, { "type": "null" }]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RunState"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "createdAt": {
       "type": "string",
@@ -73,7 +93,10 @@
       "minLength": 1
     },
     "finishedAt": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Momento de encerramento da execução, em ISO 8601; nulo enquanto ela estiver ativa."
     },
     "dryRun": {
@@ -81,28 +104,45 @@
       "description": "Quando verdadeiro, nenhuma operação destrutiva ou remota é efetivada."
     },
     "baseCommitSha": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "SHA do commit da base no início da execução."
     },
     "branchName": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Nome da branch de trabalho criada ou reutilizada."
     },
     "worktreePath": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Caminho absoluto do worktree dedicado, quando houver."
     },
     "workingDirectory": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Diretório em que os agentes e os comandos locais são executados."
     },
     "prompts": {
       "type": "array",
       "description": "Progresso de cada prompt da fila, na ordem natural de execução.",
-      "items": { "$ref": "#/definitions/PromptProgress" }
+      "items": {
+        "$ref": "#/definitions/PromptProgress"
+      }
     },
     "currentPromptId": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Identificador do prompt em execução; nulo quando nenhum está ativo."
     },
     "currentAttempt": {
@@ -113,53 +153,114 @@
     "commits": {
       "type": "array",
       "description": "Commits criados pela execução, na ordem em que foram gerados.",
-      "items": { "$ref": "#/definitions/RunCommit" }
+      "items": {
+        "$ref": "#/definitions/RunCommit"
+      }
     },
     "pushedAt": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Momento do último push bem-sucedido, em ISO 8601."
     },
     "pushedRemote": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Nome do remoto para o qual a branch foi enviada."
     },
     "pullRequest": {
       "description": "Estado do pull request associado; nulo quando ainda não existe.",
-      "anyOf": [{ "$ref": "#/definitions/PullRequestInfo" }, { "type": "null" }]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PullRequestInfo"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "checks": {
       "description": "Resumo dos checks do GitHub para o head atual; nulo quando não consultado.",
-      "anyOf": [{ "$ref": "#/definitions/ChecksSummary" }, { "type": "null" }]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ChecksSummary"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "finalTests": {
       "description": "Resultado da suíte de testes local executada antes do merge.",
-      "anyOf": [{ "$ref": "#/definitions/TestSuiteResult" }, { "type": "null" }]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/TestSuiteResult"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "mergeReviews": {
       "type": "array",
       "description": "Auditorias finais de merge produzidas pelo Claude e pelo Codex.",
-      "items": { "$ref": "#/definitions/MergeReviewRecord" }
+      "items": {
+        "$ref": "#/definitions/MergeReviewRecord"
+      }
     },
     "consensus": {
       "description": "Apuração do consenso entre as duas auditorias de merge.",
-      "anyOf": [{ "$ref": "#/definitions/MergeConsensus" }, { "type": "null" }]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/MergeConsensus"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "gateReport": {
       "description": "Relatório da avaliação dos portões obrigatórios de merge.",
-      "anyOf": [{ "$ref": "#/definitions/MergeGateReport" }, { "type": "null" }]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/MergeGateReport"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "mergeOutcome": {
       "description": "Desfecho da tentativa de merge.",
-      "anyOf": [{ "$ref": "#/definitions/MergeOutcome" }, { "type": "null" }]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/MergeOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "events": {
       "type": "array",
       "description": "Histórico cronológico de transições e mensagens da execução.",
-      "items": { "$ref": "#/definitions/RunEvent" }
+      "items": {
+        "$ref": "#/definitions/RunEvent"
+      }
     },
     "lastError": {
       "description": "Último erro registrado pela execução.",
-      "anyOf": [{ "$ref": "#/definitions/OrqError" }, { "type": "null" }]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/OrqError"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "pauseRequested": {
       "type": "boolean",
@@ -168,6 +269,109 @@
     "cancelRequested": {
       "type": "boolean",
       "description": "Sinaliza pedido de cancelamento na próxima fronteira segura."
+    },
+    "budgets": {
+      "type": "array",
+      "description": "Orçamento por prompt, preservado através de retomadas.",
+      "items": {
+        "$ref": "#/definitions/PromptBudget"
+      }
+    },
+    "overrides": {
+      "type": "array",
+      "description": "Autorizações humanas concedidas nesta execução.",
+      "items": {
+        "$ref": "#/definitions/ManualOverride"
+      }
+    },
+    "lastLoopGuard": {
+      "description": "Última decisão do Loop Guard, ou null.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/LoopGuardDecision"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ciRepairCycles": {
+      "type": "integer",
+      "description": "Ciclos de reparo de CI já consumidos.",
+      "minimum": 0
+    },
+    "mergeCorrectionCycles": {
+      "type": "integer",
+      "description": "Ciclos de correção pós-auditoria já consumidos.",
+      "minimum": 0
+    },
+    "ciWait": {
+      "description": "Espera do CI em curso, ou null.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/CiWaitState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ciFailureFingerprints": {
+      "type": "array",
+      "description": "Assinaturas de falha de CI, na ordem dos ciclos.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ciRepairs": {
+      "type": "array",
+      "description": "Ciclos de reparo de CI registrados.",
+      "items": {
+        "$ref": "#/definitions/CiRepairRecord"
+      }
+    },
+    "mergeCorrections": {
+      "type": "array",
+      "description": "Ciclos de correção pós-auditoria registrados.",
+      "items": {
+        "$ref": "#/definitions/MergeCorrectionRecord"
+      }
+    },
+    "effectivePolicy": {
+      "description": "Política congelada no início da execução. null apenas em execuções criadas antes deste campo existir, tratadas fail-closed.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/EffectiveExecutionPolicySnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sourceSnapshots": {
+      "description": "Hashes das fontes no congelamento. null em execuções legadas.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/RunSourceSnapshots"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "projectContextHash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "DEPRECIADO: espelho de sourceSnapshots.projectContextHash, mantido para leitura por versões anteriores."
+    },
+    "projectConfigHash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "DEPRECIADO: espelho de sourceSnapshots.projectConfigHash, mantido para leitura por versões anteriores."
     }
   },
   "definitions": {
@@ -243,21 +447,38 @@
           "minimum": 0
         },
         "lastAttemptAt": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Momento da última tentativa, em ISO 8601."
         },
         "approvedAt": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Momento da aprovação do prompt, em ISO 8601."
         },
         "commitSha": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "SHA do commit gerado após a aprovação."
         },
         "lastVerdict": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Último veredito recebido do revisor de prompt.",
-          "enum": ["APPROVED", "CHANGES_REQUESTED", "BLOCKED", null]
+          "enum": [
+            "APPROVED",
+            "CHANGES_REQUESTED",
+            "BLOCKED",
+            null
+          ]
         },
         "blockingIssueCount": {
           "type": "integer",
@@ -270,7 +491,12 @@
       "type": "object",
       "description": "Commit criado pela execução para um prompt aprovado.",
       "additionalProperties": false,
-      "required": ["promptId", "sha", "message", "at"],
+      "required": [
+        "promptId",
+        "sha",
+        "message",
+        "at"
+      ],
       "properties": {
         "promptId": {
           "type": "string",
@@ -297,7 +523,11 @@
       "type": "object",
       "description": "Entrada do histórico de eventos da execução.",
       "additionalProperties": false,
-      "required": ["at", "state", "message"],
+      "required": [
+        "at",
+        "state",
+        "message"
+      ],
       "properties": {
         "at": {
           "type": "string",
@@ -356,7 +586,11 @@
         "state": {
           "type": "string",
           "description": "Situação do pull request.",
-          "enum": ["OPEN", "CLOSED", "MERGED"]
+          "enum": [
+            "OPEN",
+            "CLOSED",
+            "MERGED"
+          ]
         },
         "isDraft": {
           "type": "boolean",
@@ -376,16 +610,26 @@
           "minLength": 1
         },
         "baseSha": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "SHA do commit da base considerado pelo GitHub."
         },
         "mergeable": {
           "type": "string",
           "description": "Resultado da checagem de conflitos.",
-          "enum": ["MERGEABLE", "CONFLICTING", "UNKNOWN"]
+          "enum": [
+            "MERGEABLE",
+            "CONFLICTING",
+            "UNKNOWN"
+          ]
         },
         "mergeStateStatus": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Estado detalhado de mergeabilidade informado pelo GitHub."
         },
         "merged": {
@@ -393,13 +637,24 @@
           "description": "Indica se o pull request já foi integrado."
         },
         "mergeCommitSha": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "SHA do commit de merge, quando já integrado."
         },
         "reviewDecision": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Decisão agregada das revisões humanas.",
-          "enum": ["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", null]
+          "enum": [
+            "APPROVED",
+            "CHANGES_REQUESTED",
+            "REVIEW_REQUIRED",
+            null
+          ]
         },
         "unresolvedThreadCount": {
           "type": "integer",
@@ -430,7 +685,13 @@
         "status": {
           "type": "string",
           "description": "Estágio de execução do check.",
-          "enum": ["QUEUED", "IN_PROGRESS", "COMPLETED", "PENDING", "UNKNOWN"]
+          "enum": [
+            "QUEUED",
+            "IN_PROGRESS",
+            "COMPLETED",
+            "PENDING",
+            "UNKNOWN"
+          ]
         },
         "conclusion": {
           "type": "string",
@@ -449,7 +710,10 @@
           ]
         },
         "detailsUrl": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "URL com os detalhes da execução do check."
         },
         "required": {
@@ -457,15 +721,24 @@
           "description": "Indica se o check é obrigatório para o merge."
         },
         "workflowName": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Nome do workflow que originou o check."
         },
         "startedAt": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Início da execução do check, em ISO 8601."
         },
         "completedAt": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Término da execução do check, em ISO 8601."
         }
       }
@@ -537,7 +810,9 @@
         "runs": {
           "type": "array",
           "description": "Lista completa dos checks observados.",
-          "items": { "$ref": "#/definitions/CheckRun" }
+          "items": {
+            "$ref": "#/definitions/CheckRun"
+          }
         }
       }
     },
@@ -570,7 +845,10 @@
           "$ref": "#/definitions/TestStatus"
         },
         "exitCode": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "description": "Código de saída do processo; nulo quando encerrado por sinal."
         },
         "startedAt": {
@@ -601,7 +879,14 @@
     "TestStatus": {
       "type": "string",
       "description": "Situação possível de uma suíte ou comando de teste.",
-      "enum": ["PASSED", "FAILED", "TIMEOUT", "INTERRUPTED", "COMMAND_NOT_FOUND", "NOT_RUN"]
+      "enum": [
+        "PASSED",
+        "FAILED",
+        "TIMEOUT",
+        "INTERRUPTED",
+        "COMMAND_NOT_FOUND",
+        "NOT_RUN"
+      ]
     },
     "TestSuiteResult": {
       "type": "object",
@@ -643,12 +928,16 @@
         "commands": {
           "type": "array",
           "description": "Resultado de cada comando executado.",
-          "items": { "$ref": "#/definitions/TestCommandResult" }
+          "items": {
+            "$ref": "#/definitions/TestCommandResult"
+          }
         },
         "failedCommands": {
           "type": "array",
           "description": "Comandos que falharam, na ordem de execução.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -656,12 +945,21 @@
       "type": "object",
       "description": "Problema apontado por uma revisão de IA.",
       "additionalProperties": false,
-      "required": ["severity", "title", "description"],
+      "required": [
+        "severity",
+        "title",
+        "description"
+      ],
       "properties": {
         "severity": {
           "type": "string",
           "description": "Gravidade do problema.",
-          "enum": ["blocking", "major", "minor", "info"]
+          "enum": [
+            "blocking",
+            "major",
+            "minor",
+            "info"
+          ]
         },
         "title": {
           "type": "string",
@@ -708,7 +1006,11 @@
         "verdict": {
           "type": "string",
           "description": "Veredito da auditoria de merge.",
-          "enum": ["APPROVED_FOR_MERGE", "CHANGES_REQUIRED", "BLOCKED"]
+          "enum": [
+            "APPROVED_FOR_MERGE",
+            "CHANGES_REQUIRED",
+            "BLOCKED"
+          ]
         },
         "reviewedHeadSha": {
           "type": "string",
@@ -729,28 +1031,42 @@
         "blockingIssues": {
           "type": "array",
           "description": "Problemas que impedem o merge.",
-          "items": { "$ref": "#/definitions/ReviewIssue" }
+          "items": {
+            "$ref": "#/definitions/ReviewIssue"
+          }
         },
         "nonBlockingIssues": {
           "type": "array",
           "description": "Problemas que não impedem o merge.",
-          "items": { "$ref": "#/definitions/ReviewIssue" }
+          "items": {
+            "$ref": "#/definitions/ReviewIssue"
+          }
         },
         "requiredActions": {
           "type": "array",
           "description": "Ações exigidas antes de uma nova auditoria.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "riskAssessment": {
           "type": "object",
           "description": "Avaliação de risco da integração.",
           "additionalProperties": false,
-          "required": ["level", "summary"],
+          "required": [
+            "level",
+            "summary"
+          ],
           "properties": {
             "level": {
               "type": "string",
               "description": "Nível de risco.",
-              "enum": ["low", "medium", "high", "critical"]
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
             },
             "summary": {
               "type": "string",
@@ -762,7 +1078,11 @@
           "type": "object",
           "description": "Avaliação da cobertura e dos resultados de teste.",
           "additionalProperties": false,
-          "required": ["localTestsPassed", "ciPassed", "coverageAcceptable"],
+          "required": [
+            "localTestsPassed",
+            "ciPassed",
+            "coverageAcceptable"
+          ],
           "properties": {
             "localTestsPassed": {
               "type": "boolean",
@@ -782,7 +1102,10 @@
           "type": "object",
           "description": "Avaliação de aderência ao escopo pedido.",
           "additionalProperties": false,
-          "required": ["withinScope", "unexpectedChanges"],
+          "required": [
+            "withinScope",
+            "unexpectedChanges"
+          ],
           "properties": {
             "withinScope": {
               "type": "boolean",
@@ -791,7 +1114,9 @@
             "unexpectedChanges": {
               "type": "array",
               "description": "Alterações fora do escopo identificadas.",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
           }
         }
@@ -814,7 +1139,10 @@
         "auditor": {
           "type": "string",
           "description": "Agente que produziu a auditoria.",
-          "enum": ["claude", "codex"]
+          "enum": [
+            "claude",
+            "codex"
+          ]
         },
         "review": {
           "description": "Parecer completo da auditoria.",
@@ -831,7 +1159,10 @@
           "minLength": 1
         },
         "rawOutputPath": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Caminho do artefato com a saída bruta do agente."
         },
         "invalidated": {
@@ -839,7 +1170,10 @@
           "description": "Verdadeiro quando o parecer deixou de valer."
         },
         "invalidationReason": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Motivo da invalidação do parecer."
         }
       }
@@ -848,21 +1182,40 @@
       "type": "object",
       "description": "Posição de um dos auditores na apuração do consenso.",
       "additionalProperties": false,
-      "required": ["verdict", "confidence", "reviewedHeadSha", "available"],
+      "required": [
+        "verdict",
+        "confidence",
+        "reviewedHeadSha",
+        "available"
+      ],
       "properties": {
         "verdict": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Veredito do auditor; nulo quando não há parecer válido.",
-          "enum": ["APPROVED_FOR_MERGE", "CHANGES_REQUIRED", "BLOCKED", null]
+          "enum": [
+            "APPROVED_FOR_MERGE",
+            "CHANGES_REQUIRED",
+            "BLOCKED",
+            null
+          ]
         },
         "confidence": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "description": "Confiança declarada pelo auditor, entre 0 e 1.",
           "minimum": 0,
           "maximum": 1
         },
         "reviewedHeadSha": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Head SHA auditado por este auditor."
         },
         "available": {
@@ -915,7 +1268,9 @@
         "reasons": {
           "type": "array",
           "description": "Motivos que sustentam o resultado da apuração.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -923,7 +1278,13 @@
       "type": "object",
       "description": "Resultado da avaliação de um portão obrigatório de merge.",
       "additionalProperties": false,
-      "required": ["id", "index", "title", "status", "reason"],
+      "required": [
+        "id",
+        "index",
+        "title",
+        "status",
+        "reason"
+      ],
       "properties": {
         "id": {
           "description": "Identificador do portão.",
@@ -941,7 +1302,12 @@
         "status": {
           "type": "string",
           "description": "Situação da avaliação do portão.",
-          "enum": ["PASSED", "FAILED", "SKIPPED", "NOT_EVALUATED"]
+          "enum": [
+            "PASSED",
+            "FAILED",
+            "SKIPPED",
+            "NOT_EVALUATED"
+          ]
         },
         "reason": {
           "type": "string",
@@ -983,7 +1349,14 @@
       "type": "object",
       "description": "Relatório completo da avaliação dos portões de merge.",
       "additionalProperties": false,
-      "required": ["evaluatedAt", "headSha", "baseSha", "allPassed", "gates", "failedGates"],
+      "required": [
+        "evaluatedAt",
+        "headSha",
+        "baseSha",
+        "allPassed",
+        "gates",
+        "failedGates"
+      ],
       "properties": {
         "evaluatedAt": {
           "type": "string",
@@ -1006,12 +1379,16 @@
         "gates": {
           "type": "array",
           "description": "Resultado de cada portão, na ordem de avaliação.",
-          "items": { "$ref": "#/definitions/GateResult" }
+          "items": {
+            "$ref": "#/definitions/GateResult"
+          }
         },
         "failedGates": {
           "type": "array",
           "description": "Identificadores dos portões que reprovaram.",
-          "items": { "$ref": "#/definitions/GateId" }
+          "items": {
+            "$ref": "#/definitions/GateId"
+          }
         }
       }
     },
@@ -1039,20 +1416,33 @@
           "description": "Verdadeiro quando o merge foi efetivado."
         },
         "mergeSha": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "SHA do commit de merge."
         },
         "strategy": {
           "type": "string",
           "description": "Estratégia usada na integração.",
-          "enum": ["squash", "merge", "rebase"]
+          "enum": [
+            "squash",
+            "merge",
+            "rebase"
+          ]
         },
         "matchedHeadSha": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Head SHA exigido e confirmado no momento do merge."
         },
         "performedAt": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "Momento da integração, em ISO 8601."
         },
         "reason": {
@@ -1069,7 +1459,10 @@
       "type": "object",
       "description": "Erro estruturado do OrqPEG.",
       "additionalProperties": false,
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "properties": {
         "code": {
           "type": "string",
@@ -1121,6 +1514,1071 @@
         "cause": {
           "type": "string",
           "description": "Causa original resumida."
+        }
+      }
+    },
+    "LoopGuardTrigger": {
+      "type": "string",
+      "description": "Motivo nomeado pelo qual uma nova tentativa automática foi recusada.",
+      "enum": [
+        "MAX_ATTEMPTS_REACHED",
+        "CLAUDE_CALL_BUDGET_EXHAUSTED",
+        "CODEX_CALL_BUDGET_EXHAUSTED",
+        "AGENT_CALL_BUDGET_EXHAUSTED",
+        "PROMPT_TIME_BUDGET_EXHAUSTED",
+        "RUN_TIME_BUDGET_EXHAUSTED",
+        "NO_PROGRESS",
+        "REPEATED_REVIEW_ISSUES",
+        "REPEATED_TEST_FAILURE",
+        "OSCILLATION_DETECTED",
+        "REVIEW_OSCILLATION_DETECTED",
+        "PROMPT_CHANGED_DURING_RUN",
+        "PROJECT_CONTEXT_CHANGED",
+        "PROJECT_CONFIG_CHANGED",
+        "POLICY_SNAPSHOT_MISSING",
+        "SCOPE_VIOLATION",
+        "FORBIDDEN_AREA_CHANGED",
+        "DIFF_BUDGET_EXCEEDED",
+        "INCOMPLETE_REVIEW_EVIDENCE",
+        "REVIEW_FORMAT_RETRIES_EXHAUSTED",
+        "INVALID_CHANGES_REQUEST",
+        "AUTH_REQUIRED",
+        "USAGE_LIMIT_REACHED",
+        "TOOL_MISSING",
+        "PROCESS_TIMEOUT",
+        "REPEATED_CI_FAILURE",
+        "CI_WAIT_TIMEOUT",
+        "CI_REPAIR_BUDGET_EXHAUSTED",
+        "CI_CONFIGURATION_ERROR",
+        "CI_REQUIRED_CHECK_MISSING",
+        "MERGE_CORRECTION_BUDGET_EXHAUSTED",
+        "USER_PAUSED",
+        "USER_CANCELLED"
+      ]
+    },
+    "LoopGuardDecision": {
+      "type": "object",
+      "description": "Decisão do Loop Guard sobre permitir ou não a próxima chamada de IA.",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "severity",
+        "trigger",
+        "reason",
+        "evidence",
+        "nextActions"
+      ],
+      "properties": {
+        "allowed": {
+          "type": "boolean",
+          "description": "Verdadeiro quando a próxima tentativa foi autorizada."
+        },
+        "severity": {
+          "type": "string",
+          "description": "hard_stop exige correção fora do laço; soft_stop admite uma tentativa extra autorizada.",
+          "enum": [
+            "none",
+            "soft_stop",
+            "hard_stop"
+          ]
+        },
+        "trigger": {
+          "description": "Gatilho da parada, ou null quando não houve parada.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/LoopGuardTrigger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "description": "Explicação da decisão, em português."
+        },
+        "evidence": {
+          "type": "object",
+          "description": "Fatos que sustentam a decisão."
+        },
+        "nextActions": {
+          "type": "array",
+          "description": "Caminhos possíveis a partir daqui.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "OPEN_REPORT",
+              "OPEN_DIFF",
+              "OPEN_TESTS",
+              "OPEN_REVIEW",
+              "EDIT_PROMPT",
+              "AUTHORIZE_EXTRA_ATTEMPT",
+              "MARK_FOR_MANUAL_REVIEW",
+              "SKIP_PROMPT",
+              "CANCEL_RUN",
+              "FIX_AUTH",
+              "WAIT_QUOTA",
+              "INSTALL_TOOL",
+              "SPLIT_PROMPT",
+              "START_NEW_RUN"
+            ]
+          }
+        }
+      }
+    },
+    "PromptBudget": {
+      "type": "object",
+      "description": "Orçamento acumulado de um prompt. Sobrevive à retomada: retomar nunca zera o consumido.",
+      "additionalProperties": false,
+      "required": [
+        "promptId",
+        "attempts",
+        "claudeCalls",
+        "codexCalls",
+        "reviewFormatRetries",
+        "startedAt",
+        "consumedMs",
+        "manualOverridesUsed",
+        "diffFingerprints",
+        "reviewFingerprints",
+        "testFailureFingerprints",
+        "lastTrigger",
+        "lastDecisionAt"
+      ],
+      "properties": {
+        "promptId": {
+          "type": "string",
+          "description": "Prompt ao qual este orçamento pertence."
+        },
+        "attempts": {
+          "type": "integer",
+          "description": "Tentativas já realizadas.",
+          "minimum": 0
+        },
+        "claudeCalls": {
+          "type": "integer",
+          "description": "Chamadas do Claude consumidas.",
+          "minimum": 0
+        },
+        "codexCalls": {
+          "type": "integer",
+          "description": "Chamadas do Codex consumidas.",
+          "minimum": 0
+        },
+        "reviewFormatRetries": {
+          "type": "integer",
+          "description": "Retentativas por formato inválido do revisor.",
+          "minimum": 0
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Início do relógio do prompt, em ISO 8601."
+        },
+        "consumedMs": {
+          "type": "integer",
+          "description": "Tempo consumido pelo prompt, em milissegundos.",
+          "minimum": 0
+        },
+        "manualOverridesUsed": {
+          "type": "integer",
+          "description": "Autorizações humanas já exercidas.",
+          "minimum": 0
+        },
+        "diffFingerprints": {
+          "type": "array",
+          "description": "Assinaturas do diff, em ordem. Histórico limitado.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reviewFingerprints": {
+          "type": "array",
+          "description": "Assinaturas da revisão, em ordem.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "testFailureFingerprints": {
+          "type": "array",
+          "description": "Assinaturas da falha de teste, em ordem.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lastTrigger": {
+          "description": "Último gatilho registrado para este prompt.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/LoopGuardTrigger"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastDecisionAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Momento da última decisão do Loop Guard."
+        }
+      }
+    },
+    "ManualOverride": {
+      "type": "object",
+      "description": "Autorização humana, pontual e não reutilizável, de uma tentativa extra.",
+      "additionalProperties": false,
+      "required": [
+        "promptId",
+        "trigger",
+        "authorizedAt",
+        "authorizedBy",
+        "justification",
+        "consumed"
+      ],
+      "properties": {
+        "promptId": {
+          "type": "string",
+          "description": "Prompt autorizado."
+        },
+        "trigger": {
+          "description": "Gatilho que a autorização dispensa.",
+          "$ref": "#/definitions/LoopGuardTrigger"
+        },
+        "authorizedAt": {
+          "type": "string",
+          "description": "Momento da autorização, em ISO 8601."
+        },
+        "authorizedBy": {
+          "type": "string",
+          "description": "Quem autorizou."
+        },
+        "justification": {
+          "type": "string",
+          "description": "Por que outra tentativa deve resolver o que as anteriores não resolveram."
+        },
+        "consumed": {
+          "type": "boolean",
+          "description": "Verdadeiro depois que a tentativa extra foi liberada."
+        }
+      }
+    },
+    "CiWaitState": {
+      "type": "object",
+      "description": "Espera do CI, persistida para que o timeout seja histórico e não reinicie na retomada.",
+      "additionalProperties": false,
+      "required": [
+        "startedAt",
+        "headSha",
+        "lastPolledAt",
+        "pollCount",
+        "nextIntervalSeconds"
+      ],
+      "properties": {
+        "startedAt": {
+          "type": "string",
+          "description": "Início da PRIMEIRA espera deste head SHA. Não muda em retomada."
+        },
+        "headSha": {
+          "type": "string",
+          "description": "Head SHA cujo CI está sendo aguardado."
+        },
+        "lastPolledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Momento da última consulta ao CI."
+        },
+        "pollCount": {
+          "type": "integer",
+          "description": "Consultas já realizadas.",
+          "minimum": 0
+        },
+        "nextIntervalSeconds": {
+          "type": "integer",
+          "description": "Intervalo da próxima consulta, com backoff aplicado.",
+          "minimum": 1
+        }
+      }
+    },
+    "CiRepairRecord": {
+      "type": "object",
+      "description": "Um ciclo de reparo de CI.",
+      "additionalProperties": false,
+      "required": [
+        "cycle",
+        "headShaBefore",
+        "fingerprint",
+        "failedChecks",
+        "startedAt",
+        "finishedAt",
+        "outcome",
+        "headShaAfter"
+      ],
+      "properties": {
+        "cycle": {
+          "type": "integer",
+          "description": "Número do ciclo, a partir de 1.",
+          "minimum": 1
+        },
+        "headShaBefore": {
+          "type": "string",
+          "description": "Head SHA que o CI reprovou."
+        },
+        "fingerprint": {
+          "type": "string",
+          "description": "Assinatura normalizada da falha."
+        },
+        "failedChecks": {
+          "type": "array",
+          "description": "Checks obrigatórios reprovados.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "Início do ciclo, em ISO 8601."
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Fim do ciclo, em ISO 8601."
+        },
+        "outcome": {
+          "type": "string",
+          "description": "Desfecho do ciclo.",
+          "enum": [
+            "REPAIRED",
+            "TESTS_FAILED",
+            "NO_CHANGES",
+            "AGENT_FAILED"
+          ]
+        },
+        "headShaAfter": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Head SHA produzido pelo reparo."
+        }
+      }
+    },
+    "MergeCorrectionRecord": {
+      "type": "object",
+      "description": "Um ciclo de correção solicitado pelas auditorias finais.",
+      "additionalProperties": false,
+      "required": [
+        "cycle",
+        "headShaBefore",
+        "requestedBy",
+        "issueFingerprint",
+        "startedAt",
+        "finishedAt",
+        "outcome",
+        "headShaAfter"
+      ],
+      "properties": {
+        "cycle": {
+          "type": "integer",
+          "description": "Número do ciclo, a partir de 1.",
+          "minimum": 1
+        },
+        "headShaBefore": {
+          "type": "string",
+          "description": "Head SHA auditado."
+        },
+        "requestedBy": {
+          "type": "array",
+          "description": "Auditores que pediram mudanças.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex"
+            ]
+          }
+        },
+        "issueFingerprint": {
+          "type": "string",
+          "description": "Assinatura dos problemas apontados."
+        },
+        "startedAt": {
+          "type": "string",
+          "description": "Início do ciclo, em ISO 8601."
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Fim do ciclo, em ISO 8601."
+        },
+        "outcome": {
+          "type": "string",
+          "description": "Desfecho do ciclo.",
+          "enum": [
+            "CORRECTED",
+            "TESTS_FAILED",
+            "NO_CHANGES",
+            "AGENT_FAILED"
+          ]
+        },
+        "headShaAfter": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Head SHA produzido pela correção."
+        }
+      }
+    },
+    "EffectiveLoopGuardPolicy": {
+      "type": "object",
+      "description": "Política do Loop Guard já resolvida, com os tetos que moram fora de loopGuard no cadastro.",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "maxClaudeCallsPerPrompt",
+        "maxCodexCallsPerPrompt",
+        "maxTotalAgentCallsPerPrompt",
+        "maxPromptDurationMinutes",
+        "maxRunDurationMinutes",
+        "maxConsecutiveNoProgress",
+        "maxRepeatedReviewFingerprints",
+        "maxRepeatedTestFailureFingerprints",
+        "detectDiffOscillation",
+        "detectReviewOscillation",
+        "stopOnPromptMutation",
+        "stopOnContextMutation",
+        "stopOnScopeViolation",
+        "maxChangedFilesPerPrompt",
+        "maxChangedLinesPerPrompt",
+        "maxManualOverridesPerPrompt",
+        "maxCiRepairCycles",
+        "maxMergeCorrectionCycles",
+        "ciPollIntervalSeconds",
+        "ciPollMaxIntervalSeconds",
+        "ciWaitTimeoutMinutes",
+        "maxReviewFormatRetries",
+        "maxAttemptsPerPrompt",
+        "maxReviewerRetries",
+        "continueAfterApproval",
+        "stopOnBlocked"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Proteção contra looping ativa."
+        },
+        "maxClaudeCallsPerPrompt": {
+          "type": "integer",
+          "description": "Teto de chamadas do Claude por prompt.",
+          "minimum": 1
+        },
+        "maxCodexCallsPerPrompt": {
+          "type": "integer",
+          "description": "Teto de chamadas do Codex por prompt.",
+          "minimum": 1
+        },
+        "maxTotalAgentCallsPerPrompt": {
+          "type": "integer",
+          "description": "Teto total de chamadas de IA por prompt.",
+          "minimum": 2
+        },
+        "maxPromptDurationMinutes": {
+          "type": "integer",
+          "description": "Tempo máximo por prompt.",
+          "minimum": 1
+        },
+        "maxRunDurationMinutes": {
+          "type": "integer",
+          "description": "Tempo máximo da execução.",
+          "minimum": 1
+        },
+        "maxConsecutiveNoProgress": {
+          "type": "integer",
+          "description": "Correções sem progresso toleradas.",
+          "minimum": 1
+        },
+        "maxRepeatedReviewFingerprints": {
+          "type": "integer",
+          "description": "Revisões idênticas toleradas.",
+          "minimum": 2
+        },
+        "maxRepeatedTestFailureFingerprints": {
+          "type": "integer",
+          "description": "Falhas de teste idênticas toleradas.",
+          "minimum": 2
+        },
+        "detectDiffOscillation": {
+          "type": "boolean",
+          "description": "Detectar oscilação A→B→A no código."
+        },
+        "detectReviewOscillation": {
+          "type": "boolean",
+          "description": "Detectar oscilação A→B→A na revisão."
+        },
+        "stopOnPromptMutation": {
+          "type": "boolean",
+          "description": "Parar quando o prompt muda durante a execução."
+        },
+        "stopOnContextMutation": {
+          "type": "boolean",
+          "description": "Parar quando contexto ou cadastro mudam durante a execução."
+        },
+        "stopOnScopeViolation": {
+          "type": "boolean",
+          "description": "Parar quando o executor sai do escopo do prompt."
+        },
+        "maxChangedFilesPerPrompt": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Teto de arquivos no diff. null desativa."
+        },
+        "maxChangedLinesPerPrompt": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Teto de linhas no diff. null desativa."
+        },
+        "maxManualOverridesPerPrompt": {
+          "type": "integer",
+          "description": "Autorizações humanas por prompt.",
+          "minimum": 0
+        },
+        "maxCiRepairCycles": {
+          "type": "integer",
+          "description": "Ciclos de reparo de CI.",
+          "minimum": 0
+        },
+        "maxMergeCorrectionCycles": {
+          "type": "integer",
+          "description": "Ciclos de correção após auditoria.",
+          "minimum": 0
+        },
+        "ciPollIntervalSeconds": {
+          "type": "integer",
+          "description": "Intervalo inicial de consulta ao CI.",
+          "minimum": 5
+        },
+        "ciPollMaxIntervalSeconds": {
+          "type": "integer",
+          "description": "Teto do intervalo de consulta ao CI.",
+          "minimum": 5
+        },
+        "ciWaitTimeoutMinutes": {
+          "type": "integer",
+          "description": "Espera máxima pelo CI.",
+          "minimum": 1
+        },
+        "maxReviewFormatRetries": {
+          "type": "integer",
+          "description": "Retentativas por formato inválido do revisor.",
+          "minimum": 0
+        },
+        "maxAttemptsPerPrompt": {
+          "type": "integer",
+          "description": "Tentativas por prompt.",
+          "minimum": 1
+        },
+        "maxReviewerRetries": {
+          "type": "integer",
+          "description": "Retentativas do revisor.",
+          "minimum": 0
+        },
+        "continueAfterApproval": {
+          "type": "boolean",
+          "description": "Seguir para o próximo prompt após aprovação."
+        },
+        "stopOnBlocked": {
+          "type": "boolean",
+          "description": "Interromper a execução quando um prompt fica bloqueado."
+        }
+      }
+    },
+    "EffectiveCiPolicy": {
+      "type": "object",
+      "description": "Orçamento do CI congelado para esta execução.",
+      "additionalProperties": false,
+      "required": [
+        "maxRepairCycles",
+        "pollingInitialSeconds",
+        "pollingMaxSeconds",
+        "waitTimeoutMinutes",
+        "stopOnRepeatedFailure"
+      ],
+      "properties": {
+        "maxRepairCycles": {
+          "type": "integer",
+          "description": "Ciclos de reparo permitidos.",
+          "minimum": 0
+        },
+        "pollingInitialSeconds": {
+          "type": "integer",
+          "description": "Intervalo inicial de consulta.",
+          "minimum": 1
+        },
+        "pollingMaxSeconds": {
+          "type": "integer",
+          "description": "Teto do intervalo de consulta.",
+          "minimum": 1
+        },
+        "waitTimeoutMinutes": {
+          "type": "integer",
+          "description": "Teto HISTÓRICO da espera, contado desde a primeira.",
+          "minimum": 1
+        },
+        "stopOnRepeatedFailure": {
+          "type": "boolean",
+          "description": "Parar quando a mesma falha se repete entre ciclos."
+        }
+      }
+    },
+    "EffectiveMergeAuditPolicy": {
+      "type": "object",
+      "description": "Orçamento das correções pedidas pelas auditorias finais.",
+      "additionalProperties": false,
+      "required": [
+        "maxCorrectionCycles"
+      ],
+      "properties": {
+        "maxCorrectionCycles": {
+          "type": "integer",
+          "description": "Ciclos de correção permitidos.",
+          "minimum": 0
+        }
+      }
+    },
+    "EffectiveRepositoryPolicy": {
+      "type": "object",
+      "description": "Identidade do repositório congelada: retomar não pode trocar de alvo.",
+      "additionalProperties": false,
+      "required": [
+        "repositoryPath",
+        "githubRepository",
+        "remote",
+        "baseBranch",
+        "branchStrategy"
+      ],
+      "properties": {
+        "repositoryPath": {
+          "type": "string",
+          "description": "Caminho local do repositório."
+        },
+        "githubRepository": {
+          "type": "string",
+          "description": "Repositório no GitHub, no formato owner/repo."
+        },
+        "remote": {
+          "type": "string",
+          "description": "Nome do remoto."
+        },
+        "baseBranch": {
+          "type": "string",
+          "description": "Branch base."
+        },
+        "branchStrategy": {
+          "type": "string",
+          "description": "Estratégia de branch.",
+          "enum": [
+            "per_run",
+            "fixed",
+            "per_prompt"
+          ]
+        }
+      }
+    },
+    "EffectiveExecutionPolicySnapshot": {
+      "type": "object",
+      "description": "Fotografia imutável da política que rege UMA execução. Resolvida uma vez, antes de createRun, e nunca recalculada.",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "capturedAt",
+        "sources",
+        "effectiveHash",
+        "integrityHash",
+        "loopGuard",
+        "ci",
+        "mergeAudit",
+        "commands",
+        "agents",
+        "git",
+        "pullRequest",
+        "merge",
+        "repository",
+        "worktree",
+        "sourceMetadata"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "description": "Versão do formato do snapshot.",
+          "const": 1
+        },
+        "capturedAt": {
+          "type": "string",
+          "description": "Momento do congelamento, em ISO 8601."
+        },
+        "sources": {
+          "type": "object",
+          "description": "Hashes das fontes que originaram a política.",
+          "additionalProperties": false,
+          "required": [
+            "globalConfigHash",
+            "projectConfigHash",
+            "roundConfigHash"
+          ],
+          "properties": {
+            "globalConfigHash": {
+              "type": "string",
+              "description": "Hash da configuração global."
+            },
+            "projectConfigHash": {
+              "type": "string",
+              "description": "Hash canônico do cadastro do projeto."
+            },
+            "roundConfigHash": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Hash da rodada. null significa \"esta fase não tem rodada\"."
+            }
+          }
+        },
+        "effectiveHash": {
+          "type": "string",
+          "description": "Identidade da política resolvida. Igual entre execuções sob a mesma política."
+        },
+        "integrityHash": {
+          "type": "string",
+          "description": "Selo do snapshot inteiro, sourceMetadata inclusive. Detecta adulteração da procedência."
+        },
+        "loopGuard": {
+          "$ref": "#/definitions/EffectiveLoopGuardPolicy"
+        },
+        "ci": {
+          "$ref": "#/definitions/EffectiveCiPolicy"
+        },
+        "mergeAudit": {
+          "$ref": "#/definitions/EffectiveMergeAuditPolicy"
+        },
+        "commands": {
+          "type": "object",
+          "description": "Comandos congelados.",
+          "additionalProperties": false,
+          "required": [
+            "install",
+            "tests",
+            "timeoutSeconds"
+          ],
+          "properties": {
+            "install": {
+              "type": "array",
+              "description": "Comandos de instalação.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tests": {
+              "type": "array",
+              "description": "Comandos da suíte oficial.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "description": "Timeout dos comandos.",
+              "minimum": 1
+            }
+          }
+        },
+        "agents": {
+          "type": "object",
+          "description": "Modelos congelados, já resolvidos contra o padrão global.",
+          "additionalProperties": false,
+          "required": [
+            "claudeModel",
+            "codexModel"
+          ],
+          "properties": {
+            "claudeModel": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Modelo do Claude."
+            },
+            "codexModel": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Modelo do Codex."
+            }
+          }
+        },
+        "git": {
+          "type": "object",
+          "description": "Política de commit e push congelada.",
+          "additionalProperties": false,
+          "required": [
+            "commitAfterApproval",
+            "pushAfterRun",
+            "commitMessagePrefix"
+          ],
+          "properties": {
+            "commitAfterApproval": {
+              "type": "boolean",
+              "description": "Commitar após cada aprovação."
+            },
+            "pushAfterRun": {
+              "type": "boolean",
+              "description": "Enviar a branch ao final."
+            },
+            "commitMessagePrefix": {
+              "type": "string",
+              "description": "Prefixo das mensagens de commit."
+            }
+          }
+        },
+        "pullRequest": {
+          "type": "object",
+          "description": "Política de PR congelada.",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "draftDuringExecution",
+            "markReadyBeforeMerge",
+            "waitForChecks"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Abrir pull request."
+            },
+            "draftDuringExecution": {
+              "type": "boolean",
+              "description": "Abrir como rascunho."
+            },
+            "markReadyBeforeMerge": {
+              "type": "boolean",
+              "description": "Marcar como pronta antes do merge."
+            },
+            "waitForChecks": {
+              "type": "boolean",
+              "description": "Aguardar o CI."
+            }
+          }
+        },
+        "merge": {
+          "type": "object",
+          "description": "Política de merge congelada.",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "mode",
+            "strategy",
+            "deleteBranchAfterMerge",
+            "requireClaudeApproval",
+            "requireCodexApproval",
+            "requireLocalTests",
+            "requireCiSuccess",
+            "requireNoConflicts",
+            "requireNoUnresolvedThreads",
+            "invalidateApprovalOnHeadChange",
+            "minimumConfidence"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Merge automático habilitado."
+            },
+            "mode": {
+              "type": "string",
+              "description": "Modo de merge.",
+              "enum": [
+                "dual_ai_consensus",
+                "manual",
+                "disabled"
+              ]
+            },
+            "strategy": {
+              "type": "string",
+              "description": "Estratégia de merge.",
+              "enum": [
+                "squash",
+                "merge",
+                "rebase"
+              ]
+            },
+            "deleteBranchAfterMerge": {
+              "type": "boolean",
+              "description": "Apagar a branch após o merge."
+            },
+            "requireClaudeApproval": {
+              "type": "boolean",
+              "description": "Exigir aprovação do Claude."
+            },
+            "requireCodexApproval": {
+              "type": "boolean",
+              "description": "Exigir aprovação do Codex."
+            },
+            "requireLocalTests": {
+              "type": "boolean",
+              "description": "Exigir suíte local aprovada."
+            },
+            "requireCiSuccess": {
+              "type": "boolean",
+              "description": "Exigir CI aprovado."
+            },
+            "requireNoConflicts": {
+              "type": "boolean",
+              "description": "Exigir ausência de conflitos."
+            },
+            "requireNoUnresolvedThreads": {
+              "type": "boolean",
+              "description": "Exigir ausência de threads abertas."
+            },
+            "invalidateApprovalOnHeadChange": {
+              "type": "boolean",
+              "description": "Invalidar aprovações quando o head SHA muda."
+            },
+            "minimumConfidence": {
+              "type": "number",
+              "description": "Confiança mínima exigida das auditorias.",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "repository": {
+          "$ref": "#/definitions/EffectiveRepositoryPolicy"
+        },
+        "worktree": {
+          "type": "object",
+          "description": "Política de worktree congelada.",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "rootPath",
+            "reuseWhenSafe"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Usar worktree isolado."
+            },
+            "rootPath": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Raiz sob a qual os worktrees são criados."
+            },
+            "reuseWhenSafe": {
+              "type": "boolean",
+              "description": "Reaproveitar worktree limpo."
+            }
+          }
+        },
+        "sourceMetadata": {
+          "type": "object",
+          "description": "Procedência do snapshot. Coberta pelo integrityHash.",
+          "additionalProperties": false,
+          "required": [
+            "projectId",
+            "roundId",
+            "projectUpdatedAt"
+          ],
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "description": "Projeto que originou a política."
+            },
+            "roundId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Rodada que originou a política, quando houver."
+            },
+            "projectUpdatedAt": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "updatedAt do cadastro no momento do congelamento."
+            },
+            "materializedFromLegacyRun": {
+              "type": "boolean",
+              "description": "Verdadeiro quando o snapshot foi capturado DEPOIS do início da execução, para uma execução legada. Não é reconstrução histórica."
+            },
+            "materializedAt": {
+              "type": "string",
+              "description": "Momento da materialização legada."
+            },
+            "materializedBy": {
+              "type": "string",
+              "description": "Quem confirmou a materialização legada."
+            }
+          }
+        }
+      }
+    },
+    "RunSourceSnapshots": {
+      "type": "object",
+      "description": "Hashes das fontes no instante do congelamento, comparados contra o disco a cada volta.",
+      "additionalProperties": false,
+      "required": [
+        "promptHashes",
+        "promptSetHash",
+        "projectContextHash",
+        "projectConfigHash",
+        "roundConfigHash"
+      ],
+      "properties": {
+        "promptHashes": {
+          "type": "object",
+          "description": "Hash do conteúdo de cada prompt, por promptId.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "promptSetHash": {
+          "type": "string",
+          "description": "Hash do conjunto de prompts. Pega inclusão e remoção, não só edição."
+        },
+        "projectContextHash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Hash do PROJECT-CONTEXT.md."
+        },
+        "projectConfigHash": {
+          "type": "string",
+          "description": "Hash canônico do cadastro."
+        },
+        "roundConfigHash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Hash da rodada, quando houver."
         }
       }
     }
