@@ -34,6 +34,7 @@ const {
   renderSkillsForAgent,
   skillsRoot,
 } = require('../../dist/skills/skill-catalog');
+const { isOverridable } = require('../../dist/execution/override');
 
 ensureDataLayout();
 
@@ -284,6 +285,10 @@ function portasComGitReal(repoPath, options = {}) {
              declaração `<id>@<versão>`, então casar por ele contaria uma
              instrução que apenas cita a Skill sem carregar o conteúdo dela. */
           if (input.instruction.includes('Prefira nomes explícitos')) spy.skillsNoPrompt += 1;
+          /* Gancho para o teste de mutação: permite editar a Skill DEPOIS de
+             uma chamada ter acontecido, que é a única forma de reproduzir
+             "as regras mudaram no meio da execução". */
+          if (options.aposChamadaClaude) options.aposChamadaClaude(spy.claude.length);
           if (input.role === 'merge-auditor') return agentResult('{}');
           /*
            * Efeito real no repositório, em arquivo RASTREADO.
@@ -439,6 +444,13 @@ test('rodada real: pacote importado, Skill carregada, dois prompts, dois commits
     config: defaultGlobalConfig(),
     logger: nullLogger(),
     ports,
+    /* A rodada ATIVA a Skill. Sem esta declaração nada é injetado: ativação é
+       sempre explícita, e uma regra que entrasse sozinha no prompt seria uma
+       regra que ninguém decidiu aplicar. */
+    roundConfig: {
+      roundId: 'rodada-1',
+      skills: { claude: ['clareza-minima@1.0.0'], codex: ['clareza-minima@1.0.0'] },
+    },
   });
 
   assert.equal(resultado.ok, true, resultado.ok ? '' : JSON.stringify(resultado.error));
@@ -475,25 +487,30 @@ test('rodada real: pacote importado, Skill carregada, dois prompts, dois commits
     'nada mudou nas Skills durante a execução',
   );
 
-  /* LACUNA CONHECIDA — a Skill NÃO chega ao agente hoje.
+  /* O conteúdo da Skill de fato chegou à instrução do agente.
    *
-   * `renderSkillsForAgent`, `resolveDeclaredSkills` e `assertSkillsUnchanged`
-   * não são chamadas em lugar nenhum de `src/`: o orquestrador não referencia
-   * Skills. O que este teste exercita é o MÓDULO de Skills, invocado direto
-   * daqui, e não a integração com a execução.
-   *
-   * A asserção anterior era `spy.skillsNoPrompt >= 0` — sempre verdadeira para
-   * uma contagem, e por isso incapaz de revelar a lacuna. Enquanto a integração
-   * não existir, o teste afirma o que é verdade e falha no dia em que a
-   * situação mudar, para que ninguém precise descobrir isso de novo por acaso.
+   * A asserção original era `spy.skillsNoPrompt >= 0` — sempre verdadeira para
+   * uma contagem, e por isso incapaz de falhar. Ela escondia que nenhuma Skill
+   * chegava a agente nenhum: o orquestrador não referenciava Skills. Agora a
+   * contagem é pelo CORPO do documento, e precisa ser positiva.
    */
-  assert.equal(
-    spy.skillsNoPrompt,
-    0,
-    'uma Skill chegou ao agente: a integração passou a existir — troque esta asserção por > 0',
+  assert.ok(
+    spy.skillsNoPrompt > 0,
+    `nenhuma instrução entregue ao agente continha o corpo da Skill (${spy.skillsNoPrompt} de ${spy.claude.length} chamadas)`,
   );
 
-  /* O renderizador funciona; é só ninguém que o chama. */
+  /* E a Skill ficou congelada no registro, com id, versão e hash. */
+  assert.ok(run.skills, 'a execução congelou as Skills declaradas');
+  assert.deepEqual(
+    run.skills.claude.map((s) => `${s.id}@${s.version}`),
+    ['clareza-minima@1.0.0'],
+  );
+  assert.equal(
+    run.skills.claude[0].contentHash,
+    skills.value.claude[0].contentHash,
+    'o hash congelado é o do documento que o catálogo entregou',
+  );
+
   const bloco = renderSkillsForAgent(skills.value.claude);
   assert.match(bloco, /Prefira nomes explícitos/);
 });
@@ -550,4 +567,87 @@ test('rodada real: CI sempre vermelho para com gatilho nomeado, sem repetir para
 
   // Não houve repetição infinita: o número de chamadas de IA é limitado.
   assert.ok(spy.claude.length < 12, `chamadas de IA limitadas: ${spy.claude.length}`);
+});
+
+/* ======================================================================== */
+/* Skill editada durante a execução                                         */
+/* ======================================================================== */
+
+/**
+ * O defeito que este teste vigia é o mesmo de `PROMPT_CHANGED_DURING_RUN`,
+ * visto pelo lado das Skills: a primeira tentativa roda sob um documento, e a
+ * seguinte sob outro. Nenhuma correção posterior desfaz isso — a tentativa
+ * anterior já aconteceu sob as regras antigas.
+ *
+ * A execução precisa PARAR, com gatilho próprio, e preservar o trabalho.
+ */
+test('Skill editada no meio da execução para a rodada com gatilho nomeado', async () => {
+  const repo = repositorioDescartavel();
+  const shaValidado = git(repo, ['rev-parse', 'HEAD']).trim();
+  const skillDir = skillDocumental();
+
+  const projeto = projetoApontandoPara(repo);
+  const pacote = pacoteDeUmaRodada(shaValidado);
+  const importado = importCuratedPackage({
+    projectId: projeto.id,
+    sourcePath: pacote,
+    version: '1.0.0',
+  });
+  assert.equal(importado.ok, true, importado.ok ? '' : importado.error.message);
+
+  const rodada = getImportedRound(projeto.id, '01-fundacao');
+  assert.equal(rodada.ok, true);
+
+  const promptsDir = projectPromptsDir(projeto.id);
+  fs.mkdirSync(promptsDir, { recursive: true });
+  for (const nome of rodada.value.prompts) {
+    fs.copyFileSync(
+      path.join(pacote, 'rounds', '01-fundacao', 'prompts', nome),
+      path.join(promptsDir, nome),
+    );
+  }
+
+  const { ports, spy } = portasComGitReal(repo, {
+    // Depois da primeira chamada, alguém edita o documento da Skill.
+    aposChamadaClaude(chamadas) {
+      if (chamadas !== 1) return;
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        '# Clareza mínima\n\nRegra TROCADA no meio da execução.\n',
+      );
+    },
+  });
+
+  const resultado = await runProject({
+    projectId: projeto.id,
+    dryRun: false,
+    config: defaultGlobalConfig(),
+    logger: nullLogger(),
+    ports,
+    roundConfig: {
+      roundId: 'rodada-1',
+      skills: { claude: ['clareza-minima@1.0.0'], codex: ['clareza-minima@1.0.0'] },
+    },
+  });
+
+  assert.equal(resultado.ok, true, resultado.ok ? '' : JSON.stringify(resultado.error));
+  const run = resultado.value;
+
+  assert.equal(run.state, 'LOOP_GUARD_TRIGGERED');
+  assert.ok(run.lastLoopGuard, 'a parada precisa ser nomeada');
+  assert.equal(
+    run.lastLoopGuard.trigger,
+    'SKILL_CHANGED_DURING_RUN',
+    'gatilho próprio: reaproveitar outro esconderia a causa de quem lê o relatório',
+  );
+  assert.match(run.lastLoopGuard.reason, /editada durante a execução/i);
+
+  /* Hard stop: nenhum botão de "continuar" dispensa este caso. */
+  assert.equal(run.lastLoopGuard.severity, 'hard_stop');
+  assert.equal(isOverridable('SKILL_CHANGED_DURING_RUN'), false);
+
+  /* O congelado permanece intacto — é a evidência de sob o que a execução
+     rodou, e reescrevê-lo apagaria justamente a prova da divergência. */
+  assert.equal(run.skills.claude[0].id, 'clareza-minima');
+  assert.notEqual(run.state, 'MERGED');
 });

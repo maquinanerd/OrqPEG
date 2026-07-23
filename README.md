@@ -563,7 +563,8 @@ A camada de rodada é declarada no corpo de `POST /api/projects/{id}/run`:
   "roundConfig": {
     "roundId": "rodada-1",
     "maxAttemptsPerPrompt": 5,
-    "loopGuard": { "maxCiRepairCycles": 1 }
+    "loopGuard": { "maxCiRepairCycles": 1 },
+    "skills": { "claude": ["clareza-minima@1.0.0"], "codex": ["clareza-minima@1.0.0"] }
   }
 }
 ```
@@ -661,25 +662,41 @@ skills/
         └── SKILL.md
 ```
 
-A rodada declara o que quer, sempre com versão:
+A rodada declara o que quer, sempre com versão, no `roundConfig` que inicia a
+execução:
 
 ```json
 {
-  "skills": {
-    "claude": ["typescript-strict@1.0.0"],
-    "codex": ["security-review@1.0.0"]
+  "roundConfig": {
+    "roundId": "rodada-1",
+    "skills": {
+      "claude": ["typescript-strict@1.0.0"],
+      "codex": ["security-review@1.0.0"]
+    }
   }
 }
 ```
 
+O que acontece com isso:
+
+1. As Skills são resolvidas **antes de a execução existir**. Falhar aqui não
+   cria registro nenhum.
+2. O que passou é congelado em `run.skills` — id, versão e hash do documento.
+   O texto não vai para o registro: ele é relido do catálogo e conferido contra
+   o hash a cada uso, o que mantém o `RunRecord` enxuto e prova que o agente
+   recebeu o mesmo conteúdo que foi congelado.
+3. O bloco renderizado entra na instrução do executor, do corretor e do revisor.
+
 Regras, todas verificadas:
 
-- ativação é **explícita**; não existe descoberta automática;
+- ativação é **explícita**; não existe descoberta automática, e nenhuma Skill
+  entra sozinha — uma regra que ninguém decidiu aplicar não é regra;
 - Skill ausente, versão divergente, status não aprovado ou agente incompatível
   **bloqueiam a rodada** — sem versão, atualizar a Skill mudaria em silêncio o
   comportamento de algo já validado;
-- as Skills são congeladas por hash no início e conferidas depois: editá-las no
-  meio da execução bloqueia, pela mesma razão que editar um prompt bloqueia;
+- editar uma Skill no meio da execução para tudo em `SKILL_CHANGED_DURING_RUN`,
+  que é **hard stop** e não admite override: a tentativa anterior já rodou sob
+  o documento antigo, e autorizar mais uma não desfaz isso;
 - `executeScripts` e `networkAccess` verdadeiros são **recusados na leitura**;
 - nenhuma Skill amplia escopo, substitui política ou dispensa teste — isso é
   dito também ao agente, dentro do bloco que ele recebe.

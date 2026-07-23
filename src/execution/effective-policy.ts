@@ -5,6 +5,7 @@ import type {
   LoopGuardConfig,
   ProjectConfig,
   Result,
+  RoundSkillDeclaration,
   RunRecord,
 } from '../types';
 import { fail, ok } from '../utils/errors';
@@ -16,6 +17,7 @@ import {
   validateLoopGuardConfig,
 } from './loop-guard-config';
 import { validateIdentifier } from '../security/path-guard';
+import { parseSkillRef } from '../skills/skill-catalog';
 import { stableHash } from './fingerprints';
 
 /**
@@ -80,6 +82,15 @@ export interface RoundPolicyOverrides {
   maxReviewerRetries?: number;
   continueAfterApproval?: boolean;
   stopOnBlocked?: boolean;
+  /**
+   * Skills que esta rodada ativa, por agente, em `<id>@<versão>`.
+   *
+   * Fica aqui, e não no cadastro do projeto, pelo mesmo motivo do resto da
+   * rodada: a Skill vale para ESTA execução. A ativação é sempre explícita —
+   * não existe Skill ligada por padrão, porque uma regra que entra sozinha no
+   * prompt é uma regra que ninguém decidiu aplicar.
+   */
+  skills?: RoundSkillDeclaration;
 }
 
 /** Campos aceitos na raiz de `roundConfig`. */
@@ -90,6 +101,7 @@ const ROUND_KNOWN_KEYS: ReadonlySet<string> = new Set([
   'maxReviewerRetries',
   'continueAfterApproval',
   'stopOnBlocked',
+  'skills',
 ]);
 
 /** Chaves de `loopGuard` em que `null` é declaração explícita de "sem teto". */
@@ -161,12 +173,15 @@ export function parseRoundPolicyOverrides(value: unknown): Result<RoundPolicyOve
   if (!stopOnBlocked.ok) return stopOnBlocked;
   const loopGuard = parseRoundLoopGuard(raw['loopGuard']);
   if (!loopGuard.ok) return loopGuard;
+  const skills = parseRoundSkills(raw['skills']);
+  if (!skills.ok) return skills;
 
   /* Chave só entra quando foi declarada. `stableStringify` serializa
      `undefined` como `null`, então um campo presente-e-indefinido mudaria o
      hash sem mudar a política. */
   const round: RoundPolicyOverrides = { roundId: roundId.value };
   if (loopGuard.value !== undefined) round.loopGuard = loopGuard.value;
+  if (skills.value !== undefined) round.skills = skills.value;
   if (attempts.value !== undefined) round.maxAttemptsPerPrompt = attempts.value;
   if (retries.value !== undefined) round.maxReviewerRetries = retries.value;
   if (continueAfterApproval.value !== undefined) {
@@ -175,6 +190,77 @@ export function parseRoundPolicyOverrides(value: unknown): Result<RoundPolicyOve
   if (stopOnBlocked.value !== undefined) round.stopOnBlocked = stopOnBlocked.value;
 
   return ok(round);
+}
+
+/**
+ * Valida a declaração de Skills da rodada.
+ *
+ * Só a FORMA é conferida aqui: `<id>@<versão>`, sem duplicata, nas duas listas
+ * conhecidas. Se a Skill existe no catálogo, se está aprovada e se é compatível
+ * com o agente é pergunta para `resolveDeclaredSkills`, que tem o catálogo em
+ * mãos — responder isso aqui exigiria ler o disco dentro de um validador de
+ * requisição, e um catálogo indisponível viraria "requisição malformada".
+ *
+ * Declaração vazia nos dois lados vira `undefined`: `{}` e a ausência do campo
+ * descrevem a mesma rodada e precisam produzir o mesmo `roundConfigHash`.
+ */
+function parseRoundSkills(value: unknown): Result<RoundSkillDeclaration | undefined> {
+  if (value === undefined) return ok(undefined);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return fail(
+      'VALIDATION_FAILED',
+      'roundConfig.skills: deve ser um objeto com as listas "claude" e/ou "codex".',
+    );
+  }
+
+  const raw = value as Record<string, unknown>;
+  const unknown = Object.keys(raw).filter((key) => key !== 'claude' && key !== 'codex');
+  if (unknown.length > 0) {
+    return fail(
+      'VALIDATION_FAILED',
+      `roundConfig.skills: agente(s) não reconhecido(s): ${unknown.join(', ')}.`,
+      { unknownKeys: unknown },
+    );
+  }
+
+  const out: RoundSkillDeclaration = { claude: [], codex: [] };
+
+  for (const agent of ['claude', 'codex'] as const) {
+    const list = raw[agent];
+    if (list === undefined) continue;
+    if (!Array.isArray(list)) {
+      return fail('VALIDATION_FAILED', `roundConfig.skills.${agent}: deve ser uma lista.`);
+    }
+
+    const seen = new Set<string>();
+    for (const entry of list) {
+      if (typeof entry !== 'string') {
+        return fail(
+          'VALIDATION_FAILED',
+          `roundConfig.skills.${agent}: cada item deve ser uma string "<id>@<versao>".`,
+          { value: entry },
+        );
+      }
+      const ref = parseSkillRef(entry);
+      if (!ref.ok) return ref;
+
+      /* Repetir a mesma Skill duplicaria o documento no prompt e mudaria o
+         hash sem mudar as regras. */
+      const key = `${ref.value.id}@${ref.value.version}`;
+      if (seen.has(key)) {
+        return fail(
+          'VALIDATION_FAILED',
+          `roundConfig.skills.${agent}: "${key}" aparece mais de uma vez.`,
+          { duplicate: key },
+        );
+      }
+      seen.add(key);
+      out[agent].push(ref.value.id + '@' + ref.value.version);
+    }
+  }
+
+  if (out.claude.length === 0 && out.codex.length === 0) return ok(undefined);
+  return ok(out);
 }
 
 function optionalRoundInteger(

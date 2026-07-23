@@ -226,6 +226,7 @@ export type LoopGuardTrigger =
   | 'OSCILLATION_DETECTED'
   | 'REVIEW_OSCILLATION_DETECTED'
   | 'PROMPT_CHANGED_DURING_RUN'
+  | 'SKILL_CHANGED_DURING_RUN'
   | 'PROJECT_CONTEXT_CHANGED'
   | 'PROJECT_CONFIG_CHANGED'
   | 'POLICY_SNAPSHOT_MISSING'
@@ -1175,6 +1176,16 @@ export interface RunRecord {
   effectivePolicy: EffectiveExecutionPolicySnapshot | null;
   /** Hashes das fontes no congelamento, comparados contra o disco a cada volta. */
   sourceSnapshots: RunSourceSnapshots | null;
+  /**
+   * Skills congeladas no início da execução, por agente.
+   *
+   * `null` significa que a rodada não declarou Skill nenhuma — ausência
+   * explícita, e não "ainda não sabemos". O conteúdo é conferido contra o disco
+   * antes de cada chamada de agente: editar uma Skill no meio da execução muda
+   * as regras entre uma tentativa e a seguinte, e a execução para em
+   * `SKILL_CHANGED_DURING_RUN`.
+   */
+  skills: SkillSnapshot | null;
 
   /**
    * Mantidos por compatibilidade com execuções gravadas antes de

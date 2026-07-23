@@ -36,6 +36,10 @@ const HARD_STOP_TRIGGERS: ReadonlySet<LoopGuardTrigger> = new Set<LoopGuardTrigg
   'TOOL_MISSING',
   'FORBIDDEN_AREA_CHANGED',
   'PROMPT_CHANGED_DURING_RUN',
+  /* Declarado, e não deixado para o padrão fail-closed: um gatilho que só é
+     hard stop por omissão vira soft stop no dia em que alguém mexer no
+     padrão, e uma Skill editada passaria a admitir override. */
+  'SKILL_CHANGED_DURING_RUN',
   'PROJECT_CONTEXT_CHANGED',
   'PROJECT_CONFIG_CHANGED',
   'POLICY_SNAPSHOT_MISSING',
@@ -598,6 +602,8 @@ function nextActionsFor(
     case 'TOOL_MISSING':
       return [...base, 'INSTALL_TOOL'];
     case 'PROMPT_CHANGED_DURING_RUN':
+      return [...base, 'START_NEW_RUN'];
+    case 'SKILL_CHANGED_DURING_RUN':
       return [...base, 'START_NEW_RUN'];
     case 'PROJECT_CONTEXT_CHANGED':
       return [...base, 'START_NEW_RUN'];

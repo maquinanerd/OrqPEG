@@ -9,6 +9,7 @@ import type {
   RunRecord,
   RunSourceSnapshots,
   RunState,
+  SkillSnapshot,
 } from '../types';
 import { fail, ok } from '../utils/errors';
 import { fileExists, listFilesSync, readJsonSync, writeJsonAtomicSync } from '../utils/fs-atomic';
@@ -293,6 +294,8 @@ export interface CreateRunInput {
    */
   effectivePolicy: EffectiveExecutionPolicySnapshot;
   sourceSnapshots: RunSourceSnapshots;
+  /** Skills já resolvidas e congeladas. `null` quando a rodada não declarou. */
+  skills?: SkillSnapshot | null;
 }
 
 /** Monta um `RunRecord` completo, com todos os prompts em `PENDING`. */
@@ -372,6 +375,7 @@ export function createRun(input: CreateRunInput): RunRecord {
 
     effectivePolicy: input.effectivePolicy,
     sourceSnapshots: input.sourceSnapshots,
+    skills: input.skills ?? null,
     /* Espelhados para que execuções gravadas agora continuem legíveis por uma
        versão anterior do painel. A escrita nova é `sourceSnapshots`. */
     projectContextHash: input.sourceSnapshots.projectContextHash,
@@ -767,6 +771,9 @@ function validateRunRecord(
   const record = value as RunRecord;
   if (record.effectivePolicy === undefined) record.effectivePolicy = null;
   if (record.sourceSnapshots === undefined) record.sourceSnapshots = null;
+  /* Execução gravada antes das Skills entrarem na execução: ausência vira
+     `null`, que é "não declarou Skill" — e é o que ela de fato não fez. */
+  if (record.skills === undefined) record.skills = null;
 
   /* Campos de CI e auditoria acrescentados depois: execuções gravadas antes
      deles continuam legíveis, com os contadores em zero. */

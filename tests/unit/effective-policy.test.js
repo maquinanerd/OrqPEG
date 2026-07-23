@@ -1024,6 +1024,78 @@ test('rodadas com a mesma política produzem o mesmo hash', () => {
 });
 
 /* ------------------------------------------------------------------------ */
+/* Declaração de Skills da rodada                                            */
+/* ------------------------------------------------------------------------ */
+
+test('a rodada declara Skills em <id>@<versão>, e só isso', () => {
+  const valida = parseRoundPolicyOverrides({
+    roundId: 'r1',
+    skills: { claude: ['clareza-minima@1.0.0'], codex: ['clareza-minima@1.0.0'] },
+  });
+  assert.equal(valida.ok, true, valida.ok ? '' : valida.error.message);
+  assert.deepEqual(valida.value.skills, {
+    claude: ['clareza-minima@1.0.0'],
+    codex: ['clareza-minima@1.0.0'],
+  });
+
+  for (const ruim of [
+    { claude: ['clareza-minima'] },
+    { claude: ['clareza-minima@1.0'] },
+    { claude: ['clareza-minima@latest'] },
+    { claude: [42] },
+    { claude: 'clareza-minima@1.0.0' },
+    { gemini: ['x@1.0.0'] },
+  ]) {
+    const lido = parseRoundPolicyOverrides({ roundId: 'r1', skills: ruim });
+    assert.equal(lido.ok, false, `${JSON.stringify(ruim)} deveria ser recusado`);
+  }
+});
+
+test('sem versão explícita a Skill é recusada: atualizar mudaria a rodada em silêncio', () => {
+  const lido = parseRoundPolicyOverrides({ roundId: 'r1', skills: { claude: ['clareza-minima'] } });
+  assert.equal(lido.ok, false);
+  assert.match(lido.error.message, /<id>@<versao>/i);
+});
+
+test('a mesma Skill declarada duas vezes é recusada', () => {
+  const lido = parseRoundPolicyOverrides({
+    roundId: 'r1',
+    skills: { claude: ['a-skill@1.0.0', 'a-skill@1.0.0'] },
+  });
+  assert.equal(lido.ok, false, 'duplicar o documento no prompt não é declaração de nada novo');
+  assert.match(lido.error.message, /mais de uma vez/);
+});
+
+test('declaração vazia é o mesmo que não declarar, e produz o mesmo hash', () => {
+  const semCampo = parseRoundPolicyOverrides({ roundId: 'r1' });
+  const listasVazias = parseRoundPolicyOverrides({
+    roundId: 'r1',
+    skills: { claude: [], codex: [] },
+  });
+  assert.equal(semCampo.ok && listasVazias.ok, true);
+  assert.equal(listasVazias.value.skills, undefined);
+  assert.equal(roundConfigHashOf(semCampo.value), roundConfigHashOf(listasVazias.value));
+});
+
+test('Skills diferentes produzem rodadas com hashes diferentes', () => {
+  const uma = parseRoundPolicyOverrides({ roundId: 'r1', skills: { claude: ['a@1.0.0'] } });
+  const outraVersao = parseRoundPolicyOverrides({ roundId: 'r1', skills: { claude: ['a@1.0.1'] } });
+  const outroAgente = parseRoundPolicyOverrides({ roundId: 'r1', skills: { codex: ['a@1.0.0'] } });
+
+  assert.equal(uma.ok && outraVersao.ok && outroAgente.ok, true);
+  assert.notEqual(
+    roundConfigHashOf(uma.value),
+    roundConfigHashOf(outraVersao.value),
+    'versão diferente é regra diferente',
+  );
+  assert.notEqual(
+    roundConfigHashOf(uma.value),
+    roundConfigHashOf(outroAgente.value),
+    'a mesma Skill em outro agente é outra configuração',
+  );
+});
+
+/* ------------------------------------------------------------------------ */
 /* Auxiliares                                                                */
 /* ------------------------------------------------------------------------ */
 

@@ -38,6 +38,9 @@ export const NEVER_OVERRIDABLE: ReadonlySet<LoopGuardTrigger> = new Set<LoopGuar
   'FORBIDDEN_AREA_CHANGED',
   'SCOPE_VIOLATION',
   'PROMPT_CHANGED_DURING_RUN',
+  /* Mesma razão do prompt alterado: as tentativas anteriores rodaram sob outro
+     conjunto de regras, e autorizar mais uma não desfaz isso. */
+  'SKILL_CHANGED_DURING_RUN',
   'PROJECT_CONTEXT_CHANGED',
   'AUTH_REQUIRED',
   'USAGE_LIMIT_REACHED',

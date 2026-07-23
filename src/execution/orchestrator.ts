@@ -6,6 +6,7 @@ import type {
   EffectiveExecutionPolicySnapshot,
   GlobalConfig,
   Logger,
+  LoadedSkill,
   LoopGuardDecision,
   LoopGuardTrigger,
   MergeReview,
@@ -15,9 +16,11 @@ import type {
   PromptFile,
   PromptReview,
   Result,
+  RoundSkillDeclaration,
   RunRecord,
   RunSourceSnapshots,
   RunState,
+  SkillSnapshot,
   TestSuiteResult,
 } from '../types';
 import { fail, ok } from '../utils/errors';
@@ -107,6 +110,13 @@ import {
   resolveEffectiveExecutionPolicy,
 } from './effective-policy';
 import type { RoundPolicyOverrides } from './effective-policy';
+import {
+  assertSkillsUnchanged,
+  loadSkillCatalog,
+  renderSkillsForAgent,
+  resolveDeclaredSkills,
+  snapshotSkills,
+} from '../skills/skill-catalog';
 import { renderPullRequestBody } from './pr-body';
 import type { OrchestratorPorts } from './ports';
 
@@ -257,6 +267,13 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
     if (!resolved.ok) return resolved;
     policy = resolved.value;
 
+    /* As Skills são resolvidas ANTES de a execução existir. Falhar aqui não
+       cria registro nenhum: uma rodada que declara Skill que o catálogo não
+       tem rodaria sob regras diferentes das que foram validadas, e isso é
+       indistinguível de não ter validado. */
+    const frozenSkills = freezeDeclaredSkills(roundConfig?.skills ?? null);
+    if (!frozenSkills.ok) return frozenSkills;
+
     run = createRun({
       projectId: project.id,
       dryRun: options.dryRun,
@@ -270,11 +287,13 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
         prompts,
         policy.sources.roundConfigHash,
       ),
+      skills: frozenSkills.value,
     });
     logger.info(
       `Nova execução ${run.runId} com ${String(prompts.length)} prompt(s), ` +
         `política ${policy.effectiveHash} congelada` +
-        (roundConfig === null ? ' (sem rodada).' : ` na rodada ${roundConfig.roundId}.`),
+        (roundConfig === null ? ' (sem rodada)' : ` na rodada ${roundConfig.roundId}`) +
+        `, ${describeFrozenSkills(frozenSkills.value)}.`,
     );
   }
 
@@ -741,7 +760,16 @@ async function executeSinglePrompt(
       testCommands: ctx.policy.commands.tests,
     };
 
-    const instruction =
+    /* As Skills valem para a tentativa que está prestes a acontecer, então a
+       conferência é aqui e não uma vez no início: entre a tentativa anterior e
+       esta, alguém pode ter editado o documento. */
+    const skillsIntact = assertRunSkillsUnchanged(run);
+    if (!skillsIntact.ok) {
+      run = save(ctx, stopBySkillMutation(ctx, run, promptFile.id, skillsIntact.error.message));
+      return ok(run);
+    }
+
+    const baseInstruction =
       attempt === 1 || previousReview === null
         ? buildClaudeExecutionInstruction({
             ...common,
@@ -758,6 +786,8 @@ async function executeSinglePrompt(
             failedTestCommands: lastTests?.failedCommands ?? [],
             testOutputExcerpt: lastTests ? summarizeTestSuite(lastTests) : '',
           });
+
+    const instruction = withSkills(baseInstruction, renderSkillsFor(run, 'claude'));
 
     const claude = await ports.agents.runClaude({
       role: attempt === 1 ? 'executor' : 'corrector',
@@ -862,27 +892,42 @@ async function executeSinglePrompt(
     const schema = loadSchema('prompt-review.schema.json');
     if (!schema.ok) return schema;
 
+    /* Mesma conferência de antes da chamada do Claude: o revisor precisa julgar
+       sob as regras que o executor recebeu, e uma Skill editada entre as duas
+       chamadas faria o revisor cobrar o que o executor nunca leu. */
+    const skillsIntactForReview = assertRunSkillsUnchanged(run);
+    if (!skillsIntactForReview.ok) {
+      run = save(
+        ctx,
+        stopBySkillMutation(ctx, run, promptFile.id, skillsIntactForReview.error.message),
+      );
+      return ok(run);
+    }
+
     const codex = await ports.agents.runCodex({
       role: 'prompt-reviewer',
       config,
       cwd: ctx.workingDir,
       // A instrução define as regras e o formato de resposta; o pacote de
       // auditoria (diff completo, testes, escopo) segue anexado como evidência.
-      instruction: `${buildCodexPromptReviewInstruction({
-        projectName: project.name,
-        repositoryPath: project.repositoryPath,
-        workingDirectory: ctx.workingDir,
-        branchName: run.branchName ?? '',
-        promptId: promptFile.id,
-        promptName: promptFile.name,
-        promptContent: parsed.rawBody,
-        attempt,
-        maxAttempts,
-        changedFiles,
-        diffSummary: diffStat.ok ? diffStat.value : '',
-        testsSummary: summarizeTestSuite(tests),
-        responseSchema: JSON.stringify(schema.value, null, 2),
-      })}\n\n${reviewPackage}`,
+      instruction: `${withSkills(
+        buildCodexPromptReviewInstruction({
+          projectName: project.name,
+          repositoryPath: project.repositoryPath,
+          workingDirectory: ctx.workingDir,
+          branchName: run.branchName ?? '',
+          promptId: promptFile.id,
+          promptName: promptFile.name,
+          promptContent: parsed.rawBody,
+          attempt,
+          maxAttempts,
+          changedFiles,
+          diffSummary: diffStat.ok ? diffStat.value : '',
+          testsSummary: summarizeTestSuite(tests),
+          responseSchema: JSON.stringify(schema.value, null, 2),
+        }),
+        renderSkillsFor(run, 'codex'),
+      )}\n\n${reviewPackage}`,
       timeoutMs: config.agents.codexTimeoutSeconds * 1000,
       model: ctx.policy.agents.codexModel,
       artifactDir,
@@ -2136,6 +2181,116 @@ function captureSourceSnapshots(
     projectConfigHash: executionRelevantProjectConfigHash(project),
     roundConfigHash,
   };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Skills da rodada                                                           */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Resolve e congela as Skills declaradas, antes de a execução existir.
+ *
+ * Falha — nunca degrada. Skill ausente, versão divergente, status não aprovado
+ * ou agente incompatível interrompem aqui, com a lista inteira de problemas de
+ * uma vez: corrigir um por vez, descobrindo o próximo a cada tentativa, gasta
+ * a paciência de quem opera sem nenhuma vantagem.
+ */
+function freezeDeclaredSkills(
+  declaration: RoundSkillDeclaration | null,
+): Result<SkillSnapshot | null> {
+  if (declaration === null) return ok(null);
+
+  const catalog = loadSkillCatalog();
+  const resolved = resolveDeclaredSkills({ declaration, catalog: catalog.skills });
+  if (!resolved.ok) {
+    /* Manifesto malformado é reportado junto: sem isso, a mensagem diria
+       "Skill ausente" enquanto o problema real é um `skill.json` quebrado, e a
+       pessoa procuraria no lugar errado. */
+    const detail =
+      catalog.problems.length > 0
+        ? `${resolved.error.message}\n\nSkills inválidas no catálogo:\n- ${catalog.problems.join('\n- ')}`
+        : resolved.error.message;
+    return fail('VALIDATION_FAILED', detail, {
+      problems: resolved.error.details?.['problems'] ?? [],
+      catalogProblems: catalog.problems,
+    });
+  }
+
+  return ok(snapshotSkills(resolved.value));
+}
+
+/** Resumo legível do congelamento, para o log de criação da execução. */
+function describeFrozenSkills(snapshot: SkillSnapshot | null): string {
+  if (snapshot === null) return 'sem Skills declaradas';
+  const total = snapshot.claude.length + snapshot.codex.length;
+  if (total === 0) return 'sem Skills declaradas';
+  return (
+    `${String(total)} Skill(s) congelada(s) ` +
+    `(claude: ${String(snapshot.claude.length)}, codex: ${String(snapshot.codex.length)})`
+  );
+}
+
+/**
+ * Confere que as Skills em disco continuam idênticas ao congelado.
+ *
+ * Chamada antes de CADA invocação de agente, e não só na retomada: editar uma
+ * Skill entre uma tentativa e a seguinte muda as regras no meio da execução,
+ * exatamente como editar um prompt — e a tentativa anterior já rodou sob as
+ * regras antigas, o que nenhuma correção posterior desfaz.
+ */
+function assertRunSkillsUnchanged(run: RunRecord): Result<void> {
+  if (!run.skills) return ok(undefined);
+  return assertSkillsUnchanged(run.skills, loadSkillCatalog().skills);
+}
+
+/**
+ * Bloco de Skills para o agente, reconstruído do catálogo a cada chamada.
+ *
+ * O snapshot guarda id, versão e hash — não o texto. Reler o documento e
+ * conferir o hash antes é melhor que carregar o conteúdo no registro: o
+ * `RunRecord` não incha com cópias de documento, e o que chega ao agente é
+ * comprovadamente o mesmo conteúdo que foi congelado.
+ */
+function renderSkillsFor(run: RunRecord, agent: 'claude' | 'codex'): string {
+  if (!run.skills) return '';
+  const frozen = run.skills[agent];
+  if (frozen.length === 0) return '';
+
+  const catalog = loadSkillCatalog().skills;
+  const skills = frozen
+    .map((entry) => catalog.find((skill) => skill.manifest.id === entry.id))
+    .filter((skill): skill is LoadedSkill => skill !== undefined);
+
+  return renderSkillsForAgent(skills);
+}
+
+/** Junta o bloco de Skills à instrução, sem deixar linha em branco sobrando. */
+function withSkills(instruction: string, skillsBlock: string): string {
+  return skillsBlock === '' ? instruction : `${instruction}\n\n${skillsBlock}`;
+}
+
+/**
+ * Parada por Skill alterada, registrada como qualquer outra decisão do guard.
+ *
+ * Passa por `applyLoopGuardStop` de propósito: assim a parada grava artefato,
+ * marca o prompt como bloqueado e aparece no relatório pelo mesmo caminho das
+ * demais. Uma parada com tratamento próprio seria uma parada que o relatório
+ * conta de um jeito diferente.
+ */
+function stopBySkillMutation(
+  ctx: Context,
+  run: RunRecord,
+  promptId: string,
+  reason: string,
+): RunRecord {
+  return applyLoopGuardStop(ctx, run, promptId, {
+    allowed: false,
+    severity: severityOf('SKILL_CHANGED_DURING_RUN'),
+    trigger: 'SKILL_CHANGED_DURING_RUN',
+    reason,
+    evidence: { frozenSkills: run.skills },
+    nextActions: ['OPEN_REPORT', 'START_NEW_RUN'],
+  });
 }
 
 /** Hashes originais dos prompts: do registro quando houver, do disco na criação. */

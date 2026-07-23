@@ -39,6 +39,41 @@ Fechamento do escopo do OrqPEG 1.0. Tudo aqui existe para uma finalidade só:
   identificadores devolvem `400` nomeando o campo. `roundConfig` junto de
   `resumeRunId` devolve `409`, porque a retomada roda sob a política congelada
   quando a execução começou.
+- Mínimos numéricos do Loop Guard centralizados em `LOOP_GUARD_MINIMUMS`, lida
+  pela normalização (para corrigir o valor de disco) e pela fronteira de rodada
+  (para recusar o da requisição). Enquanto cada uma tinha a própria cópia,
+  `maxClaudeCallsPerPrompt: 0` atravessava a fronteira e virava `1` depois — o
+  clamp silencioso que a recusa existe para impedir.
+
+#### Skills locais na execução
+
+- As Skills declaradas em `roundConfig.skills` passam a ser **resolvidas,
+  congeladas e injetadas** de fato. Antes o módulo existia completo e testado,
+  mas nenhuma de suas funções era chamada pelo orquestrador: nenhuma Skill
+  chegava a agente nenhum.
+- Resolução acontece **antes de a execução existir**: Skill ausente, versão
+  divergente, status não aprovado ou agente incompatível interrompem sem criar
+  registro. Manifesto malformado no catálogo é reportado junto, para que a
+  mensagem não diga "Skill ausente" quando o problema é um `skill.json`
+  quebrado.
+- O congelado vai para `RunRecord.skills` com id, versão e hash — não o texto.
+  O conteúdo é relido do catálogo e conferido contra o hash antes de cada uso.
+- Bloco renderizado entra na instrução do executor, do corretor e do revisor.
+- Gatilho novo `SKILL_CHANGED_DURING_RUN`: editar uma Skill no meio da execução
+  para a rodada. É **hard stop** declarado e **não admite override**, pela mesma
+  razão de `PROMPT_CHANGED_DURING_RUN` — a tentativa anterior já rodou sob o
+  documento antigo.
+
+#### Painel
+
+- Defesa contra CSRF nos métodos que alteram estado. A validação de `Host`
+  cobria DNS rebinding, não CSRF: numa requisição disparada por outra página o
+  `Host` é justamente o do painel. Com a porta padrão fixa e documentada,
+  qualquer site aberto enquanto o painel rodava alcançava criação de projeto,
+  alteração de `merge.mode`, disparo de execução e concessão de override.
+  Agora `Sec-Fetch-Site` e `Origin` são verificados, e corpo presente exige
+  `Content-Type: application/json` — o que elimina a forma "simple request",
+  que o navegador entrega sem preflight.
 - `POST /api/projects/:id/runs/:runId/materialize-policy` para execuções
   legadas, com confirmação explícita e marca de procedência.
 
@@ -240,7 +275,8 @@ Fechamento do escopo do OrqPEG 1.0. Tudo aqui existe para uma finalidade só:
   `merge.mode: "manual"` e faça o merge pelo GitHub após sua própria revisão.
 - **A camada de rodada só é declarável pela API do painel.**
   `POST /api/projects/{id}/run` aceita `roundConfig`; a CLI não expõe o campo, e
-  uma execução disparada por ela roda sem rodada — `roundConfigHash` fica `null`.
+  uma execução disparada por ela roda sem rodada e sem Skills —
+  `roundConfigHash` e `skills` ficam `null`.
 - **O teste de rodada real dubla as duas IAs e o GitHub.** O Git é real e os
   commits são reais, mas chamar Claude e Codex de dentro da suíte gastaria
   assinatura e exigiria rede para provar o que já é observável no disco.

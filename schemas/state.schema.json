@@ -47,6 +47,7 @@
     "mergeCorrections",
     "effectivePolicy",
     "sourceSnapshots",
+    "skills",
     "projectContextHash",
     "projectConfigHash"
   ],
@@ -342,6 +343,17 @@
       "oneOf": [
         {
           "$ref": "#/definitions/EffectiveExecutionPolicySnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "skills": {
+      "description": "Skills congeladas no início da execução, por agente. null significa que a rodada não declarou Skill nenhuma.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/SkillSnapshot"
         },
         {
           "type": "null"
@@ -1533,6 +1545,7 @@
         "OSCILLATION_DETECTED",
         "REVIEW_OSCILLATION_DETECTED",
         "PROMPT_CHANGED_DURING_RUN",
+        "SKILL_CHANGED_DURING_RUN",
         "PROJECT_CONTEXT_CHANGED",
         "PROJECT_CONFIG_CHANGED",
         "POLICY_SNAPSHOT_MISSING",
@@ -2536,6 +2549,48 @@
               "description": "Quem confirmou a materialização legada."
             }
           }
+        }
+      }
+    },
+    "SkillSnapshot": {
+      "type": "object",
+      "description": "Skills congeladas para uma execução. Guarda id, versão e hash do documento — não o texto: o conteúdo é relido do catálogo e conferido contra o hash antes de cada chamada de agente.",
+      "additionalProperties": false,
+      "required": ["capturedAt", "claude", "codex"],
+      "properties": {
+        "capturedAt": {
+          "type": "string",
+          "description": "Instante do congelamento, em ISO 8601."
+        },
+        "claude": {
+          "type": "array",
+          "description": "Skills ativas para o Claude.",
+          "items": { "$ref": "#/definitions/FrozenSkill" }
+        },
+        "codex": {
+          "type": "array",
+          "description": "Skills ativas para o Codex.",
+          "items": { "$ref": "#/definitions/FrozenSkill" }
+        }
+      }
+    },
+    "FrozenSkill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "contentHash"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador da Skill no catálogo local."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Versão declarada pela rodada e confirmada no catálogo."
+        },
+        "contentHash": {
+          "type": "string",
+          "description": "Hash do documento no congelamento. Divergência durante a execução dispara SKILL_CHANGED_DURING_RUN."
         }
       }
     },
