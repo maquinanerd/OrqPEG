@@ -16,14 +16,14 @@ import {
 import { normalizeProjectConfig, validateProjectConfig } from '../projects/project-validator';
 import { toSlug } from '../projects/slug';
 import { discoverPrompts, ensurePromptsDir } from '../prompts/prompt-store';
-import { findActiveRun, listRuns, requestCancel, requestPause, saveRun } from '../state/run-state';
+import { findActiveRun, latestRun, listRuns, recordRunIntent } from '../state/run-state';
 import { runProject, describeRunState } from '../execution/orchestrator';
 import { createDefaultPorts } from '../execution/default-ports';
 import { buildDryRunPlan, renderDryRunPlan } from '../execution/dry-run';
 import { defaultLoopGuardConfig } from '../execution/loop-guard-config';
 import { runDiagnostics, renderDiagnosticReport } from './diagnostics';
 import { startPanelServer } from '../server/http-server';
-import { abortAll } from '../server/run-manager';
+import { cancelRun, pauseRun, shutdownRuns } from '../server/run-manager';
 import { writeRunReport } from '../reports/report-generator';
 import { runProcess } from '../agents/process-runner';
 import { fileExists, readTextSync } from '../utils/fs-atomic';
@@ -196,10 +196,25 @@ async function commandPanel(args: string[], config: GlobalConfig): Promise<numbe
   if (config.panel.openBrowserOnStart) await openInBrowser(started.value.url);
 
   await new Promise<void>((resolve) => {
+    let shuttingDown = false;
     const shutdown = (): void => {
+      /* Ctrl+C repetido não dispara dois desligamentos concorrentes. */
+      if (shuttingDown) return;
+      shuttingDown = true;
       print('\n  Encerrando o painel com segurança...');
-      abortAll();
-      void started.value.close().then(() => resolve());
+      /*
+       * Interromper e AGUARDAR. Só sinalizar, como antes, deixava o painel
+       * fechar com processos filhos (Claude, Codex, `npm test`) ainda vivos —
+       * exatamente o processo órfão que o produto promete não deixar.
+       */
+      void shutdownRuns()
+        .then((finished) => {
+          if (!finished) {
+            print('  AVISO: alguma execução não terminou dentro do prazo de espera.');
+          }
+        })
+        .then(() => started.value.close())
+        .then(() => resolve());
     };
     process.once('SIGINT', shutdown);
     process.once('SIGTERM', shutdown);
@@ -531,13 +546,34 @@ async function commandPause(args: string[]): Promise<number> {
     print('  Nenhuma execução ativa para pausar.');
     return EXIT_OK;
   }
-  const paused = requestPause(active.value);
-  const saved = saveRun(paused);
+  /*
+   * A intenção é PERSISTIDA primeiro, por um caminho SERIALIZADO, e o
+   * controlador vivo é acionado depois.
+   *
+   * `recordRunIntent` relê o registro e grava dentro do mesmo lock de estado.
+   * A versão anterior lia aqui (`findActiveRun`) e gravava depois: entre uma
+   * coisa e outra o orquestrador podia gravar progresso a partir da mesma
+   * revisão, e a pausa desaparecia. Uma pausa que não chega ao disco não
+   * sobrevive a nada — nem a um reinício, nem à retomada — então falhar a
+   * gravação precisa reprovar o comando em vez de interromper o trabalho sem
+   * deixar registro do porquê.
+   */
+  const saved = recordRunIntent(projectId, active.value.runId, 'PAUSE');
   if (!saved.ok) {
+    print('  A pausa NÃO foi registrada. Nada foi interrompido.');
     print(formatError(saved.error));
     return EXIT_FAIL;
   }
-  print(`  Pausa solicitada para a execução ${paused.runId}.`);
+
+  const accepted = pauseRun(projectId);
+  print(`  Pausa solicitada para a execução ${saved.value.runId}.`);
+  if (accepted === null) {
+    /* Caso normal da CLI: a rodada vive no processo do painel. A vigília de
+       intenção daquele processo lê esta marca e interrompe a etapa em curso. */
+    print('  Intenção registrada no estado. A execução em curso interrompe a etapa corrente.');
+  } else {
+    print(`  Etapa "${accepted.step ?? 'desconhecida'}" interrompida neste processo.`);
+  }
   print('  O estado, o código e o worktree são preservados. Use RETOMAR.cmd para continuar.');
   return EXIT_OK;
 }
@@ -599,6 +635,14 @@ async function commandCancel(args: string[]): Promise<number> {
     return EXIT_FAIL;
   }
   if (!active.value) {
+    /* Idempotência: cancelar de novo o que já foi cancelado é sucesso, não
+       "não havia nada". A distinção é o que o operador precisa ler. */
+    const previous = latestRun(projectId);
+    const last = previous.ok ? previous.value : null;
+    if (last && (last.state === 'CANCELLED' || last.cancelRequested)) {
+      print(`  A execução ${last.runId} já estava cancelada (${last.state}). Nada foi alterado.`);
+      return EXIT_OK;
+    }
     print('  Nenhuma execução ativa para cancelar.');
     return EXIT_OK;
   }
@@ -613,13 +657,20 @@ async function commandCancel(args: string[]): Promise<number> {
     return EXIT_OK;
   }
 
-  const cancelled = requestCancel(active.value);
-  const saved = saveRun(cancelled);
+  const saved = recordRunIntent(projectId, active.value.runId, 'CANCEL');
   if (!saved.ok) {
+    print('  O cancelamento NÃO foi registrado. Nada foi interrompido.');
     print(formatError(saved.error));
     return EXIT_FAIL;
   }
-  print(`  Cancelamento solicitado para ${cancelled.runId}. Nada foi apagado.`);
+
+  const accepted = cancelRun(projectId);
+  print(`  Cancelamento solicitado para ${saved.value.runId}. Nada foi apagado.`);
+  if (accepted === null) {
+    print('  Intenção registrada no estado. A execução em curso encerra a etapa corrente.');
+  } else {
+    print(`  Etapa "${accepted.step ?? 'desconhecida'}" interrompida neste processo.`);
+  }
   return EXIT_OK;
 }
 

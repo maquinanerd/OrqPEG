@@ -718,21 +718,88 @@ RETOMAR.cmd           :: continua de onde parou
 CANCELAR-ETAPA.cmd    :: cancelamento seguro da execução atual
 ```
 
+O controle tem **duas metades**, e as duas são obrigatórias:
+
+1. a **intenção persistida** no arquivo de estado — é ela que sobrevive a um
+   reinício e é ela que uma execução hospedada em outro processo enxerga;
+2. o **controlador vivo** da execução — um registro em memória com o
+   `AbortController`, a etapa corrente e a identidade da rodada.
+
+Quem pede pausa ou cancelamento grava a intenção **e** fala com o controlador.
+O controlador é consultado **antes** do registro em disco, porque ele existe
+primeiro: um pedido que chega entre o início da execução e a criação do
+`RunRecord` é aceito, não recebe `404`.
+
+A resposta da API separa três fatos que não são o mesmo:
+
+| Campo | Significa |
+| --- | --- |
+| `intentPersisted` | a intenção foi gravada no arquivo de estado |
+| `accepted` | um controlador vivo **neste processo** recebeu o pedido |
+| `terminated` | o encerramento da árvore de processos foi **confirmado** |
+
+`200` exige `accepted` **e** `terminated`. `202` é "aceito, encerramento em
+andamento" ou "apenas registrado — a rodada está em outro processo". Se a
+intenção não puder ser gravada, a resposta é `500` e **nada é interrompido** —
+uma pausa que não chega ao disco não sobreviveria à retomada. `abort()` envia o
+sinal; a confirmação de término é aguardada (com teto de 3 s) antes de a API
+afirmar que a árvore morreu.
+
 Garantias:
 
-- **Pausar** grava a solicitação no estado. A etapa em andamento termina de
-  forma limpa; código, worktree, branch, commits e logs são preservados.
-- **Retomar** encontra a execução em `INTERRUPTED`, `BLOCKED`, `CI_FAILED`,
-  `AUTH_REQUIRED` ou `USAGE_LIMIT_REACHED` e continua dali. **Prompts já
-  aprovados não são reexecutados.**
-- **Cancelar** pede confirmação explícita e não executa nenhum reset
-  destrutivo, nenhuma limpeza e nenhuma remoção. Nada do seu trabalho é perdido.
-- `Ctrl+C` durante uma execução é tratado como interrupção: os processos filhos
-  são encerrados e o estado é gravado antes da saída.
+- **Pausar** persiste a intenção, **encerra a árvore de processos da etapa em
+  curso** (Claude, Codex ou a suíte de testes, com `taskkill /T /F` restrito ao
+  PID daquela árvore), impede o início da etapa seguinte e aguarda a terminação
+  antes de gravar um estado retomável. Código, worktree, branch, commits,
+  artefatos e tentativas consumidas são preservados.
+- **Retomar** relê o estado **do disco**, encontra a execução em `INTERRUPTED`,
+  `BLOCKED`, `CI_FAILED`, `AUTH_REQUIRED`, `USAGE_LIMIT_REACHED` ou
+  `LOOP_GUARD_TRIGGERED` e continua dali. **Prompts já aprovados não são
+  reexecutados, e um commit já registrado nunca é refeito.**
+- **Cancelar** pede confirmação explícita, encerra a árvore, impede qualquer
+  etapa, commit, push, PR ou merge posterior e termina em `CANCELLED`. É
+  **idempotente**: pedir de novo responde sucesso e não altera nada. Nenhum
+  reset destrutivo, nenhuma limpeza, nenhuma remoção.
+- `Ctrl+C` no painel interrompe as execuções vivas **e aguarda** o término real
+  antes de fechar, para não deixar processo órfão. Uma queda do processo
+  hospedeiro é registrada como `INTERRUPTED` sem marcar pausa nem cancelamento:
+  pausa, queda, cancelamento e falha continuam sendo quatro coisas distintas.
+
+Operações Git curtas (`commit`, `add`, `push`) **não** são mortas no meio de
+propósito: matar um `git commit` a meio caminho deixaria `.git/index.lock` para
+trás e destruiria justamente o worktree que a pausa existe para preservar. Elas
+são bloqueadas **antes de começar**, e é por isso que nenhum commit, push ou PR
+acontece depois de a intenção ter sido aceita.
+
+### Como o estado sobrevive à concorrência e à queda
 
 Todo o estado fica em `data/projects/<id>/state/<runId>.json`, escrito de forma
-atômica (arquivo temporário + `rename`), de modo que uma queda de energia não
-deixa um estado meio gravado.
+atômica (arquivo temporário + `fsync` + `rename`), de modo que uma queda de
+energia não deixa um estado meio gravado.
+
+**Exclusão mútua entre processos.** Leitura, comparação de revisão,
+reconciliação da intenção e escrita acontecem inteiramente dentro de um lock de
+arquivo (`<runId>.json.lock`, criado com `openSync(..., 'wx')` — atômico no
+NTFS). Sem isso, comparar revisões não resolveria o caso que importa: dois
+processos que leem a MESMA revisão não têm o que detectar, e o segundo a gravar
+apagaria o primeiro. Era assim que uma pausa vinda de `PAUSAR.cmd` podia
+desaparecer. Cada gravação carrega uma **revisão** monotônica; uma gravação
+obsoleta é recusada com `STATE_REGRESSION` se apagaria commits ou aprovações já
+persistidos.
+
+**Fail-closed na escrita.** Toda gravação que precede um efeito — chamada de
+IA, suíte de testes, `git add`, commit, push, PR, merge — é um *checkpoint*: se
+ela não chega ao disco, a execução **para ali** e diz em que etapa. Seguir em
+frente criaria trabalho que o estado persistido não conhece.
+
+**Diário de commits.** Entre `git commit` e a gravação do SHA existe uma janela
+em que o commit já está na branch e ainda não está no registro. Uma queda ali
+fazia a retomada refazer o prompt e commitar de novo. Agora a intenção é
+gravada com `fsync` **antes** do Git, o commit carrega os carimbos
+`OrqPEG-Run-Id`, `OrqPEG-Prompt-Id`, `OrqPEG-Attempt` e `OrqPEG-Operation-Id`
+(128 bits aleatórios), e a retomada reencontra o commit órfão e o **adota** —
+exigindo carimbo conferente, alcançabilidade a partir do HEAD e alteração de ao
+menos um arquivo. A mensagem humana nunca é usada como identidade.
 
 ---
 

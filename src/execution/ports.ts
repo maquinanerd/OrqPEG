@@ -14,6 +14,7 @@ import type {
   TestSuiteResult,
   AgentInvocation,
 } from '../types';
+import type { CommitSummary } from '../git/git';
 
 /**
  * Portas do orquestrador.
@@ -47,6 +48,15 @@ export interface GitPort {
   ): Promise<Result<void>>;
   remoteUrl(dir: string, remote: string): Promise<Result<string>>;
   commitLog(dir: string, fromRef: string): Promise<Result<string>>;
+  /**
+   * Commits alcançáveis a partir do HEAD e ausentes em `fromRef`, com a
+   * mensagem completa. É o que permite descobrir, numa retomada, que o commit
+   * que a execução ia criar JÁ existe — o caso de queda entre `git commit` e a
+   * gravação do estado.
+   */
+  listCommitsSince(dir: string, fromRef: string): Promise<Result<CommitSummary[]>>;
+  /** Arquivos alterados por um commit: prova de conteúdo na conciliação. */
+  commitChangedFiles(dir: string, sha: string): Promise<Result<string[]>>;
 }
 
 export interface WorktreePort {

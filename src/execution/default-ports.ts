@@ -56,6 +56,9 @@ const gitPort: GitPort = {
     if (!result.ok || result.value.status !== 'COMPLETED') return ok('');
     return ok(result.value.stdout.trim());
   },
+
+  listCommitsSince: (dir, fromRef) => git.listCommitsSince(dir, fromRef),
+  commitChangedFiles: (dir, sha) => git.commitChangedFiles(dir, sha),
 };
 
 export function createDefaultPorts(): OrchestratorPorts {

@@ -42,10 +42,37 @@ export {
   loadRun,
   saveRun,
   listRuns,
+  latestRun,
+  findActiveRun,
   transition,
   canTransition,
   invalidateMergeApprovals,
+  requestPause,
+  requestCancel,
+  recordRunIntent,
+  readPersistedIntent,
 } from './state/run-state';
+
+/* Controle de execução viva: quem pausa e quem cancela fala com estas funções. */
+export {
+  getController,
+  isRunLive,
+  listControllers,
+  requestPauseOnLiveRun,
+  requestCancelOnLiveRun,
+  shutdownAllRuns,
+  awaitAllRuns,
+} from './execution/run-control';
+export type { RunIntent, RunControlSnapshot, IntentAcceptance } from './execution/run-control';
+export { watchPersistedIntent } from './execution/intent-watcher';
+export {
+  pauseRun,
+  cancelRun,
+  isRunning,
+  listRunningProjects,
+  describeRunningRuns,
+  shutdownRuns,
+} from './server/run-manager';
 
 export { acquireLock, withLock, listLocks } from './state/locks';
 

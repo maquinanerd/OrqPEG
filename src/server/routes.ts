@@ -24,13 +24,28 @@ import {
 } from '../projects/project-store';
 import { normalizeProjectConfig, validateProjectConfig } from '../projects/project-validator';
 import { discoverPrompts, readPrompt } from '../prompts/prompt-store';
-import { findActiveRun, listRuns, loadRun, requestCancel, requestPause, saveRun } from '../state/run-state';
+import {
+  findActiveRun,
+  latestRun,
+  listRuns,
+  loadRun,
+  recordRunIntent,
+  saveRun,
+} from '../state/run-state';
 import { runDiagnostics } from '../cli/diagnostics';
 import { buildDryRunPlan } from '../execution/dry-run';
 import { buildRunReport } from '../reports/report-generator';
 import { readTextSync } from '../utils/fs-atomic';
 import { nowIso } from '../utils/time';
-import { startRunInBackground } from './run-manager';
+import {
+  TERMINATION_CONFIRM_MS,
+  cancelRun,
+  confirmTermination,
+  isRunning,
+  liveRunId,
+  pauseRun,
+  startRunInBackground,
+} from './run-manager';
 import { openTarget } from './open-target';
 import { describeOverrides, grantManualOverride } from '../execution/override';
 import type { GrantOverrideOutput } from '../execution/override';
@@ -1008,18 +1023,152 @@ async function handleStartRun(ctx: RouteContext): Promise<void> {
   });
 }
 
+/**
+ * Aplica pausa ou cancelamento, dizendo exatamente o que aconteceu.
+ *
+ * Três defeitos que esta função existe para não repetir:
+ *
+ *  1. **Janela antes do `RunRecord`.** O controlador vivo é publicado antes de
+ *     qualquer `await`, mas o registro em disco só existe depois da validação.
+ *     Procurar o registro PRIMEIRO devolvia `404` para um pedido que tinha
+ *     quem atender. Agora o controlador é consultado antes, e a intenção
+ *     aceita nesse intervalo é honrada e persistida pelo próprio orquestrador
+ *     assim que o registro nasce.
+ *  2. **Sucesso falso na falha de escrita.** O `Result` de `saveRun` era
+ *     descartado. Agora uma falha de persistência é `500` e nada é
+ *     interrompido: uma intenção que não chega ao disco não sobrevive à
+ *     retomada.
+ *  3. **"Processo interrompido" no instante do `abort()`.** `abort()` envia o
+ *     sinal; a árvore leva um tempo real para morrer. A resposta só afirma
+ *     encerramento depois de confirmá-lo, e distingue os estados intermediários.
+ */
+async function applyRunIntent(
+  ctx: RouteContext,
+  projectId: string,
+  intent: 'PAUSE' | 'CANCEL',
+): Promise<void> {
+  const verb = intent === 'PAUSE' ? 'pausa' : 'cancelamento';
+  const doneKey = intent === 'PAUSE' ? 'paused' : 'cancelled';
+
+  /* O controlador é consultado ANTES do registro: ele existe primeiro. */
+  const liveId = liveRunId(projectId);
+  const active = findActiveRun(projectId);
+  const activeRun = active.ok ? active.value : null;
+
+  if (activeRun === null && liveId === null && !isRunning(projectId)) {
+    if (intent === 'CANCEL') {
+      const previous = latestRun(projectId);
+      const last = previous.ok ? previous.value : null;
+      if (last && (last.state === 'CANCELLED' || last.cancelRequested)) {
+        sendJson(ctx.res, 200, {
+          cancelled: true,
+          accepted: false,
+          alreadyCancelled: true,
+          runId: last.runId,
+          state: last.state,
+          intentPersisted: true,
+          terminated: true,
+          note: 'A execução já estava cancelada. Nada foi alterado.',
+        });
+        return;
+      }
+    }
+    sendJson(ctx.res, 404, { error: `Nenhuma execução ativa para ${verb}.` });
+    return;
+  }
+
+  /*
+   * Persistir a intenção vem primeiro, e por um caminho SERIALIZADO:
+   * `recordRunIntent` relê o registro e grava dentro do mesmo lock de estado.
+   * Ler aqui e gravar depois reabriria a corrida com o orquestrador.
+   */
+  const targetRunId = activeRun?.runId ?? liveId;
+  let intentPersisted = false;
+  let persistedRunId: string | null = null;
+
+  if (targetRunId !== null) {
+    const recorded = recordRunIntent(projectId, targetRunId, intent);
+    if (recorded.ok) {
+      intentPersisted = true;
+      persistedRunId = recorded.value.runId;
+      ctx.deps.events.publishRun(recorded.value, `${capitalize(verb)} solicitada.`);
+    } else if (recorded.error.code === 'CONFIG_NOT_FOUND') {
+      /* O registro ainda não existe no disco — a execução acabou de nascer. O
+         controlador vivo abaixo atende, e o orquestrador persiste a intenção
+         ao criar o registro. Não é falha de escrita. */
+      intentPersisted = false;
+    } else {
+      sendJson(ctx.res, 500, {
+        [doneKey]: false,
+        error: `A ${verb} NÃO foi registrada: ${recorded.error.message}`,
+        code: recorded.error.code,
+        intentPersisted: false,
+      });
+      return;
+    }
+  }
+
+  const accepted = intent === 'PAUSE' ? pauseRun(projectId) : cancelRun(projectId);
+
+  if (accepted === null) {
+    /* Sem controlador vivo aqui: a intenção está no disco e a execução, em
+       outro processo, vai lê-la. Não há como afirmar encerramento daqui. */
+    sendJson(ctx.res, 202, {
+      [doneKey]: true,
+      accepted: false,
+      intentPersisted,
+      terminated: false,
+      runId: persistedRunId ?? targetRunId,
+      note:
+        `Intenção de ${verb} registrada. Nenhuma execução viva neste processo do painel: ` +
+        'se a rodada estiver na CLI, ela lerá a intenção e interromperá a etapa em curso.',
+    });
+    return;
+  }
+
+  /* O sinal foi enviado. Agora confirmamos — com teto — se a árvore de fato
+     morreu, em vez de afirmar que sim. */
+  const termination = await confirmTermination(projectId);
+  const runId = persistedRunId ?? accepted.runId ?? targetRunId;
+
+  if (termination === 'PENDING') {
+    sendJson(ctx.res, 202, {
+      [doneKey]: true,
+      accepted: true,
+      intentPersisted,
+      terminated: false,
+      runId,
+      step: accepted.step,
+      alreadyRequested: accepted.alreadyRequested,
+      note:
+        `Pedido de ${verb} aceito e sinal enviado. O encerramento da árvore de processos ainda ` +
+        `está em andamento após ${String(TERMINATION_CONFIRM_MS)} ms; consulte o estado da execução.`,
+    });
+    return;
+  }
+
+  sendJson(ctx.res, 200, {
+    [doneKey]: true,
+    accepted: true,
+    intentPersisted,
+    terminated: true,
+    runId,
+    step: accepted.step,
+    alreadyRequested: accepted.alreadyRequested,
+    note:
+      'Árvore de processos da etapa em curso encerrada e estado gravado. ' +
+      'Código, branch, worktree e artefatos preservados.',
+  });
+}
+
+function capitalize(value: string): string {
+  return value.length === 0 ? value : `${value[0]?.toUpperCase() ?? ''}${value.slice(1)}`;
+}
+
 async function handlePause(ctx: RouteContext): Promise<void> {
   const id = requireId(ctx, 0);
   if (id === null) return;
-  const active = findActiveRun(id);
-  if (!active.ok || !active.value) {
-    sendJson(ctx.res, 404, { error: 'Nenhuma execução ativa para pausar.' });
-    return;
-  }
-  const paused = requestPause(active.value);
-  saveRun(paused);
-  ctx.deps.events.publishRun(paused, 'Pausa solicitada.');
-  sendJson(ctx.res, 200, { paused: true, runId: paused.runId });
+  await applyRunIntent(ctx, id, 'PAUSE');
 }
 
 async function handleResume(ctx: RouteContext): Promise<void> {
@@ -1059,22 +1208,19 @@ async function handleResume(ctx: RouteContext): Promise<void> {
   sendJson(ctx.res, 202, { resumed: true, runId: resumable.runId });
 }
 
+/**
+ * Cancelamento: idempotente por contrato.
+ *
+ * Cancelar duas vezes precisa responder sucesso nas duas. Como a primeira
+ * chamada leva a execução a um estado TERMINAL, a segunda não encontraria mais
+ * "execução ativa" e a rota respondia 404 — o operador leria "não havia nada
+ * para cancelar" logo depois de cancelar. A execução mais recente é consultada
+ * justamente para distinguir "nunca houve" de "já foi cancelada".
+ */
 async function handleCancel(ctx: RouteContext): Promise<void> {
   const id = requireId(ctx, 0);
   if (id === null) return;
-  const active = findActiveRun(id);
-  if (!active.ok || !active.value) {
-    sendJson(ctx.res, 404, { error: 'Nenhuma execução ativa para cancelar.' });
-    return;
-  }
-  const cancelled = requestCancel(active.value);
-  saveRun(cancelled);
-  ctx.deps.events.publishRun(cancelled, 'Cancelamento solicitado.');
-  sendJson(ctx.res, 200, {
-    cancelled: true,
-    runId: cancelled.runId,
-    note: 'Cancelamento seguro: código, branch, worktree, logs e artefatos são preservados.',
-  });
+  await applyRunIntent(ctx, id, 'CANCEL');
 }
 
 async function handleOpen(ctx: RouteContext): Promise<void> {
