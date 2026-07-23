@@ -519,109 +519,42 @@
   /* ------------------------------------------------------------------ */
 
   function createLiveUpdates(options) {
-    var source = null;
-    var pollTimer = null;
-    var reconnectTimer = null;
-    var attempts = 0;
-    var closed = false;
-
     function setStatus(kind, label) {
       var box = $('conn');
       if (box) box.className = 'conn is-' + kind;
       setText('conn-label', label);
     }
 
-    function startPolling() {
-      if (pollTimer !== null) return;
-      pollTimer = window.setInterval(function () {
+    /* O transporte vive em assets/event-stream.js, compartilhado com o
+       dashboard. Antes daquele modulo, esta funcao registrava apenas
+       source.onmessage — que nunca dispara, porque o servidor SEMPRE nomeia o
+       evento. Nenhum evento de dado chegava e o painel vivia so do polling. */
+    var CLASS_BY_STATUS = { live: 'live', reconnecting: 'poll', polling: 'poll', down: 'down' };
+
+    if (!window.OrqEventStream) {
+      setStatus('poll', 'Atualizacao a cada 5 s');
+      window.setInterval(function () {
         options.onRefresh('polling');
       }, 5000);
+      return;
     }
 
-    function stopPolling() {
-      if (pollTimer === null) return;
-      window.clearInterval(pollTimer);
-      pollTimer = null;
-    }
-
-    function scheduleReconnect() {
-      if (closed || reconnectTimer !== null) return;
-      attempts += 1;
-      var delay = Math.min(30000, 2000 * attempts);
-      reconnectTimer = window.setTimeout(function () {
-        reconnectTimer = null;
-        connect();
-      }, delay);
-    }
-
-    function connect() {
-      if (closed) return;
-      if (IS_FILE) {
-        setStatus('down', 'Sem servidor (file://)');
-        return;
-      }
-      if (typeof window.EventSource !== 'function') {
-        setStatus('poll', 'Atualização a cada 5 s');
-        startPolling();
-        return;
-      }
-
-      setStatus('poll', 'Conectando…');
-      try {
-        source = new EventSource('/api/events');
-      } catch (error) {
-        setStatus('down', 'Falha ao abrir o fluxo de eventos');
-        startPolling();
-        scheduleReconnect();
-        return;
-      }
-
-      source.onopen = function () {
-        attempts = 0;
-        stopPolling();
-        setStatus('live', 'Tempo real');
-      };
-
-      source.onmessage = function (event) {
-        var payload = null;
-        try {
-          payload = JSON.parse(event.data);
-        } catch (error) {
-          return;
-        }
-        if (!payload || typeof payload !== 'object') return;
-        if (payload.type === 'heartbeat') return;
+    window.OrqEventStream.connect({
+      url: '/api/events',
+      types: ['run-update', 'log'],
+      pollMs: 5000,
+      onStatus: function (status, detail) {
+        setStatus(CLASS_BY_STATUS[status] || 'down', detail || status);
+      },
+      onEvent: function (payload) {
         options.onEvent(payload);
-      };
-
-      source.onerror = function () {
-        if (source) {
-          try {
-            source.close();
-          } catch (error) {
-            /* o fluxo já estava fechado */
-          }
-          source = null;
-        }
-        setStatus('poll', 'Reconectando — atualizando a cada 5 s');
-        startPolling();
-        scheduleReconnect();
-      };
-    }
-
-    connect();
-
-    window.addEventListener('beforeunload', function () {
-      closed = true;
-      stopPolling();
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
-      if (source) {
-        try {
-          source.close();
-        } catch (error) {
-          /* nada a fazer no descarregamento da página */
-        }
-      }
+      },
+      onPoll: function () {
+        options.onRefresh('polling');
+      },
+      onResync: function () {
+        options.onRefresh('resync');
+      },
     });
   }
 

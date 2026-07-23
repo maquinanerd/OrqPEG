@@ -1275,17 +1275,90 @@
      19. Início
      ---------------------------------------------------------------------- */
 
+  /* ----------------------------------------------------------------------
+     19. Transporte — SSE retomável com polling como rede de segurança
+     ---------------------------------------------------------------------- */
+
+  var TRANSPORT_TEXT = {
+    live: 'Tempo real',
+    reconnecting: 'Reconectando',
+    polling: 'Atualizando a cada 5 s',
+    down: 'Sem conexão',
+  };
+
+  var CONSOLE_LIVE = {
+    live: 'true',
+    reconnecting: 'degraded',
+    polling: 'degraded',
+    down: 'false',
+  };
+
+  function renderTransport(status, detail) {
+    if (status === state.transport) return;
+    state.transport = status;
+
+    var box = $('transport');
+    box.dataset.status = status;
+    $('transport-text').textContent = detail || TRANSPORT_TEXT[status] || status;
+
+    $('console-dot').dataset.live = CONSOLE_LIVE[status] || 'false';
+    $('console-status').textContent = TRANSPORT_TEXT[status] || status;
+
+    announce('Transporte: ' + (TRANSPORT_TEXT[status] || status) + '.');
+  }
+
+  /**
+   * Um evento do fluxo diz QUE algo mudou; ele não carrega o RunRecord inteiro.
+   * A recarga é dirigida: só o que o evento tocou.
+   */
+  function applyEvent(event) {
+    if (event.projectId && event.projectId !== state.projectId) {
+      /* Projeto diferente do selecionado: só as métricas mudam. */
+      loadHome();
+      return;
+    }
+
+    if (event.runId && state.projectId) {
+      if (event.runId !== state.runId) {
+        loadRuns(state.projectId);
+        return;
+      }
+      loadRun(state.projectId, event.runId);
+      loadHome();
+      return;
+    }
+
+    loadHome();
+  }
+
   function start() {
     wireEvents();
     wireDialog();
     activateTab('resumo');
     loadHome();
 
-    /* Enquanto o transporte resumível não entra (etapa E), o painel usa o mesmo
-       polling de 5 s que as páginas anteriores já usavam. */
-    window.setInterval(function () {
-      loadHome();
-    }, POLL_MS);
+    if (window.OrqEventStream) {
+      window.OrqEventStream.connect({
+        url: '/api/events',
+        types: ['run-update', 'log'],
+        pollMs: POLL_MS,
+        onStatus: renderTransport,
+        onEvent: applyEvent,
+        /* Polling não é o transporte: é a rede de segurança que cobre o
+           intervalo em que o SSE está fora. */
+        onPoll: function () {
+          loadHome();
+        },
+        /* O servidor avisou que o backlog já não cobre o buraco. */
+        onResync: function () {
+          announceAlert('Fluxo retomado além do backlog: recarregando o painel.');
+          loadHome();
+        },
+      });
+    } else {
+      renderTransport('polling');
+      window.setInterval(loadHome, POLL_MS);
+    }
   }
 
   if (document.readyState === 'loading') {
