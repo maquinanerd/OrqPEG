@@ -129,13 +129,15 @@ mas o padrão é bloquear.
 | npm | 9 | 11.9.0 | Sim |
 | Git | 2.30 | 2.55.0 | Sim |
 | GitHub CLI (`gh`) | 2.x, autenticado | 2.95.0 | Sim, para PR / CI / merge |
-| Claude Code (`claude`) | autenticado com Claude Max | 2.1.207 | Sim |
-| Codex CLI (`codex`) | autenticado com ChatGPT Plus | **NÃO INSTALADO** | Sim, para merge automático |
+| Claude Code (`claude`) | autenticado com Claude Max | 2.1.218 | Sim |
+| Codex CLI (`codex`) | autenticado com ChatGPT Plus | 0.145.0 | Sim, para merge automático |
 
-### Aviso honesto sobre o Codex CLI
+A coluna "Detectado" é um retrato do ambiente em que esta versão foi fechada.
+Quem manda é o `DIAGNOSTICO.cmd` da sua máquina, não esta tabela.
 
-**Nesta máquina o Codex CLI não está instalado.** Consequência real e sem
-rodeios:
+### O que acontece sem o Codex CLI
+
+Os dois executáveis são obrigatórios para o merge automático. Faltando o Codex:
 
 - a execução de prompts com revisão do Codex **não roda**;
 - a auditoria dupla de merge fica **BLOQUEADA**;
@@ -143,7 +145,7 @@ rodeios:
 - portanto **nenhum merge automático acontece**.
 
 Isso é comportamento correto, não defeito: o OrqPEG **jamais** aprova um merge
-com apenas uma IA. Para desbloquear, instale o Codex CLI e autentique com
+com apenas uma IA. Para habilitar, instale o Codex CLI e autentique com
 **"Sign in with ChatGPT"** (assinatura ChatGPT Plus). Enquanto isso não
 acontecer, use o produto em `--dry-run`, ou com `merge.mode` em `manual`, e faça
 o merge você mesmo pelo GitHub depois de revisar.
@@ -494,9 +496,9 @@ sobreposição, atalho ou "forçar".
 | 19 | `BASE_NOT_INVALIDATED` | A base não mudou de forma que invalide as auditorias |
 | 20 | `PROJECT_ALLOWS_DUAL_AI_CONSENSUS` | O projeto está em `merge.mode = dual_ai_consensus` |
 
-> **Nesta máquina, o gate 14 reprova**, porque o Codex CLI não está instalado.
-> Logo, o merge automático não acontece. Instale e autentique o Codex CLI para
-> habilitar a auditoria dupla.
+> Sem o Codex CLI instalado e autenticado, **o gate 14 reprova** e o merge
+> automático não acontece. Rode `DIAGNOSTICO.cmd` para ver o estado real da sua
+> máquina antes de contar com a auditoria dupla.
 
 Cada gate é gravado no relatório com `status` (`PASSED`, `FAILED`, `SKIPPED`,
 `NOT_EVALUATED`), motivo em português e evidência.
@@ -824,7 +826,7 @@ gh auth status --show-scopes
 O escopo `repo` é necessário. Sem `gh` autenticado, a execução até roda, mas
 para antes de `CREATING_PR`.
 
-### Codex CLI ausente (o caso desta máquina)
+### Codex CLI ausente
 
 Sintoma: o diagnóstico marca `codex` como indisponível; o gate 14
 `CODEX_MERGE_APPROVED` reprova; o consenso não é alcançado; o merge não acontece.

@@ -5,7 +5,11 @@ Todas as mudanças relevantes deste projeto são documentadas neste arquivo.
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o
 versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
-## [Não lançado]
+## [1.0.0] - 2026-07-22
+
+Primeira versão do OrqPEG, o orquestrador local que coordena os executáveis
+`claude` e `codex` para executar, revisar, testar e integrar trabalhos em
+repositórios Git já existentes na máquina do usuário.
 
 Fechamento do escopo do OrqPEG 1.0. Tudo aqui existe para uma finalidade só:
 **nenhuma repetição do produto é ilimitada, e nenhuma parada é anônima.**
@@ -103,13 +107,7 @@ Fechamento do escopo do OrqPEG 1.0. Tudo aqui existe para uma finalidade só:
   e revert pela metade deixam de passar despercebidos.
 - Artefatos de parada e de tentativa deixam de ser sobrescritos.
 
-## [1.0.0] - 2026-07-21
-
-Primeira versão do OrqPEG, o orquestrador local que coordena os executáveis
-`claude` e `codex` para executar, revisar, testar e integrar trabalhos em
-repositórios Git já existentes na máquina do usuário.
-
-### Added
+### Plataforma inicial
 
 #### Núcleo e contrato
 
@@ -234,13 +232,18 @@ repositórios Git já existentes na máquina do usuário.
 
 ### Limitações conhecidas
 
-- **O Codex CLI não está instalado nesta máquina.** Consequência direta: a
-  auditoria dupla fica **bloqueada**, o gate 14 `CODEX_MERGE_APPROVED` reprova, o
-  consenso não é alcançado e **nenhum merge automático acontece**. Isso é o
-  comportamento correto: o OrqPEG jamais aprova merge com apenas uma IA. Para
-  desbloquear, instale o Codex CLI e autentique com "Sign in with ChatGPT".
-  Enquanto isso, use `--dry-run` ou `merge.mode: "manual"` e faça o merge pelo
-  GitHub após sua própria revisão.
+- **A auditoria dupla exige os dois executáveis instalados e autenticados.** Sem
+  o Codex CLI, o gate 14 `CODEX_MERGE_APPROVED` reprova, o consenso não é
+  alcançado e **nenhum merge automático acontece**. Isso é o comportamento
+  correto: o OrqPEG jamais aprova merge com apenas uma IA. Até instalar o Codex
+  CLI e autenticar com "Sign in with ChatGPT", use `--dry-run` ou
+  `merge.mode: "manual"` e faça o merge pelo GitHub após sua própria revisão.
+- **A camada de rodada só é declarável pela API do painel.**
+  `POST /api/projects/{id}/run` aceita `roundConfig`; a CLI não expõe o campo, e
+  uma execução disparada por ela roda sem rodada — `roundConfigHash` fica `null`.
+- **O teste de rodada real dubla as duas IAs e o GitHub.** O Git é real e os
+  commits são reais, mas chamar Claude e Codex de dentro da suíte gastaria
+  assinatura e exigiria rede para provar o que já é observável no disco.
 - O produto é Windows-first. Em Linux e macOS a CLI funciona, mas os 16 wrappers
   `.cmd` não se aplicam e o diagnóstico registra um aviso de plataforma.
 - O consumo depende das assinaturas Claude Max e ChatGPT Plus. Ao atingir o

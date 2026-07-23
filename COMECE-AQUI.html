@@ -210,6 +210,11 @@
     margin: 0 0 18px;
     color: var(--text-muted);
   }
+  .small {
+    margin: 10px 0 0;
+    font-size: 0.9em;
+    color: var(--text-muted);
+  }
   h3 {
     margin: 24px 0 8px;
     font-size: 17px;
@@ -532,18 +537,20 @@ INICIAR-PAINEL.cmd</code></pre>
             <tr><th scope="row">npm</th><td>9</td><td>11.9.0</td><td>Build e testes</td></tr>
             <tr><th scope="row">Git</th><td>2.30</td><td>2.55.0</td><td>Branches, commits e worktrees</td></tr>
             <tr><th scope="row">GitHub CLI</th><td>2.x autenticado</td><td>2.95.0</td><td>Pull Request, checks e merge</td></tr>
-            <tr><th scope="row">Claude Code</th><td>autenticado (Claude Max)</td><td>2.1.207</td><td>Executor, corretor e auditor</td></tr>
-            <tr><th scope="row">Codex CLI</th><td>autenticado (ChatGPT Plus)</td><td>não instalado</td><td>Revisor de prompt e auditor de merge</td></tr>
+            <tr><th scope="row">Claude Code</th><td>autenticado (Claude Max)</td><td>2.1.218</td><td>Executor, corretor e auditor</td></tr>
+            <tr><th scope="row">Codex CLI</th><td>autenticado (ChatGPT Plus)</td><td>0.145.0</td><td>Revisor de prompt e auditor de merge</td></tr>
           </tbody>
         </table>
+        <p class="small">A coluna “Detectado” é o retrato do ambiente em que esta versão foi
+        fechada. Quem manda é o <code>DIAGNOSTICO.cmd</code> da sua máquina, não esta tabela.</p>
       </div>
 
       <div class="note stop">
-        <strong>O Codex CLI não está instalado nesta máquina</strong>
-        <p>Consequência real, sem rodeios: a auditoria dupla fica <em>bloqueada</em>, o gate
+        <strong>Os dois executáveis são obrigatórios para o merge automático</strong>
+        <p>Sem o Codex CLI instalado e autenticado, a auditoria dupla fica <em>bloqueada</em>, o gate
         <code>CODEX_MERGE_APPROVED</code> reprova e nenhum merge automático acontece.
         Isso é o comportamento correto — o OrqPEG jamais aprova merge com apenas uma IA.</p>
-        <p>Para desbloquear, instale o Codex CLI e autentique com “Sign in with ChatGPT”.
+        <p>Para habilitar, instale o Codex CLI e autentique com “Sign in with ChatGPT”.
         Enquanto isso, use o dry-run ou configure <code>merge.mode</code> como <code>manual</code>
         e faça o merge você mesmo pelo GitHub, depois de revisar.</p>
       </div>
