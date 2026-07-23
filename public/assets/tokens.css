@@ -1,0 +1,232 @@
+/* ==========================================================================
+   OrqPEG — tokens do dashboard, derivados do Figma.
+
+   Origem: https://www.figma.com/design/CCyLaVcligzX9pmCJgqruV
+   Página: OrqPEG — System & Dashboard
+   Frame:  OrqPEG / Master Canvas (node 2:2, 1920 x 1240)
+
+   Todos os valores abaixo foram lidos do MCP do Figma, não estimados a partir
+   da imagem. O arquivo do Figma não define variáveis nem estilos compartilhados
+   (`get_variable_defs` devolve `{}`), então esta folha É a camada de tokens do
+   sistema; não existe fonte anterior a ela.
+
+   Rastreabilidade completa em docs/FIGMA-IMPLEMENTATION-MAP.md.
+
+   Esta folha declara apenas custom properties. Ela não estiliza nenhum
+   seletor e não colide com public/assets/styles.css, que serve as páginas
+   anteriores com outra linguagem visual.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ------------------------------------------------------------------------
+     1. Cor
+
+     Treze sólidas. A contagem em comentário é o número de nós do frame que
+     usam o valor — ela indica o peso real da cor no desenho.
+     ---------------------------------------------------------------------- */
+
+  /* Escuros. */
+  --fig-canvas: #0a0a09;      /*  1 — fundo do frame                        */
+  --fig-ink: #0e0e0d;         /* 71 — rail, texto primário, botão de recusa  */
+  --fig-ink-raised: #1b1b18;  /*  4 — sidebar, cartão de projeto em repouso  */
+  --fig-ink-soft: #252521;    /*  7 — stat card, faixa de tarefa em escuro   */
+
+  /* Claros. */
+  --fig-mat: #b5ba9c;         /*  1 — Reference Backdrop (apresentação)      */
+  --fig-paper: #f6f5f2;       /*  5 — App Shell, Context Panel, campo, bolha */
+  --fig-surface: #ffffff;     /*    — cartões, console, botões claros        */
+  --fig-hairline: #e0e0d6;    /*  5 — divisores e borda do Run Selector      */
+
+  /* Texto. */
+  --fig-text: var(--fig-ink);
+  --fig-text-muted: #75756e;  /* 27 — legendas e metadados                   */
+  --fig-text-on-dark: var(--fig-paper);
+  --fig-text-on-accent: var(--fig-ink);
+
+  /* Acentos. Cada um carrega significado de estado; nenhum é decorativo. */
+  --fig-lime: #dbfa47;        /*  6 — selecionado, aprovado, ação primária   */
+  --fig-lime-deep: #c7e83b;   /*  1 — faixa de tarefa sobre lime             */
+  --fig-lavender: #a896f0;    /*  4 — em execução, etapa atual, prioridade média */
+  --fig-coral: #ff5e61;       /*  4 — bloqueio, prioridade alta, ambiente local  */
+  --fig-cyan: #78dbde;        /*  2 — descoberta, enfileirado, prioridade baixa  */
+
+  /* ------------------------------------------------------------------------
+     2. Semântica de execução
+
+     Mapeada sobre os cinco acentos acima: o dashboard não introduz cor nova.
+     Os nomes seguem o domínio do OrqPEG (RunState), não o do desenho.
+     ---------------------------------------------------------------------- */
+  --fig-state-discovery: var(--fig-cyan);
+  --fig-state-execution: var(--fig-lavender);
+  --fig-state-approved: var(--fig-lime);
+  --fig-state-blocked: var(--fig-coral);
+  --fig-state-idle: var(--fig-text-muted);
+
+  /* ------------------------------------------------------------------------
+     3. Tipografia
+
+     Inter em quatro pesos. Sem arquivo de fonte embarcado: a CSP do painel é
+     default-src 'self' e o projeto não versiona binários. Onde a Inter estiver
+     instalada o resultado é idêntico ao desenho; onde não estiver, a pilha
+     degrada para métricas próximas.
+     ---------------------------------------------------------------------- */
+  --fig-font: Inter, 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --fig-font-mono: ui-monospace, 'Cascadia Mono', 'Consolas', 'Liberation Mono', monospace;
+
+  --fig-weight-regular: 400;
+  --fig-weight-medium: 500;
+  --fig-weight-semibold: 600;
+  --fig-weight-bold: 700;
+
+  /* Os dezesseis tamanhos presentes no frame. O dominante é 11 px (49 nós),
+     o que define a densidade informacional do painel. */
+  --fig-size-3xs: 8px;
+  --fig-size-2xs: 9px;
+  --fig-size-xs: 10px;
+  --fig-size-sm: 11px;
+  --fig-size-base: 12px;
+  --fig-size-md: 13px;
+  --fig-size-lg: 14px;
+  --fig-size-xl: 16px;
+  --fig-size-2xl: 17px;
+  --fig-size-3xl: 18px;
+  --fig-size-4xl: 21px;
+  --fig-size-5xl: 24px;
+  --fig-size-6xl: 27px;
+  --fig-size-7xl: 28px;
+  --fig-size-8xl: 30px;
+  --fig-size-9xl: 38px;
+
+  /* 131 dos 132 nós de texto usam line-height normal; nenhum usa tracking. */
+  --fig-leading: normal;
+  --fig-leading-tight: 1.15;
+  --fig-leading-body: 1.45;
+
+  /* ------------------------------------------------------------------------
+     4. Raio
+     ---------------------------------------------------------------------- */
+  --fig-radius-xs: 10px;   /* faixa de tarefa                    */
+  --fig-radius-sm: 12px;   /* linha de arquivo                   */
+  --fig-radius-md: 14px;   /* pílula, Run Selector, campo         */
+  --fig-radius-lg: 16px;   /* cartão de evento, botão, bolha      */
+  --fig-radius-xl: 18px;   /* stat card, bolha do operador        */
+  --fig-radius-2xl: 22px;  /* cartão de projeto, console, contexto*/
+  --fig-radius-3xl: 28px;  /* App Shell, Global Rail              */
+  --fig-radius-mat: 56px;  /* Reference Backdrop                  */
+  --fig-radius-full: 999px;
+
+  /* ------------------------------------------------------------------------
+     5. Borda e sombra
+
+     O frame inteiro tem uma borda (Run Selector) e uma sombra (backdrop e
+     shell). Nada além disso.
+     ---------------------------------------------------------------------- */
+  --fig-border-width: 1px;
+  --fig-border: var(--fig-border-width) solid var(--fig-hairline);
+  --fig-shadow: 0 18px 36px rgba(0, 0, 0, 0.14);
+
+  /* ------------------------------------------------------------------------
+     6. Espaçamento
+
+     O frame é plano e sem auto-layout: a escala abaixo foi derivada das
+     distâncias que se repetem entre as coordenadas absolutas dos 218 nós.
+     ---------------------------------------------------------------------- */
+  --fig-space-1: 4px;
+  --fig-space-2: 8px;
+  --fig-space-3: 10px;
+  --fig-space-4: 12px;
+  --fig-space-5: 14px;
+  --fig-space-6: 18px;
+  --fig-space-7: 20px;
+  --fig-space-8: 22px;   /* padding padrão de painel */
+  --fig-space-9: 24px;   /* padding do shell         */
+  --fig-space-10: 34px;
+  --fig-space-11: 38px;
+  --fig-space-12: 52px;
+
+  /* ------------------------------------------------------------------------
+     7. Dimensões estruturais
+
+     Larguras fixas do desenho. São tratadas como mínimos pelo layout
+     responsivo, não como valores imutáveis.
+     ---------------------------------------------------------------------- */
+  --fig-frame-w: 1920px;
+  --fig-frame-h: 1240px;
+  --fig-shell-w: 1600px;
+  --fig-shell-h: 900px;
+  --fig-rail-w: 88px;
+  --fig-sidebar-w: 340px;
+  --fig-context-w: 348px;
+  --fig-workspace-min: 560px;
+
+  --fig-rail-item: 48px;
+  --fig-stat-w: 132px;
+  --fig-stat-h: 78px;
+  --fig-project-card-h: 116px;
+  --fig-event-card-h: 78px;
+  --fig-console-h: 310px;
+  --fig-pill-h: 28px;
+  --fig-button-h: 38px;
+  --fig-input-h: 40px;
+  --fig-avatar: 42px;
+  --fig-header-action: 40px;
+  --fig-timeline-icon: 36px;
+
+  /* ------------------------------------------------------------------------
+     8. Movimento
+
+     Não há transição declarada no Figma — um canvas estático não as expressa.
+     Os valores abaixo são a extensão mínima necessária para que estado mude
+     sem salto. Todos são zerados sob prefers-reduced-motion (§10).
+     ---------------------------------------------------------------------- */
+  --fig-duration-instant: 90ms;
+  --fig-duration-fast: 140ms;
+  --fig-duration-base: 200ms;
+  --fig-duration-slow: 320ms;
+  --fig-ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --fig-ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  --fig-transition: var(--fig-duration-fast) var(--fig-ease);
+
+  /* ------------------------------------------------------------------------
+     9. Camadas
+
+     Faixa reservada e contígua: nada no dashboard usa z-index literal.
+     ---------------------------------------------------------------------- */
+  --fig-z-base: 0;
+  --fig-z-sticky: 10;
+  --fig-z-rail: 20;
+  --fig-z-dropdown: 30;
+  --fig-z-banner: 40;
+  --fig-z-dialog: 50;
+  --fig-z-toast: 60;
+
+  /* ------------------------------------------------------------------------
+     10. Foco
+
+     Ausente no Figma. Derivado do lime de acento, que é a cor de ação do
+     sistema, com contorno duplo para permanecer visível sobre o rail escuro e
+     sobre o papel claro.
+     ---------------------------------------------------------------------- */
+  --fig-focus-width: 2px;
+  --fig-focus-offset: 2px;
+  --fig-focus-color: var(--fig-lime);
+  --fig-focus-contrast: var(--fig-ink);
+}
+
+/* --------------------------------------------------------------------------
+   Movimento reduzido.
+
+   Zera a duração em vez de remover a transição: as regras que dependem de
+   transitionend continuam disparando, e nada anima.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fig-duration-instant: 0ms;
+    --fig-duration-fast: 0ms;
+    --fig-duration-base: 0ms;
+    --fig-duration-slow: 0ms;
+  }
+}
