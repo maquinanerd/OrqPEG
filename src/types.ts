@@ -241,6 +241,9 @@ export type LoopGuardTrigger =
   | 'PROCESS_TIMEOUT'
   | 'REPEATED_CI_FAILURE'
   | 'CI_WAIT_TIMEOUT'
+  | 'CI_REPAIR_BUDGET_EXHAUSTED'
+  | 'CI_CONFIGURATION_ERROR'
+  | 'CI_REQUIRED_CHECK_MISSING'
   | 'MERGE_CORRECTION_BUDGET_EXHAUSTED'
   | 'USER_PAUSED'
   | 'USER_CANCELLED';
@@ -415,6 +418,70 @@ export interface EffectiveLoopGuardPolicy extends LoopGuardConfig {
   stopOnBlocked: boolean;
 }
 
+/**
+ * Orçamento do CI — o CI é um laço como qualquer outro.
+ *
+ * Sem teto, uma PR com check travado espera para sempre e uma falha
+ * determinística consome correção após correção sem nunca convergir.
+ */
+export interface EffectiveCiPolicy {
+  /** Quantas vezes o Claude pode tentar corrigir uma falha de CI. */
+  maxRepairCycles: number;
+  pollingInitialSeconds: number;
+  pollingMaxSeconds: number;
+  /** Teto HISTÓRICO: conta desde a primeira espera, não desde a retomada. */
+  waitTimeoutMinutes: number;
+  /** A mesma falha em dois ciclos encerra o laço. */
+  stopOnRepeatedFailure: boolean;
+}
+
+/** Orçamento das correções pedidas pelas auditorias finais. */
+export interface EffectiveMergeAuditPolicy {
+  maxCorrectionCycles: number;
+}
+
+/**
+ * Espera do CI, persistida.
+ *
+ * Existe para que o timeout seja histórico. Se o relógio recomeçasse a cada
+ * retomada, reiniciar o painel renovaria a espera indefinidamente e o teto
+ * nunca seria alcançado.
+ */
+export interface CiWaitState {
+  /** Instante da PRIMEIRA espera deste head SHA. Não muda em retomada. */
+  startedAt: string;
+  headSha: string;
+  lastPolledAt: string | null;
+  pollCount: number;
+  /** Intervalo da próxima consulta, em segundos, já com backoff aplicado. */
+  nextIntervalSeconds: number;
+}
+
+/** Um ciclo de reparo de CI, registrado no estado. */
+export interface CiRepairRecord {
+  cycle: number;
+  headShaBefore: string;
+  fingerprint: string;
+  failedChecks: string[];
+  startedAt: string;
+  finishedAt: string | null;
+  outcome: 'REPAIRED' | 'TESTS_FAILED' | 'NO_CHANGES' | 'AGENT_FAILED';
+  headShaAfter: string | null;
+}
+
+/** Um ciclo de correção pós-auditoria, registrado no estado. */
+export interface MergeCorrectionRecord {
+  cycle: number;
+  headShaBefore: string;
+  /** Problemas que os auditores pediram para corrigir. */
+  requestedBy: Array<'claude' | 'codex'>;
+  issueFingerprint: string;
+  startedAt: string;
+  finishedAt: string | null;
+  outcome: 'CORRECTED' | 'TESTS_FAILED' | 'NO_CHANGES' | 'AGENT_FAILED';
+  headShaAfter: string | null;
+}
+
 /** Identidade do repositório, congelada: retomar não pode trocar de alvo. */
 export interface EffectiveRepositoryPolicy {
   repositoryPath: string;
@@ -467,6 +534,8 @@ export interface EffectiveExecutionPolicySnapshot {
   integrityHash: string;
 
   loopGuard: EffectiveLoopGuardPolicy;
+  ci: EffectiveCiPolicy;
+  mergeAudit: EffectiveMergeAuditPolicy;
   commands: ProjectCommandsConfig;
   agents: ProjectAgentsConfig;
   git: ProjectGitConfig;
@@ -952,6 +1021,13 @@ export interface RunRecord {
   lastLoopGuard: LoopGuardDecision | null;
   ciRepairCycles: number;
   mergeCorrectionCycles: number;
+
+  /** Espera do CI em curso. `null` quando nenhuma espera começou. */
+  ciWait: CiWaitState | null;
+  /** Assinaturas de falha de CI, na ordem dos ciclos. Detecta repetição. */
+  ciFailureFingerprints: string[];
+  ciRepairs: CiRepairRecord[];
+  mergeCorrections: MergeCorrectionRecord[];
 
   /**
    * Política congelada no início da execução. Fonte da verdade para todo

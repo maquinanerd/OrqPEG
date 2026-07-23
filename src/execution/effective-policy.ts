@@ -211,6 +211,16 @@ export function resolveEffectiveExecutionPolicy(
     effectiveHash: '',
     integrityHash: '',
     loopGuard,
+    /* Derivadas do mesmo `loopGuard` já resolvido em camadas — não há uma
+       segunda fonte de verdade para os limites de CI e de auditoria. */
+    ci: {
+      maxRepairCycles: loopGuard.maxCiRepairCycles,
+      pollingInitialSeconds: loopGuard.ciPollIntervalSeconds,
+      pollingMaxSeconds: loopGuard.ciPollMaxIntervalSeconds,
+      waitTimeoutMinutes: loopGuard.ciWaitTimeoutMinutes,
+      stopOnRepeatedFailure: true,
+    },
+    mergeAudit: { maxCorrectionCycles: loopGuard.maxMergeCorrectionCycles },
     commands: projectConfig.commands,
     /* Modelo já resolvido contra o padrão global: se a resolução ficasse no
        consumidor, trocar o padrão global entre a parada e a retomada mudaria o
@@ -263,6 +273,8 @@ export function sealSnapshot(
 export function effectiveHashOf(snapshot: EffectiveExecutionPolicySnapshot): string {
   return stableHash({
     loopGuard: snapshot.loopGuard,
+    ci: snapshot.ci,
+    mergeAudit: snapshot.mergeAudit,
     commands: snapshot.commands,
     agents: snapshot.agents,
     git: snapshot.git,

@@ -92,7 +92,11 @@ const BASE_TRANSITIONS: Readonly<Record<RunState, readonly RunState[]>> = {
     'COMPLETED',
   ],
   CREATING_PR: ['WAITING_CI', 'RUNNING_CLAUDE_MERGE_AUDIT', 'COMPLETED'],
-  WAITING_CI: ['CI_FAILED', 'RUNNING_CLAUDE_MERGE_AUDIT', 'COMPLETED'],
+  // `RUNNING_CLAUDE` é alcançável daqui porque um CI reprovado inicia um ciclo
+  // de reparo sem passar por CI_FAILED: reservar CI_FAILED para a parada
+  // definitiva mantém a linha do tempo legível — um reparo bem-sucedido não
+  // deve deixar um "falhou" transitório no histórico.
+  WAITING_CI: ['CI_FAILED', 'RUNNING_CLAUDE', 'RUNNING_CLAUDE_MERGE_AUDIT', 'COMPLETED'],
   CI_FAILED: ['RUNNING_CLAUDE', 'WAITING_CI', 'COMPLETED'],
   RUNNING_CLAUDE_MERGE_AUDIT: ['RUNNING_CODEX_MERGE_AUDIT', 'MERGE_CONSENSUS_PENDING'],
   RUNNING_CODEX_MERGE_AUDIT: ['MERGE_CONSENSUS_PENDING'],
@@ -361,6 +365,10 @@ export function createRun(input: CreateRunInput): RunRecord {
     lastLoopGuard: null,
     ciRepairCycles: 0,
     mergeCorrectionCycles: 0,
+    ciWait: null,
+    ciFailureFingerprints: [],
+    ciRepairs: [],
+    mergeCorrections: [],
 
     effectivePolicy: input.effectivePolicy,
     sourceSnapshots: input.sourceSnapshots,
@@ -759,6 +767,13 @@ function validateRunRecord(
   const record = value as RunRecord;
   if (record.effectivePolicy === undefined) record.effectivePolicy = null;
   if (record.sourceSnapshots === undefined) record.sourceSnapshots = null;
+
+  /* Campos de CI e auditoria acrescentados depois: execuções gravadas antes
+     deles continuam legíveis, com os contadores em zero. */
+  if (record.ciWait === undefined) record.ciWait = null;
+  if (!Array.isArray(record.ciFailureFingerprints)) record.ciFailureFingerprints = [];
+  if (!Array.isArray(record.ciRepairs)) record.ciRepairs = [];
+  if (!Array.isArray(record.mergeCorrections)) record.mergeCorrections = [];
 
   return ok(record);
 }

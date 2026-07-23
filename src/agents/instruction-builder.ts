@@ -325,6 +325,70 @@ type MarkerMap = Readonly<Record<string, string>>;
 
 const MARKER = /\{\{([A-Z0-9_]+)\}\}/g;
 
+export interface CiRepairInstructionInput {
+  projectName: string;
+  cycle: number;
+  maxCycles: number;
+  failedChecks: string[];
+  checksSummary: string;
+  testCommands: string[];
+}
+
+/**
+ * Instrução do reparo de CI.
+ *
+ * Deliberadamente estreita: o executor corrige o que o CI reprovou e nada
+ * mais. Um reparo que aproveita a viagem para refatorar amplia o diff que os
+ * auditores já examinaram e invalida o trabalho aprovado — por isso o escopo
+ * proibido é dito explicitamente, e não apenas subentendido.
+ */
+export function buildCiRepairInstruction(input: CiRepairInstructionInput): string {
+  return render('CLAUDE-CI-REPAIR.md', CLAUDE_CI_REPAIR_FALLBACK, {
+    PROJECT_NAME: input.projectName,
+    CYCLE: String(input.cycle),
+    MAX_CYCLES: String(input.maxCycles),
+    FAILED_CHECKS: formatList(input.failedChecks, 'Nenhum check nomeado.'),
+    CHECKS_SUMMARY: textOrDefault(input.checksSummary, 'Sem resumo de checks.'),
+    TEST_COMMANDS: formatList(input.testCommands, 'Nenhum comando de teste configurado.'),
+  });
+}
+
+const CLAUDE_CI_REPAIR_FALLBACK = [
+  '# Reparo de CI — {{PROJECT_NAME}}',
+  '',
+  'O código já foi aprovado na revisão e commitado. O CI do GitHub reprovou.',
+  'Sua tarefa é fazer o CI passar, sem nada além disso.',
+  '',
+  'Ciclo {{CYCLE}} de {{MAX_CYCLES}}. Este orçamento é fixo: esgotado, a execução',
+  'para e passa para revisão humana.',
+  '',
+  '## Checks reprovados',
+  '',
+  '{{FAILED_CHECKS}}',
+  '',
+  '## Situação do CI',
+  '',
+  '{{CHECKS_SUMMARY}}',
+  '',
+  '## Antes de terminar',
+  '',
+  'Rode localmente e garanta que passam:',
+  '',
+  '{{TEST_COMMANDS}}',
+  '',
+  '## Escopo',
+  '',
+  'PERMITIDO: corrigir a causa da reprovação do CI.',
+  '',
+  'PROIBIDO: refatorar o que não está quebrado, renomear, reorganizar arquivos,',
+  'alterar configuração de workflow para mascarar a falha, desabilitar teste,',
+  'marcar teste como skip, ou ampliar o diff além do necessário.',
+  '',
+  'Se a causa estiver fora do repositório (credencial ausente, serviço externo',
+  'indisponível, runner mal configurado), NÃO invente contorno: explique o que',
+  'encontrou e pare. Uma parada honesta é melhor que um verde falso.',
+].join('\n');
+
 function render(templateFile: string, fallback: string, markers: MarkerMap): string {
   const template = loadTemplate(templateFile) ?? fallback;
   return `${applyMarkers(template, markers).trimEnd()}\n`;

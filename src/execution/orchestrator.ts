@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import type {
   AttemptSummary,
+  CiRepairRecord,
   EffectiveExecutionPolicySnapshot,
   GlobalConfig,
   Logger,
@@ -35,7 +36,7 @@ import {
   projectArtifactsDir,
   projectDir,
 } from '../utils/paths';
-import { compactStamp, nowIso } from '../utils/time';
+import { compactStamp, nowIso, sleep } from '../utils/time';
 import { buildRunBranchName } from '../security/branch-name';
 import { inspectApiEnvironment } from '../security/api-guard';
 import { getProject, readDeclaredLoopGuard } from '../projects/project-store';
@@ -63,6 +64,7 @@ import { summarizeTestSuite } from '../tests-runner/test-runner';
 import {
   buildClaudeCorrectionInstruction,
   buildClaudeExecutionInstruction,
+  buildCiRepairInstruction,
   buildClaudeMergeAuditInstruction,
   buildCodexMergeAuditInstruction,
   buildCodexPromptReviewInstruction,
@@ -78,6 +80,7 @@ import {
   createPromptBudget,
   describeDecision,
   evaluateLoopGuard,
+  severityOf,
   wasOverrideApplied,
 } from './loop-guard';
 import { consumeOverride, hasPendingOverride, pendingOverrideCount } from './override';
@@ -90,6 +93,12 @@ import {
   stableHash,
   testFailureFingerprint,
 } from './fingerprints';
+import {
+  advanceCiWait,
+  decideCi,
+  failureSignalsFrom,
+  rebaseCiWaitOnHead,
+} from './ci-budget';
 import {
   assertEffectivePolicySnapshot,
   executionRelevantProjectConfigHash,
@@ -1131,32 +1140,315 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
 
   if (!ctx.policy.pullRequest.waitForChecks) return ok(run);
 
+  return runCiLoop(ctx, run, pr.number);
+}
+
+/**
+ * Laço do CI, governado por orçamento.
+ *
+ * Substitui a espera de teto fixo que existia antes. Três diferenças que
+ * importam: o timeout é HISTÓRICO (persistido, não reinicia com o processo),
+ * o polling tem backoff limitado, e uma falha reprovada só é corrigida
+ * enquanto o orçamento permitir. Nenhuma chamada de IA acontece enquanto os
+ * checks estiverem apenas pendentes.
+ */
+async function runCiLoop(
+  ctx: Context,
+  input: RunRecord,
+  prNumber: number,
+): Promise<Result<RunRecord>> {
+  let run = input;
+  const policy = ctx.policy.ci;
+
+  /* Entrar em WAITING_CI antes da primeira consulta: a máquina de estados só
+     admite o reparo a partir daqui, e é também o estado que o painel espera
+     ver enquanto o CI roda. */
   run = save(ctx, transition(run, 'WAITING_CI', 'Aguardando o CI do GitHub Actions.'));
-  const checks = await ports.github.waitForChecks({
+
+  for (;;) {
+    if (ctx.signal?.aborted === true) {
+      return ok(save(ctx, transition(run, 'INTERRUPTED', 'Espera do CI cancelada.')));
+    }
+
+    const current = await ctx.ports.github.getChecks({
+      cwd: ctx.workingDir,
+      repo: ctx.policy.repository.githubRepository,
+      prNumber,
+    });
+    if (!current.ok) {
+      run = save(ctx, {
+        ...transition(run, 'CI_FAILED', 'Não foi possível obter o status do CI.'),
+        lastError: current.error,
+      });
+      return ok(run);
+    }
+
+    const checks = current.value;
+    const at = nowIso();
+
+    /* A espera é ancorada no head SHA: commit novo é CI novo e merece relógio
+       novo, mas o contador de reparos atravessa o laço inteiro. */
+    const wait = rebaseCiWaitOnHead(run.ciWait, checks.headSha, policy, at);
+    run = save(ctx, { ...run, checks, ciWait: wait });
+
+    const decision = decideCi({
+      run,
+      policy,
+      checks,
+      failureSignals: failureSignalsFrom(checks),
+      nowMs: Date.now(),
+    });
+
+    if (decision.action === 'PROCEED') {
+      ctx.logger.info('CI aprovou todos os checks obrigatórios.');
+      return ok(run);
+    }
+
+    if (decision.action === 'STOP') {
+      run = save(ctx, applyCiStop(ctx, run, decision.trigger, decision.reason, decision.evidence));
+      return ok(run);
+    }
+
+    if (decision.action === 'WAIT') {
+      run = save(ctx, {
+        ...transition(run, 'WAITING_CI', decision.reason),
+        ciWait: advanceCiWait(wait, policy, at),
+      });
+      try {
+        await sleep(decision.waitSeconds * 1000, ctx.signal);
+      } catch {
+        return ok(save(ctx, transition(run, 'INTERRUPTED', 'Espera do CI cancelada.')));
+      }
+      continue;
+    }
+
+    /* REPAIR — a única ramificação que gasta assinatura. */
+    const repaired = await repairCi(ctx, run, decision.cycle, decision.fingerprint, decision.failedChecks);
+    if (!repaired.ok) return repaired;
+    run = repaired.value;
+
+    /* O reparo pode ter parado a execução por conta própria (testes locais
+       reprovados, agente falhou). Sair do laço evita nova espera de CI sobre
+       um commit que não chegou a existir. `CI_FAILED` entra explicitamente
+       porque não é um estado de parada genérico do produto. */
+    if (run.state === 'CI_FAILED' || isStopState(run.state)) return ok(run);
+
+    /* Commit novo enviado: volta a esperar, e a máquina de estados exige que
+       o retorno passe por WAITING_CI antes de qualquer novo reparo. */
+    run = save(ctx, transition(run, 'WAITING_CI', 'Aguardando o CI do commit de reparo.'));
+  }
+}
+
+/** Registra a parada de CI com gatilho nomeado, nunca com CI_FAILED genérico. */
+function applyCiStop(
+  ctx: Context,
+  run: RunRecord,
+  trigger: LoopGuardTrigger,
+  reason: string,
+  evidence: Record<string, unknown>,
+): RunRecord {
+  ctx.logger.warn(`CI parou: ${trigger} — ${reason}`);
+
+  const decision: LoopGuardDecision = {
+    allowed: false,
+    severity: severityOf(trigger),
+    trigger,
+    reason,
+    evidence,
+    nextActions: ['OPEN_REPORT', 'MARK_FOR_MANUAL_REVIEW'],
+  };
+
+  /* O trabalho é preservado: branch, PR e worktree continuam intactos. */
+  return {
+    ...transition(run, 'CI_FAILED', `${trigger}: ${reason}`, { trigger }),
+    lastLoopGuard: decision,
+  };
+}
+
+/**
+ * Um ciclo de reparo de CI.
+ *
+ * É um laço próprio da execução, com artefatos próprios: não reabre prompts já
+ * aprovados nem os devolve ao estado pendente. O que ele produz é um commit
+ * adicional sobre a mesma branch.
+ */
+async function repairCi(
+  ctx: Context,
+  input: RunRecord,
+  cycle: number,
+  fingerprint: string,
+  failedChecks: string[],
+): Promise<Result<RunRecord>> {
+  let run = input;
+  const headShaBefore = run.checks?.headSha ?? '';
+  const startedAt = nowIso();
+
+  const dirResult = createExclusiveDirSync(
+    path.join(
+      projectArtifactsDir(ctx.project.id),
+      run.runId,
+      'ci-repairs',
+      `cycle-${String(cycle).padStart(3, '0')}`,
+    ),
+  );
+  if (!dirResult.ok) {
+    run = save(ctx, transition(run, 'FAILED', dirResult.error.message));
+    return dirResult;
+  }
+  const dir = dirResult.value;
+
+  writeExclusiveSync(
+    path.join(dir, 'checks-before.json'),
+    `${JSON.stringify(run.checks, null, 2)}\n`,
+  );
+  writeExclusiveSync(path.join(dir, 'failure-fingerprint.txt'), `${fingerprint}\n`);
+
+  run = save(ctx, {
+    ...transition(run, 'RUNNING_CLAUDE', `Reparo de CI ${String(cycle)}: corrigindo ${failedChecks.join(', ')}.`),
+    ciRepairCycles: cycle,
+    ciFailureFingerprints: pushBounded(run.ciFailureFingerprints, fingerprint),
+    ciRepairs: [
+      ...run.ciRepairs,
+      {
+        cycle,
+        headShaBefore,
+        fingerprint,
+        failedChecks,
+        startedAt,
+        finishedAt: null,
+        outcome: 'AGENT_FAILED',
+        headShaAfter: null,
+      },
+    ],
+  });
+
+  const instruction = buildCiRepairInstruction({
+    projectName: ctx.project.name,
+    cycle,
+    maxCycles: ctx.policy.ci.maxRepairCycles,
+    failedChecks,
+    checksSummary: describeChecks(run),
+    testCommands: ctx.policy.commands.tests,
+  });
+  writeExclusiveSync(path.join(dir, 'claude-instruction.md'), instruction);
+
+  const claude = await ctx.ports.agents.runClaude({
+    role: 'corrector',
+    config: ctx.config,
     cwd: ctx.workingDir,
-    repo: project.githubRepository,
-    prNumber: pr.number,
-    timeoutMs: 45 * 60 * 1000,
-    pollIntervalMs: 20 * 1000,
+    instruction,
+    timeoutMs: ctx.config.agents.claudeTimeoutSeconds * 1000,
+    model: ctx.policy.agents.claudeModel,
+    artifactDir: dir,
+    readOnly: false,
     ...(ctx.signal ? { signal: ctx.signal } : {}),
   });
 
-  if (!checks.ok) {
-    run = save(ctx, { ...transition(run, 'CI_FAILED', 'Não foi possível obter o status do CI.'), lastError: checks.error });
+  if (!claude.ok) {
+    run = save(ctx, {
+      ...finishCiRepair(run, cycle, 'AGENT_FAILED', null),
+      ...transition(run, 'CI_FAILED', `O executor falhou durante o reparo de CI ${String(cycle)}.`),
+      lastError: claude.error,
+    });
     return ok(run);
   }
 
-  run = save(ctx, { ...run, checks: checks.value });
-
-  if (!checks.value.allRequiredPassed) {
+  const changed = await ctx.ports.git.changedFiles(ctx.workingDir);
+  if (!changed.ok) return changed;
+  if (changed.value.length === 0) {
+    /* O encerramento do ciclo entra como BASE da parada, não espalhado depois:
+       espalhar sobrescreveria `ciRepairs` com a versão anterior do registro. */
     run = save(
       ctx,
-      transition(run, 'CI_FAILED', 'O CI não aprovou todos os checks obrigatórios.'),
+      applyCiStop(
+        ctx,
+        finishCiRepair(run, cycle, 'NO_CHANGES', null),
+        'NO_PROGRESS',
+        `O reparo de CI ${String(cycle)} não alterou nenhum arquivo. Sem mudança não há o que reenviar, e repetir produziria o mesmo nada.`,
+        { cycle, fingerprint },
+      ),
     );
     return ok(run);
   }
 
+  /* Testes locais antes do push: reenviar sem verificar transformaria o CI em
+     ferramenta de depuração remota, gastando minutos de runner por tentativa. */
+  run = save(ctx, transition(run, 'RUNNING_TESTS', 'Validando o reparo de CI localmente.'));
+  const tests = await ctx.ports.tests.run({
+    commands: ctx.policy.commands.tests,
+    cwd: ctx.workingDir,
+    timeoutSeconds: ctx.policy.commands.timeoutSeconds,
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+  });
+  writeExclusiveSync(path.join(dir, 'tests.json'), `${JSON.stringify(tests, null, 2)}\n`);
+
+  if (!tests.passed) {
+    run = save(
+      ctx,
+      applyCiStop(
+        ctx,
+        finishCiRepair(run, cycle, 'TESTS_FAILED', null),
+        'REPEATED_TEST_FAILURE',
+        `O reparo de CI ${String(cycle)} não passou nos testes locais. Enviá-lo faria o CI reprovar de novo.`,
+        { cycle, failedCommands: tests.failedCommands },
+      ),
+    );
+    return ok(run);
+  }
+
+  const patch = await ctx.ports.git.diffPatch(ctx.workingDir);
+  if (patch.ok) writeExclusiveSync(path.join(dir, 'diff.patch'), patch.value);
+
+  const staged = await ctx.ports.git.addPaths(ctx.workingDir, changed.value);
+  if (!staged.ok) return staged;
+
+  const message = `${ctx.policy.git.commitMessagePrefix} ${ctx.project.id}: reparo de CI ${String(cycle)}`.trim();
+  const commit = await ctx.ports.git.commit(ctx.workingDir, message);
+  if (!commit.ok) return commit;
+
+  run = save(ctx, {
+    ...run,
+    commits: [
+      ...run.commits,
+      { promptId: `ci-repair-${String(cycle)}`, sha: commit.value, message, at: nowIso() },
+    ],
+  });
+
+  run = save(ctx, transition(run, 'PUSHING', 'Enviando o reparo de CI.'));
+  const pushed = await ctx.ports.git.push(
+    ctx.workingDir,
+    ctx.policy.repository.remote,
+    run.branchName ?? '',
+    false,
+  );
+  if (!pushed.ok) {
+    run = save(ctx, {
+      ...finishCiRepair(run, cycle, 'AGENT_FAILED', commit.value),
+      ...transition(run, 'CI_FAILED', 'Falha ao enviar o reparo de CI.'),
+      lastError: pushed.error,
+    });
+    return ok(run);
+  }
+
+  run = save(ctx, finishCiRepair(run, cycle, 'REPAIRED', commit.value));
+  ctx.logger.info(`Reparo de CI ${String(cycle)} enviado (${commit.value.slice(0, 12)}).`);
   return ok(run);
+}
+
+function finishCiRepair(
+  run: RunRecord,
+  cycle: number,
+  outcome: CiRepairRecord['outcome'],
+  headShaAfter: string | null,
+): RunRecord {
+  return {
+    ...run,
+    ciRepairs: run.ciRepairs.map((entry) =>
+      entry.cycle === cycle
+        ? { ...entry, outcome, headShaAfter, finishedAt: nowIso() }
+        : entry,
+    ),
+  };
 }
 
 /* ------------------------------------------------------------------------- */

@@ -215,6 +215,83 @@ export function testFailureFingerprint(suite: TestSuiteResult | null): string | 
 }
 
 /* ------------------------------------------------------------------------- */
+/* Falha de CI                                                                */
+/* ------------------------------------------------------------------------- */
+
+/** O que identifica uma falha de CI, depois de removido o que é incidental. */
+export interface CiFailureSignal {
+  workflow: string | null;
+  job: string;
+  step?: string | null;
+  conclusion: string;
+  /** Comando ou teste que falhou, quando o log permitiu extrair. */
+  command?: string | null;
+  message?: string | null;
+}
+
+/**
+ * Assinatura normalizada de uma falha de CI.
+ *
+ * O objetivo é reconhecer "é a mesma falha de novo" entre dois ciclos de
+ * reparo. Por isso tudo que muda a cada execução — run ID, timestamps,
+ * duração, URLs efêmeras, hashes e números de linha volantes — é removido
+ * antes do hash. Sem essa normalização, cada nova rodada do CI produziria uma
+ * assinatura diferente e `REPEATED_CI_FAILURE` nunca dispararia.
+ */
+export function ciFailureFingerprint(signals: readonly CiFailureSignal[]): string | null {
+  if (signals.length === 0) return null;
+
+  const normalized = signals
+    .map((signal) =>
+      [
+        normalizeText(signal.workflow ?? ''),
+        normalizeText(signal.job),
+        normalizeText(signal.step ?? ''),
+        normalizeText(signal.conclusion),
+        normalizeCiText(signal.command ?? ''),
+        normalizeCiText(signal.message ?? ''),
+      ].join('|'),
+    )
+    /* Ordena porque a ordem em que o GitHub devolve os checks varia entre
+       consultas e não significa nada sobre a falha em si. */
+    .sort();
+
+  return sha(normalized.join('\n'));
+}
+
+/**
+ * Remove de um texto de CI o que varia entre execuções da MESMA falha.
+ *
+ * Exportada porque o normalizador é a parte testável: se ele deixar passar um
+ * identificador volátil, a detecção de repetição silenciosamente para de
+ * funcionar, e isso não aparece em nenhum outro sintoma.
+ */
+export function normalizeCiText(value: string): string {
+  if (typeof value !== 'string' || value.length === 0) return '';
+  return normalizeText(
+    value
+      /* URLs de run/job/artefato do próprio GitHub. */
+      .replace(/https?:\/\/\S+/g, '<url>')
+      /* Timestamps ISO e horários soltos. */
+      .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g, '<ts>')
+      .replace(/\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b/g, '<ts>')
+      /* Durações: "in 4.21s", "took 1m 3s". */
+      .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|m|h)\b/gi, '<dur>')
+      /* Identificadores do run e sequências hexadecimais longas (SHA, ids). */
+      .replace(/\brun[ _-]?(?:id|number)?[ _-]?#?\d+/gi, '<run>')
+      .replace(/\b[0-9a-f]{7,40}\b/gi, '<sha>')
+      /* UUIDs. */
+      .replace(
+        /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+        '<uuid>',
+      )
+      /* Caminhos temporários de runner. */
+      .replace(/[/\\]tmp[/\\]\S+/gi, '<tmp>')
+      .replace(/[/\\]runner[/\\]work[/\\]\S*/gi, '<workspace>'),
+  );
+}
+
+/* ------------------------------------------------------------------------- */
 /* Conteúdo canônico                                                          */
 /* ------------------------------------------------------------------------- */
 
