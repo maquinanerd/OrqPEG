@@ -2577,7 +2577,7 @@
     "FrozenSkill": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "version", "contentHash"],
+      "required": ["id", "version", "contentHash", "manifestHash"],
       "properties": {
         "id": {
           "type": "string",
@@ -2590,7 +2590,11 @@
         },
         "contentHash": {
           "type": "string",
-          "description": "Hash do documento no congelamento. Divergência durante a execução dispara SKILL_CHANGED_DURING_RUN."
+          "description": "Hash do SKILL.md no congelamento. Divergência durante a execução dispara SKILL_CHANGED_DURING_RUN."
+        },
+        "manifestHash": {
+          "type": "string",
+          "description": "Hash dos campos do manifesto que chegam ao agente (name) ou governam a autorização (status, compatibleAgents, entrypoint). Sem ele, editar só o skill.json mudaria a instrução entregue sem disparar parada."
         }
       }
     },

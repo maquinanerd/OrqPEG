@@ -111,12 +111,13 @@ import {
 } from './effective-policy';
 import type { RoundPolicyOverrides } from './effective-policy';
 import {
-  assertSkillsUnchanged,
   loadSkillCatalog,
   renderSkillsForAgent,
   resolveDeclaredSkills,
   snapshotSkills,
+  verifySkillsAgainstSnapshot,
 } from '../skills/skill-catalog';
+import type { ResolvedSkills } from '../skills/skill-catalog';
 import { renderPullRequestBody } from './pr-body';
 import type { OrchestratorPorts } from './ports';
 
@@ -763,7 +764,7 @@ async function executeSinglePrompt(
     /* As Skills valem para a tentativa que está prestes a acontecer, então a
        conferência é aqui e não uma vez no início: entre a tentativa anterior e
        esta, alguém pode ter editado o documento. */
-    const skillsIntact = assertRunSkillsUnchanged(run);
+    const skillsIntact = verifyRunSkills(run);
     if (!skillsIntact.ok) {
       run = save(ctx, stopBySkillMutation(ctx, run, promptFile.id, skillsIntact.error.message));
       return ok(run);
@@ -787,7 +788,7 @@ async function executeSinglePrompt(
             testOutputExcerpt: lastTests ? summarizeTestSuite(lastTests) : '',
           });
 
-    const instruction = withSkills(baseInstruction, renderSkillsFor(run, 'claude'));
+    const instruction = withSkills(baseInstruction, skillsIntact.value.claude);
 
     const claude = await ports.agents.runClaude({
       role: attempt === 1 ? 'executor' : 'corrector',
@@ -895,7 +896,7 @@ async function executeSinglePrompt(
     /* Mesma conferência de antes da chamada do Claude: o revisor precisa julgar
        sob as regras que o executor recebeu, e uma Skill editada entre as duas
        chamadas faria o revisor cobrar o que o executor nunca leu. */
-    const skillsIntactForReview = assertRunSkillsUnchanged(run);
+    const skillsIntactForReview = verifyRunSkills(run);
     if (!skillsIntactForReview.ok) {
       run = save(
         ctx,
@@ -926,7 +927,7 @@ async function executeSinglePrompt(
           testsSummary: summarizeTestSuite(tests),
           responseSchema: JSON.stringify(schema.value, null, 2),
         }),
-        renderSkillsFor(run, 'codex'),
+        skillsIntactForReview.value.codex,
       )}\n\n${reviewPackage}`,
       timeoutMs: config.agents.codexTimeoutSeconds * 1000,
       model: ctx.policy.agents.codexModel,
@@ -2231,42 +2232,34 @@ function describeFrozenSkills(snapshot: SkillSnapshot | null): string {
 }
 
 /**
- * Confere que as Skills em disco continuam idênticas ao congelado.
+ * Confere as Skills contra o congelado e DEVOLVE as que passaram.
  *
  * Chamada antes de CADA invocação de agente, e não só na retomada: editar uma
  * Skill entre uma tentativa e a seguinte muda as regras no meio da execução,
  * exatamente como editar um prompt — e a tentativa anterior já rodou sob as
  * regras antigas, o que nenhuma correção posterior desfaz.
+ *
+ * Devolve o que verificou, em vez de só aprovar, porque quem renderiza precisa
+ * usar ESTES objetos. Enquanto a conferência lia o catálogo e o render lia de
+ * novo, havia uma janela entre as duas leituras em que o texto entregue ao
+ * agente podia não ser o texto que passou na conferência.
  */
-function assertRunSkillsUnchanged(run: RunRecord): Result<void> {
-  if (!run.skills) return ok(undefined);
-  return assertSkillsUnchanged(run.skills, loadSkillCatalog().skills);
+function verifyRunSkills(run: RunRecord): Result<ResolvedSkills> {
+  const empty: ResolvedSkills = { claude: [], codex: [] };
+  if (!run.skills) return ok(empty);
+  return verifySkillsAgainstSnapshot(run.skills, loadSkillCatalog().skills);
 }
 
 /**
- * Bloco de Skills para o agente, reconstruído do catálogo a cada chamada.
+ * Junta o bloco de Skills à instrução, sem deixar linha em branco sobrando.
  *
- * O snapshot guarda id, versão e hash — não o texto. Reler o documento e
- * conferir o hash antes é melhor que carregar o conteúdo no registro: o
- * `RunRecord` não incha com cópias de documento, e o que chega ao agente é
- * comprovadamente o mesmo conteúdo que foi congelado.
+ * O snapshot guarda hashes, não o texto: o conteúdo é relido do catálogo e
+ * conferido antes de chegar aqui. Isso mantém o `RunRecord` sem cópias de
+ * documento e ainda assim prova que o agente recebeu o que foi congelado.
  */
-function renderSkillsFor(run: RunRecord, agent: 'claude' | 'codex'): string {
-  if (!run.skills) return '';
-  const frozen = run.skills[agent];
-  if (frozen.length === 0) return '';
-
-  const catalog = loadSkillCatalog().skills;
-  const skills = frozen
-    .map((entry) => catalog.find((skill) => skill.manifest.id === entry.id))
-    .filter((skill): skill is LoadedSkill => skill !== undefined);
-
-  return renderSkillsForAgent(skills);
-}
-
-/** Junta o bloco de Skills à instrução, sem deixar linha em branco sobrando. */
-function withSkills(instruction: string, skillsBlock: string): string {
-  return skillsBlock === '' ? instruction : `${instruction}\n\n${skillsBlock}`;
+function withSkills(instruction: string, skills: readonly LoadedSkill[]): string {
+  const block = renderSkillsForAgent(skills);
+  return block === '' ? instruction : `${instruction}\n\n${block}`;
 }
 
 /**

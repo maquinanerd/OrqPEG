@@ -651,3 +651,79 @@ test('Skill editada no meio da execução para a rodada com gatilho nomeado', as
   assert.equal(run.skills.claude[0].id, 'clareza-minima');
   assert.notEqual(run.state, 'MERGED');
 });
+
+/**
+ * Editar SOMENTE o `skill.json`, sem tocar no `SKILL.md`.
+ *
+ * O `contentHash` cobre apenas o documento, então nenhuma destas mudanças
+ * apareceria nele. Ainda assim, `name` é renderizado no cabeçalho do bloco que
+ * vai ao agente, e `status` e `compatibleAgents` são a autorização que permitiu
+ * ativar a Skill. Sem congelar o manifesto, a instrução seguinte mudaria — ou a
+ * autorização seria revogada — e a execução continuaria como se nada tivesse
+ * acontecido.
+ */
+for (const [caso, patch] of [
+  ['o nome, que é renderizado no bloco entregue ao agente', { name: 'Outro nome' }],
+  ['o status, que era a autorização para ativar', { status: 'draft' }],
+  ['os agentes compatíveis, que autorizavam o uso', { compatibleAgents: ['codex'] }],
+]) {
+  test(`manifesto alterado durante a execução para a rodada: ${caso}`, async () => {
+    const repo = repositorioDescartavel();
+    const shaValidado = git(repo, ['rev-parse', 'HEAD']).trim();
+    const skillDir = skillDocumental();
+
+    const projeto = projetoApontandoPara(repo);
+    const pacote = pacoteDeUmaRodada(shaValidado);
+    assert.equal(
+      importCuratedPackage({ projectId: projeto.id, sourcePath: pacote, version: '1.0.0' }).ok,
+      true,
+    );
+
+    const rodada = getImportedRound(projeto.id, '01-fundacao');
+    const promptsDir = projectPromptsDir(projeto.id);
+    fs.mkdirSync(promptsDir, { recursive: true });
+    for (const nome of rodada.value.prompts) {
+      fs.copyFileSync(
+        path.join(pacote, 'rounds', '01-fundacao', 'prompts', nome),
+        path.join(promptsDir, nome),
+      );
+    }
+
+    const manifestoPath = path.join(skillDir, 'skill.json');
+    const conteudoOriginal = fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8');
+
+    const { ports } = portasComGitReal(repo, {
+      aposChamadaClaude(chamadas) {
+        if (chamadas !== 1) return;
+        const manifesto = JSON.parse(fs.readFileSync(manifestoPath, 'utf8'));
+        fs.writeFileSync(manifestoPath, JSON.stringify({ ...manifesto, ...patch }, null, 2));
+      },
+    });
+
+    const resultado = await runProject({
+      projectId: projeto.id,
+      dryRun: false,
+      config: defaultGlobalConfig(),
+      logger: nullLogger(),
+      ports,
+      roundConfig: {
+        roundId: 'rodada-1',
+        skills: { claude: ['clareza-minima@1.0.0'], codex: ['clareza-minima@1.0.0'] },
+      },
+    });
+
+    assert.equal(resultado.ok, true, resultado.ok ? '' : JSON.stringify(resultado.error));
+    const run = resultado.value;
+
+    // O documento continua idêntico: só o manifesto mudou.
+    assert.equal(fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf8'), conteudoOriginal);
+
+    assert.equal(run.state, 'LOOP_GUARD_TRIGGERED');
+    assert.equal(
+      run.lastLoopGuard.trigger,
+      'SKILL_CHANGED_DURING_RUN',
+      'o contentHash não pegaria isto — quem pega é o manifestHash',
+    );
+    assert.notEqual(run.state, 'MERGED');
+  });
+}

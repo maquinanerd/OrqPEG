@@ -3,7 +3,7 @@ import type { LoadedSkill, Result, RoundSkillDeclaration, SkillManifest, SkillSn
 import { fail, ok } from '../utils/errors';
 import { directoryExists, fileExists, listDirectoriesSync, readJsonSync, readTextSync } from '../utils/fs-atomic';
 import { orqpegRoot } from '../utils/paths';
-import { contentHash } from '../execution/fingerprints';
+import { contentHash, stableHash } from '../execution/fingerprints';
 import { nowIso } from '../utils/time';
 
 /**
@@ -240,13 +240,39 @@ export function resolveDeclaredSkills(input: ResolveSkillsInput): Result<Resolve
   return ok(out);
 }
 
-/** Congela as Skills resolvidas: id, versão e hash do documento. */
+/**
+ * Hash dos campos do manifesto que precisam ficar congelados.
+ *
+ * `contentHash` cobre só o `SKILL.md`, e isso não basta por duas razões
+ * distintas. `name` é RENDERIZADO no cabeçalho do bloco que vai para o agente:
+ * trocá-lo muda o texto entregue sem tocar no documento. `status` e
+ * `compatibleAgents` decidem se a Skill podia ser ativada: rebaixar uma Skill
+ * para `draft` no meio da execução, ou remover o agente da lista, revoga uma
+ * autorização que a execução continuaria usando.
+ *
+ * `entrypoint` entra porque determina QUAL arquivo o `contentHash` resume —
+ * apontá-lo para outro arquivo com o mesmo conteúdo é mudança sem efeito, mas
+ * mantê-lo aqui evita ter de raciocinar sobre isso a cada leitura.
+ */
+export function skillManifestHash(manifest: SkillManifest): string {
+  return stableHash({
+    id: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    status: manifest.status,
+    compatibleAgents: [...manifest.compatibleAgents].sort(),
+    entrypoint: manifest.entrypoint,
+  });
+}
+
+/** Congela as Skills resolvidas: id, versão e hash do documento e do manifesto. */
 export function snapshotSkills(resolved: ResolvedSkills): SkillSnapshot {
   const map = (list: readonly LoadedSkill[]) =>
     list.map((skill) => ({
       id: skill.manifest.id,
       version: skill.manifest.version,
       contentHash: skill.contentHash,
+      manifestHash: skillManifestHash(skill.manifest),
     }));
 
   return { capturedAt: nowIso(), claude: map(resolved.claude), codex: map(resolved.codex) };
@@ -259,11 +285,12 @@ export function snapshotSkills(resolved: ResolvedSkills): SkillSnapshot {
  * no meio de uma execução mudaria as regras entre uma tentativa e a seguinte —
  * a mesma classe de problema que `PROMPT_CHANGED_DURING_RUN` cobre.
  */
-export function assertSkillsUnchanged(
+export function verifySkillsAgainstSnapshot(
   snapshot: SkillSnapshot,
   catalog: readonly LoadedSkill[],
-): Result<void> {
+): Result<ResolvedSkills> {
   const problems: string[] = [];
+  const verified: ResolvedSkills = { claude: [], codex: [] };
 
   for (const agent of ['claude', 'codex'] as const) {
     for (const frozen of snapshot[agent]) {
@@ -282,7 +309,20 @@ export function assertSkillsUnchanged(
         problems.push(
           `Skill "${frozen.id}" foi editada durante a execução: o conteúdo não corresponde ao congelado.`,
         );
+        continue;
       }
+      /* O manifesto entra na conferência porque `name` é renderizado no bloco
+         que vai ao agente, e `status` e `compatibleAgents` são a autorização
+         que permitiu ativar a Skill. Sem isto, editar só o `skill.json`
+         mudaria a instrução — ou revogaria a autorização — sem disparar nada. */
+      if (skillManifestHash(current.manifest) !== frozen.manifestHash) {
+        problems.push(
+          `Skill "${frozen.id}": o manifesto foi alterado durante a execução ` +
+            '(nome, status, agentes compatíveis ou entrypoint).',
+        );
+        continue;
+      }
+      verified[agent].push(current);
     }
   }
 
@@ -294,7 +334,22 @@ export function assertSkillsUnchanged(
       { problems },
     );
   }
-  return ok(undefined);
+  return ok(verified);
+}
+
+/**
+ * Mesma conferência, sem devolver as Skills.
+ *
+ * Quem vai RENDERIZAR deve usar `verifySkillsAgainstSnapshot` e o que ela
+ * devolve: recarregar o catálogo entre conferir e usar abre uma janela em que
+ * o texto entregue ao agente não é o texto que passou na conferência.
+ */
+export function assertSkillsUnchanged(
+  snapshot: SkillSnapshot,
+  catalog: readonly LoadedSkill[],
+): Result<void> {
+  const verified = verifySkillsAgainstSnapshot(snapshot, catalog);
+  return verified.ok ? ok(undefined) : verified;
 }
 
 /**

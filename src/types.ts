@@ -704,11 +704,27 @@ export interface LoadedSkill {
   contentHash: string;
 }
 
+/**
+ * Skill congelada: o documento E o manifesto.
+ *
+ * Dois hashes, porque cobrem coisas diferentes. `contentHash` é o `SKILL.md`,
+ * que é o corpo do que o agente lê. `manifestHash` cobre `name` — renderizado
+ * no cabeçalho do bloco — e `status`/`compatibleAgents`, que são a autorização
+ * para a Skill ter sido ativada. Sem o segundo, editar só o `skill.json`
+ * mudaria a instrução entregue, ou revogaria a autorização, sem disparar nada.
+ */
+export interface FrozenSkill {
+  id: string;
+  version: string;
+  contentHash: string;
+  manifestHash: string;
+}
+
 /** Skills congeladas para uma execução, por agente. */
 export interface SkillSnapshot {
   capturedAt: string;
-  claude: Array<{ id: string; version: string; contentHash: string }>;
-  codex: Array<{ id: string; version: string; contentHash: string }>;
+  claude: FrozenSkill[];
+  codex: FrozenSkill[];
 }
 
 /* ------------------------------------------------------------------------- */
