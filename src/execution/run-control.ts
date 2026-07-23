@@ -324,6 +324,43 @@ export function requestCancelOnLiveRun(
 }
 
 /**
+ * Aguarda o TÉRMINO REAL da execução viva, com teto de espera.
+ *
+ * Existe para que a fronteira HTTP não minta. `AbortController.abort()` apenas
+ * envia o sinal; entre ele e a morte da árvore de processos há um intervalo
+ * real — `taskkill /T /F` é assíncrono e o evento `close` do filho ainda
+ * precisa chegar. Responder "processo interrompido" no instante do `abort()`
+ * afirmaria como concluído algo que apenas começou.
+ *
+ * Devolve:
+ *  - `'SETTLED'`  quando a execução terminou (árvore encerrada, estado gravado);
+ *  - `'PENDING'`  quando o prazo acabou antes disso — o encerramento segue;
+ *  - `'ABSENT'`   quando não há execução viva neste processo.
+ */
+export async function awaitRunSettled(
+  projectId: string,
+  timeoutMs: number,
+): Promise<'SETTLED' | 'PENDING' | 'ABSENT'> {
+  const controller = controllers.get(projectId);
+  if (!controller) return 'ABSENT';
+
+  let timer: NodeJS.Timeout | null = null;
+  const expiry = new Promise<'PENDING'>((resolve) => {
+    timer = setTimeout(() => resolve('PENDING'), Math.max(0, timeoutMs));
+    timer.unref?.();
+  });
+
+  try {
+    return await Promise.race([
+      controller.whenSettled().then(() => 'SETTLED' as const),
+      expiry,
+    ]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
+/**
  * Desligamento do processo: interrompe todas as execuções vivas.
  * Devolve os controladores atingidos para que o chamador possa AGUARDAR o
  * término real — desligar sem esperar é como deixar processo órfão.

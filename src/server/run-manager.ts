@@ -5,6 +5,8 @@ import type { RoundPolicyOverrides } from '../execution/effective-policy';
 import { createDefaultPorts } from '../execution/default-ports';
 import {
   awaitAllRuns,
+  awaitRunSettled,
+  getController,
   isRunLive,
   liveProjectIds,
   listControllers,
@@ -116,6 +118,39 @@ export function pauseRun(projectId: string): IntentAcceptance | null {
 /** Pede CANCELAMENTO ao controlador vivo. Idempotente. */
 export function cancelRun(projectId: string): IntentAcceptance | null {
   return requestCancelOnLiveRun(projectId, 'panel');
+}
+
+/**
+ * Teto de espera pela confirmação de término, na fronteira HTTP.
+ *
+ * Curto de propósito: a requisição não pode ficar pendurada, e a resposta
+ * precisa distinguir "encerrado" de "encerrando". Uma árvore de processos
+ * normalmente morre em algumas centenas de milissegundos.
+ */
+export const TERMINATION_CONFIRM_MS = 3_000;
+
+/**
+ * Confirma o término da execução viva, ou declara que ele segue em andamento.
+ *
+ * É o que permite a rota dizer a verdade: `abort()` envia o sinal, não encerra
+ * o processo. Sem esta confirmação a API afirmaria como concluído algo que
+ * apenas começou.
+ */
+export function confirmTermination(
+  projectId: string,
+  timeoutMs: number = TERMINATION_CONFIRM_MS,
+): Promise<'SETTLED' | 'PENDING' | 'ABSENT'> {
+  return awaitRunSettled(projectId, timeoutMs);
+}
+
+/** Identificador da execução viva, mesmo antes de o `RunRecord` existir. */
+export function liveRunId(projectId: string): string | null {
+  return getController(projectId)?.runId ?? null;
+}
+
+/** Etapa corrente da execução viva, ou `null` quando não há uma aqui. */
+export function liveStep(projectId: string): string | null {
+  return getController(projectId)?.step ?? null;
 }
 
 export function isRunning(projectId: string): boolean {

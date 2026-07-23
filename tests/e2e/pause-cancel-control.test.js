@@ -332,6 +332,14 @@ function makePorts(workDir, options = {}) {
       async commitLog() {
         return OK('');
       },
+      /* Portas da conciliação de commit órfão: o contrato as exige, e um
+         dublê incompleto esconderia uma quebra do contrato. */
+      async listCommitsSince() {
+        return OK([]);
+      },
+      async commitChangedFiles() {
+        return OK([]);
+      },
     },
 
     worktree: {

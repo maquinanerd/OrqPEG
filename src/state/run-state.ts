@@ -18,6 +18,7 @@ import { createPromptBudget } from '../execution/loop-guard';
 import { ensureDir, projectStateDir, runStatePath } from '../utils/paths';
 import { compactStamp, nowIso } from '../utils/time';
 import { validateIdentifier } from '../security/path-guard';
+import { withStateLock } from './state-lock';
 
 /**
  * Estado persistente de execução (RunRecord).
@@ -409,25 +410,14 @@ export function createRun(input: CreateRunInput): RunRecord {
  */
 export type IntentWriteMode = 'MERGE' | 'REPLACE';
 
-/**
- * Grava o registro de forma atômica, com compare-and-swap por revisão.
- *
- * O que a função devolve é o registro REALMENTE persistido — com a revisão
- * nova e a intenção já reconciliada com o disco. Quem grava deve continuar com
- * esse valor: é assim que o orquestrador enxerga, na volta seguinte do laço,
- * uma pausa pedida pelo painel no meio de uma etapa.
- *
- * Três garantias:
- *  1. a revisão só cresce, mesmo quando o registro em memória está atrasado;
- *  2. em `MERGE`, intenção registrada no disco nunca é apagada;
- *  3. progresso não retrocede: uma escrita obsoleta que apagaria commits já
- *     persistidos é RECUSADA com `STATE_REGRESSION` em vez de aceita em
- *     silêncio.
- */
-export function saveRun(run: RunRecord, mode: IntentWriteMode = 'MERGE'): Result<RunRecord> {
-  const projectCheck = validateIdentifier(run.projectId, 'id do projeto');
+/** Prepara o caminho do arquivo de estado, validando os identificadores. */
+function resolveStateTarget(
+  projectId: string,
+  runId: string,
+): Result<{ projectId: string; runId: string; filePath: string }> {
+  const projectCheck = validateIdentifier(projectId, 'id do projeto');
   if (!projectCheck.ok) return projectCheck;
-  const runCheck = validateIdentifier(run.runId, 'id da execução');
+  const runCheck = validateIdentifier(runId, 'id da execução');
   if (!runCheck.ok) return runCheck;
 
   try {
@@ -441,23 +431,37 @@ export function saveRun(run: RunRecord, mode: IntentWriteMode = 'MERGE'): Result
     );
   }
 
-  const filePath = runStatePath(projectCheck.value, runCheck.value);
-  const onDisk = readPersistedRun(filePath, projectCheck.value, runCheck.value);
+  return ok({
+    projectId: projectCheck.value,
+    runId: runCheck.value,
+    filePath: runStatePath(projectCheck.value, runCheck.value),
+  });
+}
+
+/**
+ * Reconcilia a gravação com o que está no disco e escreve. Roda SEMPRE dentro
+ * do lock de estado — nunca chame direto.
+ */
+function reconcileAndWrite(
+  target: { projectId: string; runId: string; filePath: string },
+  run: RunRecord,
+  mode: IntentWriteMode,
+): Result<RunRecord> {
+  const onDisk = readPersistedRun(target.filePath, target.projectId, target.runId);
 
   const incomingRevision = normalizeRevision(run.revision);
   const diskRevision = onDisk === null ? -1 : normalizeRevision(onDisk.revision);
-  const stale = diskRevision > incomingRevision;
 
-  if (stale && onDisk !== null) {
+  if (diskRevision > incomingRevision && onDisk !== null) {
     const regression = describeProgressRegression(onDisk, run);
     if (regression !== null) {
       return fail(
         'STATE_REGRESSION',
-        `Gravação obsoleta recusada para ${projectCheck.value}/${runCheck.value}: ${regression}. ` +
+        `Gravação obsoleta recusada para ${target.projectId}/${target.runId}: ${regression}. ` +
           `O disco está na revisão ${String(diskRevision)} e a gravação veio da revisão ${String(incomingRevision)}.`,
         {
-          projectId: projectCheck.value,
-          runId: runCheck.value,
+          projectId: target.projectId,
+          runId: target.runId,
           diskRevision,
           incomingRevision,
           reason: regression,
@@ -476,7 +480,7 @@ export function saveRun(run: RunRecord, mode: IntentWriteMode = 'MERGE'): Result
 
   merged.updatedAt = nowIso();
 
-  const written = writeJsonAtomicSync(filePath, merged);
+  const written = writeJsonAtomicSync(target.filePath, merged);
   if (!written.ok) return written;
 
   /*
@@ -495,40 +499,83 @@ export function saveRun(run: RunRecord, mode: IntentWriteMode = 'MERGE'): Result
 }
 
 /**
- * Registra a intenção externa (pausa ou cancelamento) sobre o estado MAIS
- * RECENTE do disco, com repetição limitada em caso de corrida.
+ * Grava o registro sob EXCLUSÃO MÚTUA entre processos.
  *
- * Quem pede pausa pela API não tem o registro em mãos — tem um identificador.
- * Reler imediatamente antes de gravar fecha a janela em que o orquestrador
- * gravou algo entre a leitura do handler e a escrita.
+ * A leitura do disco, a comparação de revisão, a reconciliação da intenção e a
+ * escrita acontecem inteiramente dentro do lock (`state/state-lock`). Sem isso,
+ * comparar revisões não resolvia nada no caso que importa: dois processos que
+ * leem a MESMA revisão não têm o que detectar, e o segundo a gravar apagava o
+ * primeiro. Era assim que uma pausa vinda de `PAUSAR.cmd` podia desaparecer.
+ *
+ * O que a função devolve é o registro REALMENTE persistido — com a revisão nova
+ * e a intenção já reconciliada. Quem grava deve continuar com esse valor: é
+ * assim que o orquestrador enxerga, na etapa seguinte, uma pausa pedida no meio
+ * de uma chamada de IA.
+ *
+ * Três garantias, agora com exclusão mútua por trás:
+ *  1. a revisão só cresce, e duas gravações nunca partem do mesmo ponto;
+ *  2. em `MERGE`, intenção registrada no disco nunca é apagada;
+ *  3. progresso não retrocede: uma escrita obsoleta que apagaria commits já
+ *     persistidos é RECUSADA com `STATE_REGRESSION`, não aceita em silêncio.
+ */
+export function saveRun(run: RunRecord, mode: IntentWriteMode = 'MERGE'): Result<RunRecord> {
+  const target = resolveStateTarget(run.projectId, run.runId);
+  if (!target.ok) return target;
+
+  return withStateLock(target.value.filePath, () =>
+    reconcileAndWrite(target.value, run, mode),
+  );
+}
+
+/**
+ * Registra a intenção externa (pausa ou cancelamento) de forma SERIALIZADA.
+ *
+ * A leitura do registro acontece DENTRO do lock, junto da escrita. A versão
+ * anterior lia fora e gravava depois, o que deixava aberta exatamente a corrida
+ * que este caminho precisa fechar: painel e CLI pedindo pausa enquanto o
+ * orquestrador grava progresso.
+ *
+ * Quem pede pausa pela API tem um identificador, não o registro — por isso a
+ * função recebe `projectId`/`runId` e nunca um `RunRecord` de fora.
  */
 export function recordRunIntent(
   projectId: string,
   runId: string,
   intent: 'PAUSE' | 'CANCEL',
 ): Result<RunRecord> {
-  const MAX_ATTEMPTS = 3;
-  let lastError: Result<RunRecord> | null = null;
+  const target = resolveStateTarget(projectId, runId);
+  if (!target.ok) return target;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    const loaded = loadRun(projectId, runId);
+  return withStateLock(target.value.filePath, () => {
+    const loaded = loadRun(target.value.projectId, target.value.runId);
     if (!loaded.ok) return loaded;
 
     const marked = intent === 'CANCEL' ? requestCancel(loaded.value) : requestPause(loaded.value);
-    const saved = saveRun(marked);
-    if (saved.ok) return saved;
-    if (saved.error.code !== 'STATE_REGRESSION') return saved;
-    lastError = saved;
-  }
+    return reconcileAndWrite(target.value, marked, 'MERGE');
+  });
+}
 
-  return (
-    lastError ??
-    fail('STATE_REGRESSION', `Não foi possível registrar a intenção em ${projectId}/${runId}.`, {
-      projectId,
-      runId,
-      intent,
-    })
-  );
+/**
+ * Aplica uma mutação ao registro mais recente do disco, tudo dentro do lock.
+ *
+ * É o caminho de quem precisa de leitura-modificação-escrita atômica sem ter o
+ * registro em mãos — a reconciliação de commit após uma queda, por exemplo.
+ */
+export function mutateRun(
+  projectId: string,
+  runId: string,
+  mutate: (current: RunRecord) => Result<RunRecord>,
+): Result<RunRecord> {
+  const target = resolveStateTarget(projectId, runId);
+  if (!target.ok) return target;
+
+  return withStateLock(target.value.filePath, () => {
+    const loaded = loadRun(target.value.projectId, target.value.runId);
+    if (!loaded.ok) return loaded;
+    const mutated = mutate(loaded.value);
+    if (!mutated.ok) return mutated;
+    return reconcileAndWrite(target.value, mutated.value, 'MERGE');
+  });
 }
 
 /** Lê apenas a intenção persistida, sem validar o registro inteiro. */
@@ -596,6 +643,15 @@ function describeProgressRegression(disk: RunRecord, incoming: RunRecord): strin
   return null;
 }
 
+/**
+ * Lê o registro do disco.
+ *
+ * NÃO toma o lock de estado, de propósito: a escrita é atômica por `rename`, de
+ * modo que um leitor sempre enxerga uma versão inteira, nunca meio gravada. É
+ * também por isso que esta função pode ser chamada de DENTRO de
+ * `withStateLock` sem risco de travar contra si mesma — e é assim que
+ * `recordRunIntent` e `mutateRun` fazem leitura-modificação-escrita atômica.
+ */
 export function loadRun(projectId: string, runId: string): Result<RunRecord> {
   const projectCheck = validateIdentifier(projectId, 'id do projeto');
   if (!projectCheck.ok) return projectCheck;

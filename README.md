@@ -726,11 +726,24 @@ O controle tem **duas metades**, e as duas são obrigatórias:
    `AbortController`, a etapa corrente e a identidade da rodada.
 
 Quem pede pausa ou cancelamento grava a intenção **e** fala com o controlador.
-A API do painel só responde `200` depois que um controlador vivo aceitou o
-pedido; quando houve apenas registro (a rodada está em outro processo), ela
-responde `202` e diz isso na resposta. Se a intenção não puder ser gravada, a
-resposta é `500` e **nada é interrompido** — uma pausa que não chega ao disco
-não sobreviveria à retomada.
+O controlador é consultado **antes** do registro em disco, porque ele existe
+primeiro: um pedido que chega entre o início da execução e a criação do
+`RunRecord` é aceito, não recebe `404`.
+
+A resposta da API separa três fatos que não são o mesmo:
+
+| Campo | Significa |
+| --- | --- |
+| `intentPersisted` | a intenção foi gravada no arquivo de estado |
+| `accepted` | um controlador vivo **neste processo** recebeu o pedido |
+| `terminated` | o encerramento da árvore de processos foi **confirmado** |
+
+`200` exige `accepted` **e** `terminated`. `202` é "aceito, encerramento em
+andamento" ou "apenas registrado — a rodada está em outro processo". Se a
+intenção não puder ser gravada, a resposta é `500` e **nada é interrompido** —
+uma pausa que não chega ao disco não sobreviveria à retomada. `abort()` envia o
+sinal; a confirmação de término é aguardada (com teto de 3 s) antes de a API
+afirmar que a árvore morreu.
 
 Garantias:
 
@@ -758,12 +771,35 @@ trás e destruiria justamente o worktree que a pausa existe para preservar. Elas
 são bloqueadas **antes de começar**, e é por isso que nenhum commit, push ou PR
 acontece depois de a intenção ter sido aceita.
 
+### Como o estado sobrevive à concorrência e à queda
+
 Todo o estado fica em `data/projects/<id>/state/<runId>.json`, escrito de forma
-atômica (arquivo temporário + `rename`), de modo que uma queda de energia não
-deixa um estado meio gravado. Cada gravação carrega uma **revisão** monotônica,
-usada como compare-and-swap: uma gravação que ficou para trás do disco não
-apaga a intenção registrada por outro caminho, e é recusada com
-`STATE_REGRESSION` se apagaria commits ou aprovações já persistidos.
+atômica (arquivo temporário + `fsync` + `rename`), de modo que uma queda de
+energia não deixa um estado meio gravado.
+
+**Exclusão mútua entre processos.** Leitura, comparação de revisão,
+reconciliação da intenção e escrita acontecem inteiramente dentro de um lock de
+arquivo (`<runId>.json.lock`, criado com `openSync(..., 'wx')` — atômico no
+NTFS). Sem isso, comparar revisões não resolveria o caso que importa: dois
+processos que leem a MESMA revisão não têm o que detectar, e o segundo a gravar
+apagaria o primeiro. Era assim que uma pausa vinda de `PAUSAR.cmd` podia
+desaparecer. Cada gravação carrega uma **revisão** monotônica; uma gravação
+obsoleta é recusada com `STATE_REGRESSION` se apagaria commits ou aprovações já
+persistidos.
+
+**Fail-closed na escrita.** Toda gravação que precede um efeito — chamada de
+IA, suíte de testes, `git add`, commit, push, PR, merge — é um *checkpoint*: se
+ela não chega ao disco, a execução **para ali** e diz em que etapa. Seguir em
+frente criaria trabalho que o estado persistido não conhece.
+
+**Diário de commits.** Entre `git commit` e a gravação do SHA existe uma janela
+em que o commit já está na branch e ainda não está no registro. Uma queda ali
+fazia a retomada refazer o prompt e commitar de novo. Agora a intenção é
+gravada com `fsync` **antes** do Git, o commit carrega os carimbos
+`OrqPEG-Run-Id`, `OrqPEG-Prompt-Id`, `OrqPEG-Attempt` e `OrqPEG-Operation-Id`
+(128 bits aleatórios), e a retomada reencontra o commit órfão e o **adota** —
+exigindo carimbo conferente, alcançabilidade a partir do HEAD e alteração de ao
+menos um arquivo. A mensagem humana nunca é usada como identidade.
 
 ---
 

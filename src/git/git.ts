@@ -1,3 +1,8 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
+
 import { runProcess } from '../agents/process-runner';
 import type {
   GitStatus,
@@ -854,7 +859,49 @@ export async function commit(
     return fail('VALIDATION_FAILED', 'A mensagem de commit contém byte nulo.');
   }
 
-  const result = await runGitRaw(dir, ['commit', '--message', trimmed], options);
+  /*
+   * Mensagem de MAIS DE UMA LINHA vai por ARQUIVO, nunca por argumento.
+   *
+   * No Windows o `git` é encaminhado por `cmd.exe`, e o cmd.exe não carrega
+   * quebras de linha dentro de um argumento: tudo depois da primeira linha
+   * simplesmente desaparece. O sintoma era silencioso e grave — os carimbos de
+   * identidade do OrqPEG (`OrqPEG-Operation-Id` e companhia), que ficam no
+   * RODAPÉ da mensagem, eram descartados pelo caminho, e a conciliação de um
+   * commit órfão depois de uma queda não tinha como reencontrá-lo.
+   *
+   * `--file` não passa por interpretação de linha de comando nenhuma.
+   */
+  const multiline = trimmed.includes('\n');
+  const messageFile = multiline ? path.join(os.tmpdir(), `orqpeg-commit-${randomUUID()}.txt`) : null;
+
+  if (messageFile !== null) {
+    try {
+      fs.writeFileSync(messageFile, trimmed, 'utf8');
+    } catch (error) {
+      return fail(
+        'IO_FAILED',
+        'Falha ao gravar o arquivo temporário da mensagem de commit.',
+        { messageFile },
+        error,
+      );
+    }
+  }
+
+  const args =
+    messageFile === null
+      ? ['commit', '--message', trimmed]
+      : ['commit', '--file', messageFile, '--cleanup=whitespace'];
+
+  const result = await runGitRaw(dir, args, options);
+
+  if (messageFile !== null) {
+    try {
+      fs.unlinkSync(messageFile);
+    } catch {
+      /* melhor esforço: o arquivo vive no diretório temporário do sistema */
+    }
+  }
+
   if (!result.ok) return result;
 
   const commitProcess = result.value;
@@ -871,6 +918,85 @@ export async function commit(
   }
 
   return headSha(dir, options);
+}
+
+/** Um commit alcançável a partir do HEAD, com a mensagem completa. */
+export interface CommitSummary {
+  sha: string;
+  /** Mensagem inteira, assunto e corpo — é onde vivem os carimbos do OrqPEG. */
+  message: string;
+}
+
+/**
+ * Lista os commits alcançáveis a partir do HEAD e ausentes em `fromRef`.
+ *
+ * Existe para a conciliação após uma queda entre `git commit` e a gravação do
+ * estado: é assim que o OrqPEG descobre que o commit que ele ia fazer JÁ existe.
+ *
+ * A alcançabilidade a partir do HEAD é parte da prova, e não um detalhe de
+ * implementação: um commit solto em outra branch, ou órfão, não é o commit
+ * desta execução — e adotá-lo registraria no estado um SHA que não está no
+ * trabalho que segue para o merge.
+ *
+ * O separador é `\x1e` (record separator) entre commits e `\x1f` (unit
+ * separator) entre SHA e mensagem: nenhum dos dois pode aparecer numa mensagem
+ * de commit, ao contrário de qualquer separador textual escolhido à mão.
+ */
+export async function listCommitsSince(
+  dir: string,
+  fromRef: string,
+  options: GitCommandOptions = {},
+): Promise<Result<CommitSummary[]>> {
+  const result = await runGitRaw(
+    dir,
+    ['log', '--no-color', '--format=%H%x1f%B%x1e', `${fromRef}..HEAD`],
+    options,
+  );
+  if (!result.ok) return result;
+  if (result.value.status !== 'COMPLETED' || result.value.exitCode !== 0) {
+    return gitFailure(dir, ['log'], result.value);
+  }
+
+  const commits: CommitSummary[] = [];
+  for (const record of result.value.stdout.split('\x1e')) {
+    const separator = record.indexOf('\x1f');
+    if (separator < 0) continue;
+    const sha = record.slice(0, separator).trim();
+    if (!/^[0-9a-f]{7,40}$/i.test(sha)) continue;
+    commits.push({ sha, message: record.slice(separator + 1) });
+  }
+  return ok(commits);
+}
+
+/**
+ * Arquivos alterados por um commit em relação ao seu pai.
+ *
+ * Usado como prova de conteúdo na conciliação: um commit vazio, ou que não
+ * toca arquivo nenhum, não é o commit de trabalho que se procurava.
+ */
+export async function commitChangedFiles(
+  dir: string,
+  sha: string,
+  options: GitCommandOptions = {},
+): Promise<Result<string[]>> {
+  if (!/^[0-9a-f]{7,40}$/i.test(sha)) {
+    return fail('VALIDATION_FAILED', `SHA inválido para inspeção: ${sha}.`, { sha });
+  }
+  const result = await runGitRaw(
+    dir,
+    ['show', '--no-color', '--name-only', '--format=', sha],
+    options,
+  );
+  if (!result.ok) return result;
+  if (result.value.status !== 'COMPLETED' || result.value.exitCode !== 0) {
+    return gitFailure(dir, ['show'], result.value);
+  }
+  return ok(
+    result.value.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0),
+  );
 }
 
 /**

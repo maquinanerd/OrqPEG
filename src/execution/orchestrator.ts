@@ -57,6 +57,14 @@ import {
   updatePromptProgress,
 } from '../state/run-state';
 import type { IntentWriteMode } from '../state/run-state';
+import {
+  TRAILER_OPERATION_ID,
+  openCommitIntent,
+  pendingCommitEntries,
+  readTrailer,
+  settleCommitIntent,
+  withCommitTrailers,
+} from '../state/commit-journal';
 import { listLocks, withLock } from '../state/locks';
 import { buildMergeAuditPackage, buildReviewPackage } from '../review/review-package';
 import type { AuditedPromptContent } from '../review/review-package';
@@ -494,8 +502,23 @@ async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRec
   const afterPreparing = haltIfRequested(ctx, run, 'após a preparação');
   if (afterPreparing) return ok(afterPreparing);
 
+  /*
+   * Conciliação do diário de commits, antes de qualquer prompt.
+   *
+   * É aqui que uma queda entre `git commit` e a gravação do estado é reparada:
+   * o commit órfão é reencontrado pelo carimbo, validado e adotado. Sem esta
+   * passagem, o prompt correspondente seria reexecutado e commitado de novo.
+   * Roda também em execução nova — custa uma leitura de arquivo quando não há
+   * nada pendente, e cobre o caso de um worktree reaproveitado.
+   */
+  if (!run.dryRun) {
+    const reconciled = await reconcileCommitJournal(ctx, run);
+    if (!reconciled.ok) return reconciled;
+    run = reconciled.value;
+  }
+
   if (run.dryRun) {
-    run = save(ctx, transition(run, 'COMPLETED', 'Dry-run concluído: nenhuma alteração real.'));
+    run = saveStop(ctx, transition(run, 'COMPLETED', 'Dry-run concluído: nenhuma alteração real.'));
     writeRunReport({ project: ctx.project, run });
     return ok(run);
   }
@@ -515,7 +538,7 @@ async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRec
      * parada específico foi registrado.
      */
     if (!isStopState(run.state)) {
-      run = save(
+      run = saveStop(
         ctx,
         transition(
           run,
@@ -542,7 +565,7 @@ async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRec
     return ok(beforePublish);
   }
 
-  const persistedOk = assertPersistence(ctx);
+  const persistedOk = assertPersistence(ctx, 'publicação');
   if (!persistedOk.ok) return persistedOk;
 
   const published = await publish(ctx, run);
@@ -587,16 +610,19 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
   const asserted = assertEffectivePolicySnapshot(input);
   if (!asserted.ok) return asserted;
 
-  let run = save(
+  const validatingSaved = persistCheckpoint(
     ctx,
     transition(input, 'VALIDATING', 'Validando configuração e ferramentas.'),
+    'entrada em VALIDATING',
   );
+  if (!validatingSaved.ok) return validatingSaved;
+  let run = validatingSaved.value;
 
   const { project, ports, config, logger } = ctx;
 
   const claudeOk = await ports.agents.claudeAvailable(config);
   if (!claudeOk) {
-    run = save(
+    run = saveStop(
       ctx,
       transition(run, 'AUTH_REQUIRED', 'Claude Code não está disponível no PATH.'),
     );
@@ -618,7 +644,7 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
   const remote = await ports.git.remoteUrl(project.repositoryPath, project.remote);
   if (!remote.ok) return remote;
   if (!remoteMatchesRepository(remote.value, project.githubRepository)) {
-    run = save(ctx, transition(run, 'FAILED', 'Remoto do projeto não confere.'));
+    run = saveStop(ctx, transition(run, 'FAILED', 'Remoto do projeto não confere.'));
     return fail(
       'REMOTE_MISMATCH',
       `O remoto "${project.remote}" não aponta para ${project.githubRepository}. Push e merge foram impedidos por segurança.`,
@@ -626,7 +652,19 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     );
   }
 
-  const baseSha = await ports.git.headSha(project.repositoryPath);
+  /*
+   * O SHA-base é congelado na PRIMEIRA preparação e nunca recalculado.
+   *
+   * Recalculá-lo na retomada rebaseava a execução silenciosamente: o diff
+   * entregue aos auditores passava a ser medido contra um ponto mais recente
+   * — inclusive contra commits que a própria execução acabara de criar. Foi
+   * assim que a conciliação de um commit órfão deixou de encontrá-lo: a busca
+   * `base..HEAD` começava DEPOIS do commit procurado.
+   */
+  const existingBase = run.baseCommitSha;
+  const baseSha = existingBase
+    ? ok(existingBase)
+    : await ports.git.headSha(project.repositoryPath);
   if (!baseSha.ok) return baseSha;
 
   const branchResult = buildRunBranchName(project.id, run.runId.replace(/^run-/, ''));
@@ -635,7 +673,7 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
 
   if (run.dryRun) {
     const worktreePath = resolveWorktreePath(project, run.runId);
-    run = save(ctx, {
+    run = saveStop(ctx, {
       ...transition(run, 'PREPARING_WORKTREE', 'Dry-run: worktree apenas simulado.'),
       baseCommitSha: baseSha.value,
       branchName,
@@ -645,15 +683,26 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     return ok(run);
   }
 
-  run = save(ctx, {
-    ...transition(run, 'PREPARING_WORKTREE', 'Preparando branch e worktree.'),
-    baseCommitSha: baseSha.value,
-    branchName,
-  });
+  /* A branch e o SHA-base precisam estar no disco ANTES de qualquer escrita no
+     repositório: é por eles que a retomada e a conciliação se orientam. */
+  const preparingSaved = persistCheckpoint(
+    ctx,
+    {
+      ...transition(run, 'PREPARING_WORKTREE', 'Preparando branch e worktree.'),
+      baseCommitSha: baseSha.value,
+      branchName,
+    },
+    'registro da branch e do SHA-base',
+  );
+  if (!preparingSaved.ok) return preparingSaved;
+  run = preparingSaved.value;
 
   if (!project.worktree.enabled) {
-    run = save(ctx, { ...run, workingDirectory: project.repositoryPath, worktreePath: null });
-    return ok(run);
+    return persistCheckpoint(
+      ctx,
+      { ...run, workingDirectory: project.repositoryPath, worktreePath: null },
+      'diretório de trabalho no próprio repositório',
+    );
   }
 
   const worktreePath = resolveWorktreePath(project, run.runId);
@@ -683,7 +732,7 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
       allowedRoot: worktreeRootOf(project),
     });
     if (!owned.ok) {
-      save(
+      saveStop(
         ctx,
         transition(
           run,
@@ -704,15 +753,18 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
      */
     const claim = await claimWorktree(ctx, run, run.worktreePath);
     if (!claim.ok) {
-      save(ctx, transition(run, 'BLOCKED', claim.error.message, { code: claim.error.code }));
+      saveStop(ctx, transition(run, 'BLOCKED', claim.error.message, { code: claim.error.code }));
       return claim;
     }
 
     ctx.logger.info(
       `Retomando no worktree já existente desta execução: ${run.worktreePath}`,
     );
-    run = save(ctx, { ...run, workingDirectory: run.worktreePath });
-    return ok(run);
+    return persistCheckpoint(
+      ctx,
+      { ...run, workingDirectory: run.worktreePath },
+      'adoção do worktree da execução',
+    );
   }
 
   const prepared = await ports.worktree.prepare({
@@ -723,16 +775,15 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     reuseWhenSafe: project.worktree.reuseWhenSafe,
   });
   if (!prepared.ok) {
-    save(ctx, transition(run, 'FAILED', 'Falha ao preparar o worktree.'));
+    saveStop(ctx, transition(run, 'FAILED', 'Falha ao preparar o worktree.'));
     return prepared;
   }
 
-  run = save(ctx, {
-    ...run,
-    worktreePath: prepared.value.path,
-    workingDirectory: prepared.value.path,
-  });
-  return ok(run);
+  return persistCheckpoint(
+    ctx,
+    { ...run, worktreePath: prepared.value.path, workingDirectory: prepared.value.path },
+    'registro do worktree preparado',
+  );
 }
 
 function worktreeRootOf(project: ProjectConfig): string {
@@ -846,7 +897,7 @@ async function executeSinglePrompt(
     );
     if (beforeAttempt) return ok(beforeAttempt);
 
-    const persistedOk = assertPersistence(ctx);
+    const persistedOk = assertPersistence(ctx, `${promptFile.id}: início da tentativa`);
     if (!persistedOk.ok) return persistedOk;
 
     /* ---------------------------------------------------------------------
@@ -862,14 +913,14 @@ async function executeSinglePrompt(
     });
     const gate = assertRunCanContinue(gateDecision);
     if (!gate.canContinue) {
-      run = save(ctx, applyLoopGuardStop(ctx, run, promptFile.id, gateDecision));
+      run = saveStop(ctx, applyLoopGuardStop(ctx, run, promptFile.id, gateDecision));
       return ok(run);
     }
 
     // A autorização é consumida no instante da passagem, não ao fim da
     // tentativa: se o processo cair no meio, ela não volta a valer.
     if (wasOverrideApplied(gateDecision)) {
-      run = save(ctx, consumeOverride(run, promptFile.id));
+      run = saveStop(ctx, consumeOverride(run, promptFile.id));
       ctx.logger.warn(
         `Tentativa ${attempt} de ${promptFile.id} liberada por autorização manual ` +
           `(gatilho suprimido: ${String(gateDecision.evidence['suppressedTrigger'])}).`,
@@ -888,7 +939,7 @@ async function executeSinglePrompt(
       attemptArtifactDir(project.id, run.runId, promptFile.id, attempt),
     );
     if (!attemptDirResult.ok) {
-      run = save(
+      run = saveStop(
         ctx,
         transition(
           run,
@@ -900,24 +951,44 @@ async function executeSinglePrompt(
     }
     const artifactDir = attemptDirResult.value;
     const attemptStartedAt = nowIso();
-    run = save(ctx, startPromptClock(run, promptFile.id, attemptStartedAt));
+
+    const clockSaved = persistCheckpoint(
+      ctx,
+      startPromptClock(run, promptFile.id, attemptStartedAt),
+      `${promptFile.id}: relógio da tentativa ${String(attempt)}`,
+    );
+    if (!clockSaved.ok) return clockSaved;
+    run = clockSaved.value;
 
     writeArtifactSync(path.join(artifactDir, 'prompt-original.md'), parsed.rawBody);
 
-    run = save(ctx, {
-      ...transition(
-        run,
-        'RUNNING_CLAUDE',
-        `Prompt ${promptFile.id}: tentativa ${attempt} de ${maxAttempts}.`,
-      ),
-      currentPromptId: promptFile.id,
-      currentAttempt: attempt,
-    });
-    run = save(ctx, updatePromptProgress(run, promptFile.id, {
-      status: 'RUNNING',
-      attempts: attempt,
-      lastAttemptAt: attemptStartedAt,
-    }));
+    const runningSaved = persistCheckpoint(
+      ctx,
+      {
+        ...transition(
+          run,
+          'RUNNING_CLAUDE',
+          `Prompt ${promptFile.id}: tentativa ${attempt} de ${maxAttempts}.`,
+        ),
+        currentPromptId: promptFile.id,
+        currentAttempt: attempt,
+      },
+      `${promptFile.id}: entrada em RUNNING_CLAUDE`,
+    );
+    if (!runningSaved.ok) return runningSaved;
+    run = runningSaved.value;
+
+    const progressSaved = persistCheckpoint(
+      ctx,
+      updatePromptProgress(run, promptFile.id, {
+        status: 'RUNNING',
+        attempts: attempt,
+        lastAttemptAt: attemptStartedAt,
+      }),
+      `${promptFile.id}: progresso da tentativa`,
+    );
+    if (!progressSaved.ok) return progressSaved;
+    run = progressSaved.value;
 
     /* --- Claude implementa ou corrige --------------------------------- */
     const promptIndex = ctx.prompts.findIndex((p) => p.id === promptFile.id) + 1;
@@ -940,7 +1011,7 @@ async function executeSinglePrompt(
        esta, alguém pode ter editado o documento. */
     const skillsIntact = verifyRunSkills(run);
     if (!skillsIntact.ok) {
-      run = save(ctx, stopBySkillMutation(ctx, run, promptFile.id, skillsIntact.error.message));
+      run = saveStop(ctx, stopBySkillMutation(ctx, run, promptFile.id, skillsIntact.error.message));
       return ok(run);
     }
 
@@ -980,8 +1051,19 @@ async function executeSinglePrompt(
       signal: ctx.signal,
     });
 
-    // A chamada é contabilizada mesmo quando falha: ela consumiu orçamento.
-    run = save(ctx, recordAgentCall(run, promptFile.id, 'claude'));
+    /*
+     * A chamada é contabilizada mesmo quando falha: ela consumiu orçamento.
+     * E o registro dessa contabilidade é um CHECKPOINT: se ele não chegar ao
+     * disco, a suíte de testes não pode começar. Sem isso, uma tentativa
+     * avançava com o orçamento do Loop Guard parado numa versão antiga.
+     */
+    const claudeCallSaved = persistCheckpoint(
+      ctx,
+      recordAgentCall(run, promptFile.id, 'claude'),
+      `${promptFile.id}: contabilização da chamada do Claude`,
+    );
+    if (!claudeCallSaved.ok) return claudeCallSaved;
+    run = claudeCallSaved.value;
 
     /* O Claude pode ter sido derrubado pelo aborto. Parar AQUI é o que impede
        a etapa seguinte (a suíte de testes) de começar depois de uma pausa —
@@ -991,7 +1073,7 @@ async function executeSinglePrompt(
 
     if (!claude.ok) {
       const state = mapAgentErrorState(claude.error.code);
-      run = save(ctx, {
+      run = saveStop(ctx, {
         ...transition(run, state, `Claude falhou no prompt ${promptFile.id}.`),
         lastError: claude.error,
       });
@@ -999,7 +1081,14 @@ async function executeSinglePrompt(
     }
 
     /* --- OrqPEG executa os testes oficiais ---------------------------- */
-    run = save(ctx, transition(run, 'RUNNING_TESTS', 'Executando a suíte oficial de testes.'));
+    const testsStateSaved = persistCheckpoint(
+      ctx,
+      transition(run, 'RUNNING_TESTS', 'Executando a suíte oficial de testes.'),
+      `${promptFile.id}: entrada em RUNNING_TESTS`,
+    );
+    if (!testsStateSaved.ok) return testsStateSaved;
+    run = testsStateSaved.value;
+
     ctx.control.setStep(`${promptFile.id}: suíte de testes (tentativa ${String(attempt)})`);
     const tests = await ports.tests.run({
       commands: ctx.policy.commands.tests,
@@ -1020,10 +1109,13 @@ async function executeSinglePrompt(
     writeArtifactSync(path.join(artifactDir, 'tests-full.log'), renderTestsLog(tests));
 
     /* --- Pacote de auditoria ------------------------------------------ */
-    run = save(
+    const packageStateSaved = persistCheckpoint(
       ctx,
       transition(run, 'BUILDING_REVIEW_PACKAGE', 'Montando o pacote de auditoria.'),
+      `${promptFile.id}: montagem do pacote de auditoria`,
     );
+    if (!packageStateSaved.ok) return packageStateSaved;
+    run = packageStateSaved.value;
 
     const changed = await ports.git.changedFiles(ctx.workingDir);
     const statusText = await ports.git.statusText(ctx.workingDir);
@@ -1038,13 +1130,16 @@ async function executeSinglePrompt(
     const currentDiffPrint = diffFingerprint(patchText);
     const measured = measureDiff(patchText);
 
-    run = save(
+    const diffPrintSaved = persistCheckpoint(
       ctx,
       withBudget(run, promptFile.id, (budget) => ({
         ...budget,
         diffFingerprints: pushBounded(budget.diffFingerprints, currentDiffPrint),
       })),
+      `${promptFile.id}: assinatura do diff`,
     );
+    if (!diffPrintSaved.ok) return diffPrintSaved;
+    run = diffPrintSaved.value;
 
     ctx.lastChangedFileCount = measured.files;
     ctx.lastChangedLineCount = measured.lines;
@@ -1077,7 +1172,13 @@ async function executeSinglePrompt(
     writeArtifactSync(path.join(artifactDir, 'review-package.md'), reviewPackage);
 
     /* --- Codex revisa (somente leitura) ------------------------------- */
-    run = save(ctx, transition(run, 'RUNNING_CODEX', 'Codex revisando a implementação.'));
+    const codexStateSaved = persistCheckpoint(
+      ctx,
+      transition(run, 'RUNNING_CODEX', 'Codex revisando a implementação.'),
+      `${promptFile.id}: entrada em RUNNING_CODEX`,
+    );
+    if (!codexStateSaved.ok) return codexStateSaved;
+    run = codexStateSaved.value;
 
     const schema = loadSchema('prompt-review.schema.json');
     if (!schema.ok) return schema;
@@ -1087,7 +1188,7 @@ async function executeSinglePrompt(
        chamadas faria o revisor cobrar o que o executor nunca leu. */
     const skillsIntactForReview = verifyRunSkills(run);
     if (!skillsIntactForReview.ok) {
-      run = save(
+      run = saveStop(
         ctx,
         stopBySkillMutation(ctx, run, promptFile.id, skillsIntactForReview.error.message),
       );
@@ -1129,7 +1230,15 @@ async function executeSinglePrompt(
       signal: ctx.signal,
     });
 
-    run = save(ctx, recordAgentCall(run, promptFile.id, 'codex'));
+    /* Mesmo raciocínio da contabilização do Claude: sem o registro no disco,
+       nenhuma aprovação e nenhum commit podem acontecer. */
+    const codexCallSaved = persistCheckpoint(
+      ctx,
+      recordAgentCall(run, promptFile.id, 'codex'),
+      `${promptFile.id}: contabilização da chamada do Codex`,
+    );
+    if (!codexCallSaved.ok) return codexCallSaved;
+    run = codexCallSaved.value;
 
     const afterCodex = haltIfRequested(ctx, run, `${promptFile.id}: após o Codex`);
     if (afterCodex) return ok(afterCodex);
@@ -1138,7 +1247,7 @@ async function executeSinglePrompt(
       // Sem revisor não há aprovação possível: o prompt fica bloqueado. Jamais
       // aprovamos por ausência do revisor.
       const state = mapAgentErrorState(codex.error.code);
-      run = save(ctx, {
+      run = saveStop(ctx, {
         ...transition(
           run,
           state,
@@ -1146,7 +1255,7 @@ async function executeSinglePrompt(
         ),
         lastError: codex.error,
       });
-      run = save(ctx, updatePromptProgress(run, promptFile.id, { status: 'BLOCKED' }));
+      run = saveStop(ctx, updatePromptProgress(run, promptFile.id, { status: 'BLOCKED' }));
       writeAttemptSummary(ctx, run, promptFile, attempt, attemptStartedAt, {
         tests,
         review: null,
@@ -1182,7 +1291,7 @@ async function executeSinglePrompt(
 
     /* Assinaturas de revisão e de falha alimentam os detectores de repetição
        e de oscilação na próxima volta do laço. */
-    run = save(
+    const printsSaved = persistCheckpoint(
       ctx,
       withBudget(run, promptFile.id, (budget) => {
         const reviewPrint = reviewFingerprint(review.value);
@@ -1197,7 +1306,10 @@ async function executeSinglePrompt(
             : budget.testFailureFingerprints,
         };
       }),
+      `${promptFile.id}: assinaturas de revisão e de falha`,
     );
+    if (!printsSaved.ok) return printsSaved;
+    run = printsSaved.value;
 
     const approved = tests.passed && reviewIsApproval(review.value);
 
@@ -1211,7 +1323,16 @@ async function executeSinglePrompt(
     });
 
     if (approved) {
-      run = save(ctx, transition(run, 'PROMPT_APPROVED', `Prompt ${promptFile.id} aprovado.`));
+      /* A aprovação precede o commit e é escrita no Git: se ela não puder ser
+         persistida, nada é commitado. */
+      const approvalSaved = persistCheckpoint(
+        ctx,
+        transition(run, 'PROMPT_APPROVED', `Prompt ${promptFile.id} aprovado.`),
+        `${promptFile.id}: aprovação`,
+      );
+      if (!approvalSaved.ok) return approvalSaved;
+      run = approvalSaved.value;
+
       const committed = await commitPrompt(ctx, run, promptFile, changedFiles);
       if (!committed.ok) return committed;
       run = committed.value;
@@ -1219,31 +1340,44 @@ async function executeSinglePrompt(
     }
 
     if (review.value.verdict === 'BLOCKED') {
-      run = save(ctx, updatePromptProgress(run, promptFile.id, {
+      run = saveStop(ctx, updatePromptProgress(run, promptFile.id, {
         status: 'BLOCKED',
         lastVerdict: 'BLOCKED',
         blockingIssueCount: review.value.blockingIssues.length,
       }));
-      run = save(
+      run = saveStop(
         ctx,
         transition(run, 'BLOCKED', `Prompt ${promptFile.id} bloqueado pelo revisor.`),
       );
       return ok(run);
     }
 
-    run = save(ctx, updatePromptProgress(run, promptFile.id, {
-      status: 'CHANGES_REQUESTED',
-      lastVerdict: review.value.verdict,
-      blockingIssueCount: review.value.blockingIssues.length,
-    }));
-    run = save(
+    /* Nova volta do laço à frente: o pedido de correção é um checkpoint, não
+       uma parada. Sem ele no disco, a tentativa seguinte partiria de um
+       orçamento que o registro não conhece. */
+    const changesSaved = persistCheckpoint(
+      ctx,
+      updatePromptProgress(run, promptFile.id, {
+        status: 'CHANGES_REQUESTED',
+        lastVerdict: review.value.verdict,
+        blockingIssueCount: review.value.blockingIssues.length,
+      }),
+      `${promptFile.id}: progresso de correções solicitadas`,
+    );
+    if (!changesSaved.ok) return changesSaved;
+    run = changesSaved.value;
+
+    const changesStateSaved = persistCheckpoint(
       ctx,
       transition(
         run,
         'CHANGES_REQUESTED',
         `Correções solicitadas em ${promptFile.id} (tentativa ${attempt}).`,
       ),
+      `${promptFile.id}: entrada em CHANGES_REQUESTED`,
     );
+    if (!changesStateSaved.ok) return changesStateSaved;
+    run = changesStateSaved.value;
   }
 
   /*
@@ -1258,7 +1392,7 @@ async function executeSinglePrompt(
     previousReview,
     lastTests,
   });
-  run = save(ctx, applyLoopGuardStop(ctx, run, promptFile.id, exhausted));
+  run = saveStop(ctx, applyLoopGuardStop(ctx, run, promptFile.id, exhausted));
   return ok(run);
 }
 
@@ -1286,36 +1420,43 @@ async function commitPrompt(
       `Prompt ${promptFile.id} já possui o commit ${existingCommit.sha.slice(0, 12)} no registro; ` +
         'nenhum commit novo será criado.',
     );
-    return ok(
-      save(
-        ctx,
-        updatePromptProgress(run, promptFile.id, {
-          status: 'APPROVED',
-          approvedAt: nowIso(),
-          commitSha: existingCommit.sha,
-          lastVerdict: 'APPROVED',
-        }),
-      ),
+    return persistCheckpoint(
+      ctx,
+      updatePromptProgress(run, promptFile.id, {
+        status: 'APPROVED',
+        approvedAt: nowIso(),
+        commitSha: existingCommit.sha,
+        lastVerdict: 'APPROVED',
+      }),
+      `${promptFile.id}: adoção do commit já registrado`,
     );
   }
 
   if (!ctx.policy.git.commitAfterApproval) {
-    return ok(save(ctx, updatePromptProgress(run, promptFile.id, {
-      status: 'APPROVED',
-      approvedAt: nowIso(),
-      lastVerdict: 'APPROVED',
-    })));
+    return persistCheckpoint(
+      ctx,
+      updatePromptProgress(run, promptFile.id, {
+        status: 'APPROVED',
+        approvedAt: nowIso(),
+        lastVerdict: 'APPROVED',
+      }),
+      `${promptFile.id}: aprovação sem commit (política do projeto)`,
+    );
   }
 
   if (changedFiles.length === 0) {
     ctx.logger.warn(
       `Prompt ${promptFile.id} aprovado sem alteração de arquivo; nenhum commit criado.`,
     );
-    return ok(save(ctx, updatePromptProgress(run, promptFile.id, {
-      status: 'APPROVED',
-      approvedAt: nowIso(),
-      lastVerdict: 'APPROVED',
-    })));
+    return persistCheckpoint(
+      ctx,
+      updatePromptProgress(run, promptFile.id, {
+        status: 'APPROVED',
+        approvedAt: nowIso(),
+        lastVerdict: 'APPROVED',
+      }),
+      `${promptFile.id}: aprovação sem alteração de arquivo`,
+    );
   }
 
   /* Cancelamento aceito impede o commit: é uma escrita na branch que o
@@ -1323,28 +1464,237 @@ async function commitPrompt(
   const beforeCommit = haltIfRequested(ctx, run, `${promptFile.id}: commit`);
   if (beforeCommit) return ok(beforeCommit);
 
-  run = save(ctx, transition(run, 'COMMITTING', `Criando commit de ${promptFile.id}.`));
-
-  const staged = await ctx.ports.git.addPaths(ctx.workingDir, changedFiles);
-  if (!staged.ok) return staged;
+  const committingSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'COMMITTING', `Criando commit de ${promptFile.id}.`),
+    `${promptFile.id}: entrada em COMMITTING`,
+  );
+  if (!committingSaved.ok) return committingSaved;
+  run = committingSaved.value;
 
   const message = `${ctx.policy.git.commitMessagePrefix} ${ctx.project.id}: concluir ${promptFile.id} — ${promptFile.name}`.trim();
-  const commit = await ctx.ports.git.commit(ctx.workingDir, message);
-  if (!commit.ok) return commit;
 
-  run = save(ctx, {
-    ...updatePromptProgress(run, promptFile.id, {
-      status: 'APPROVED',
-      approvedAt: nowIso(),
-      commitSha: commit.value,
-      lastVerdict: 'APPROVED',
-    }),
-    commits: [
-      ...run.commits,
-      { promptId: promptFile.id, sha: commit.value, message, at: nowIso() },
-    ],
+  const committed = await commitWithJournal(ctx, run, {
+    promptId: promptFile.id,
+    attempt: run.currentAttempt,
+    message,
+    changedFiles,
   });
-  ctx.logger.info(`Commit ${commit.value.slice(0, 12)} criado para ${promptFile.id}.`);
+  if (!committed.ok) return committed;
+
+  const sha = committed.value.sha;
+  const withCommit = persistCheckpoint(
+    ctx,
+    {
+      ...updatePromptProgress(committed.value.run, promptFile.id, {
+        status: 'APPROVED',
+        approvedAt: nowIso(),
+        commitSha: sha,
+        lastVerdict: 'APPROVED',
+      }),
+      commits: [
+        ...committed.value.run.commits,
+        { promptId: promptFile.id, sha, message, at: nowIso() },
+      ],
+    },
+    `${promptFile.id}: registro do commit ${sha.slice(0, 12)}`,
+  );
+
+  /*
+   * A conciliação do diário acontece DEPOIS da gravação do estado, e mesmo
+   * quando ela falha. Se o estado não foi gravado, a entrada precisa continuar
+   * PENDENTE: é ela que fará a retomada encontrar e adotar este commit em vez
+   * de criar um segundo.
+   */
+  if (withCommit.ok) {
+    const settled = settleCommitIntent(
+      ctx.project.id,
+      run.runId,
+      committed.value.operationId,
+      'COMMITTED',
+      sha,
+    );
+    if (!settled.ok) {
+      ctx.logger.warn(
+        `O commit ${sha.slice(0, 12)} foi registrado no estado, mas o diário não pôde ser ` +
+          `encerrado: ${settled.error.message}. A retomada reconhecerá o commit e não o repetirá.`,
+      );
+    }
+    ctx.logger.info(`Commit ${sha.slice(0, 12)} criado para ${promptFile.id}.`);
+  }
+
+  return withCommit;
+}
+
+/**
+ * Cria um commit com WRITE-AHEAD LOG.
+ *
+ * A ordem é a única coisa que importa aqui:
+ *
+ *   1. abrir a intenção no diário, com `fsync`, ANTES de tocar no Git;
+ *   2. `git add`;
+ *   3. `git commit`, carimbando o identificador da operação no rodapé;
+ *   4. (fora daqui) gravar o SHA no estado e encerrar a entrada.
+ *
+ * Uma queda entre 3 e 4 deixa uma entrada pendente cujo carimbo está no commit
+ * — e é assim que `reconcileCommitJournal` reencontra o commit na retomada em
+ * vez de criar um segundo. Falhar no passo 1 impede o commit: commitar sem
+ * diário reabriria exatamente a janela que o diário fecha.
+ */
+async function commitWithJournal(
+  ctx: Context,
+  run: RunRecord,
+  input: { promptId: string; attempt: number; message: string; changedFiles: string[] },
+): Promise<Result<{ run: RunRecord; sha: string; operationId: string }>> {
+  const intent = openCommitIntent({
+    projectId: ctx.project.id,
+    runId: run.runId,
+    promptId: input.promptId,
+    attempt: input.attempt,
+    message: input.message,
+  });
+  if (!intent.ok) {
+    ctx.logger.error(
+      `Diário de commits indisponível para ${input.promptId}: ${intent.error.message}. ` +
+        'Nenhum commit será criado — sem diário, uma queda depois do commit duplicaria o trabalho.',
+    );
+    return intent;
+  }
+
+  const staged = await ctx.ports.git.addPaths(ctx.workingDir, input.changedFiles);
+  if (!staged.ok) {
+    settleCommitIntent(ctx.project.id, run.runId, intent.value.operationId, 'ABANDONED', null);
+    return staged;
+  }
+
+  const commit = await ctx.ports.git.commit(
+    ctx.workingDir,
+    withCommitTrailers(input.message, intent.value),
+  );
+  if (!commit.ok) {
+    settleCommitIntent(ctx.project.id, run.runId, intent.value.operationId, 'ABANDONED', null);
+    return commit;
+  }
+
+  return ok({ run, sha: commit.value, operationId: intent.value.operationId });
+}
+
+/**
+ * Reconcilia commits que existem no Git mas não no registro.
+ *
+ * O cenário: o processo caiu entre `git commit` e a gravação do estado. Sem
+ * esta reconciliação, a guarda de duplicidade — que consulta `run.commits` —
+ * não encontra nada e o prompt é reexecutado e commitado de novo.
+ *
+ * A adoção exige TRÊS provas, e a ausência de qualquer uma impede a adoção:
+ *
+ *   1. o commit carrega o `Operation-Id` daquela entrada do diário — um valor
+ *      aleatório de 128 bits que só existe no disco local desta execução;
+ *   2. o commit é ALCANÇÁVEL a partir do HEAD atual (a busca parte de
+ *      `baseCommitSha..HEAD`) — um commit solto em outra branch não é o
+ *      trabalho que segue para o merge;
+ *   3. o commit ALTERA ao menos um arquivo — um commit vazio com o carimbo
+ *      certo não é o commit de trabalho que se procurava.
+ *
+ * A mensagem humana nunca é usada como identidade: ela é derivada do prompt e
+ * seria idêntica entre duas tentativas do mesmo trabalho.
+ */
+async function reconcileCommitJournal(
+  ctx: Context,
+  input: RunRecord,
+): Promise<Result<RunRecord>> {
+  let run = input;
+  const pending = pendingCommitEntries(ctx.project.id, run.runId);
+  if (pending.length === 0) return ok(run);
+
+  const baseRef = run.baseCommitSha;
+  if (!baseRef) {
+    ctx.logger.warn(
+      `Há ${String(pending.length)} intenção(ões) de commit pendente(s), mas a execução não tem ` +
+        'SHA de base para delimitar a busca. Nenhuma adoção será feita.',
+    );
+    return ok(run);
+  }
+
+  const listed = await ctx.ports.git.listCommitsSince(ctx.workingDir, baseRef);
+  if (!listed.ok) {
+    ctx.logger.warn(
+      `Não foi possível listar os commits da branch para conciliar o diário: ${listed.error.message}.`,
+    );
+    return ok(run);
+  }
+
+  for (const entry of pending) {
+    const match = listed.value.find(
+      (candidate) => readTrailer(candidate.message, TRAILER_OPERATION_ID) === entry.operationId,
+    );
+
+    if (!match) {
+      /* O commit não chegou a existir: a queda foi ANTES do `git commit`. A
+         entrada é encerrada como abandonada e o prompt roda normalmente. */
+      settleCommitIntent(ctx.project.id, run.runId, entry.operationId, 'ABANDONED', null);
+      ctx.logger.info(
+        `Intenção de commit ${entry.operationId.slice(0, 8)} (${entry.promptId}) não produziu ` +
+          'commit algum; o prompt será executado normalmente.',
+      );
+      continue;
+    }
+
+    const touched = await ctx.ports.git.commitChangedFiles(ctx.workingDir, match.sha);
+    if (!touched.ok || touched.value.length === 0) {
+      ctx.logger.warn(
+        `O commit ${match.sha.slice(0, 12)} carrega o carimbo de ${entry.promptId} mas não altera ` +
+          'arquivo algum. Adoção recusada: um commit vazio não é o trabalho procurado.',
+      );
+      continue;
+    }
+
+    if (run.commits.some((committed) => committed.sha === match.sha)) {
+      settleCommitIntent(ctx.project.id, run.runId, entry.operationId, 'COMMITTED', match.sha);
+      continue;
+    }
+
+    ctx.logger.warn(
+      `Commit órfão reconciliado: ${match.sha.slice(0, 12)} pertence a ${entry.promptId} e existe ` +
+        'na branch, mas não estava no estado. Ele será adotado; o prompt NÃO será refeito.',
+    );
+
+    const adopted = persistCheckpoint(
+      ctx,
+      {
+        ...updatePromptProgress(run, entry.promptId, {
+          status: 'APPROVED',
+          approvedAt: nowIso(),
+          commitSha: match.sha,
+          lastVerdict: 'APPROVED',
+        }),
+        commits: [
+          ...run.commits,
+          {
+            promptId: entry.promptId,
+            sha: match.sha,
+            message: entry.message,
+            at: nowIso(),
+          },
+        ],
+      },
+      `conciliação do commit órfão ${match.sha.slice(0, 12)}`,
+    );
+    if (!adopted.ok) return adopted;
+    run = adopted.value;
+
+    const settled = settleCommitIntent(
+      ctx.project.id,
+      run.runId,
+      entry.operationId,
+      'ADOPTED',
+      match.sha,
+    );
+    if (!settled.ok) {
+      ctx.logger.warn(`Diário não pôde ser encerrado após a adoção: ${settled.error.message}`);
+    }
+  }
+
   return ok(run);
 }
 
@@ -1356,7 +1706,14 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
   let run = input;
   const { project, ports, logger } = ctx;
 
-  run = save(ctx, transition(run, 'RUNNING_TESTS', 'Executando a suíte completa.'));
+  const finalTestsStateSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'RUNNING_TESTS', 'Executando a suíte completa.'),
+    'entrada na suíte completa',
+  );
+  if (!finalTestsStateSaved.ok) return finalTestsStateSaved;
+  run = finalTestsStateSaved.value;
+
   ctx.control.setStep('suíte completa antes da publicação');
   const finalTests = await ports.tests.run({
     commands: ctx.policy.commands.tests,
@@ -1365,13 +1722,19 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     signal: ctx.signal,
     onCommandStart: (command) => logger.info(`  → ${command}`),
   });
-  run = save(ctx, { ...run, finalTests });
+  const finalTestsSaved = persistCheckpoint(
+    ctx,
+    { ...run, finalTests },
+    'resultado da suíte completa',
+  );
+  if (!finalTestsSaved.ok) return finalTestsSaved;
+  run = finalTestsSaved.value;
 
   const afterFinalTests = haltIfRequested(ctx, run, 'após a suíte completa');
   if (afterFinalTests) return ok(afterFinalTests);
 
   if (!finalTests.passed) {
-    run = save(
+    run = saveStop(
       ctx,
       transition(run, 'BLOCKED', 'Suíte completa falhou; push e PR não foram executados.'),
     );
@@ -1379,37 +1742,52 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
   }
 
   if (!ctx.policy.git.pushAfterRun) {
-    run = save(ctx, transition(run, 'COMPLETED', 'Execução concluída sem push (política do projeto).'));
+    run = saveStop(ctx, transition(run, 'COMPLETED', 'Execução concluída sem push (política do projeto).'));
     return ok(run);
   }
 
   const beforePush = haltIfRequested(ctx, run, 'push da branch');
   if (beforePush) return ok(beforePush);
 
-  run = save(ctx, transition(run, 'PUSHING', 'Enviando a branch ao remoto.'));
+  const pushingSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'PUSHING', 'Enviando a branch ao remoto.'),
+    'entrada em PUSHING',
+  );
+  if (!pushingSaved.ok) return pushingSaved;
+  run = pushingSaved.value;
+
   const branch = run.branchName;
   if (!branch) return fail('INTERNAL', 'Branch da execução não definida.');
 
   const pushed = await ports.git.push(ctx.workingDir, project.remote, branch, true);
   if (!pushed.ok) {
-    save(ctx, transition(run, 'FAILED', 'Falha no push.'));
+    saveStop(ctx, transition(run, 'FAILED', 'Falha no push.'));
     return pushed;
   }
-  run = save(ctx, {
-    ...run,
-    pushedAt: nowIso(),
-    pushedRemote: ctx.policy.repository.remote,
-  });
+  const pushedSaved = persistCheckpoint(
+    ctx,
+    { ...run, pushedAt: nowIso(), pushedRemote: ctx.policy.repository.remote },
+    'registro do push',
+  );
+  if (!pushedSaved.ok) return pushedSaved;
+  run = pushedSaved.value;
 
   if (!ctx.policy.pullRequest.enabled) {
-    run = save(ctx, transition(run, 'COMPLETED', 'Execução concluída sem PR (política do projeto).'));
+    run = saveStop(ctx, transition(run, 'COMPLETED', 'Execução concluída sem PR (política do projeto).'));
     return ok(run);
   }
 
   const beforePr = haltIfRequested(ctx, run, 'criação da pull request');
   if (beforePr) return ok(beforePr);
 
-  run = save(ctx, transition(run, 'CREATING_PR', 'Criando pull request.'));
+  const creatingPrSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'CREATING_PR', 'Criando pull request.'),
+    'entrada em CREATING_PR',
+  );
+  if (!creatingPrSaved.ok) return creatingPrSaved;
+  run = creatingPrSaved.value;
 
   const existing = await ports.github.findPullRequestForBranch({
     cwd: ctx.workingDir,
@@ -1430,7 +1808,7 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
       draft: ctx.policy.pullRequest.draftDuringExecution,
     });
     if (!created.ok) {
-      save(ctx, transition(run, 'FAILED', 'Falha ao criar a pull request.'));
+      saveStop(ctx, transition(run, 'FAILED', 'Falha ao criar a pull request.'));
       return created;
     }
     pr = created.value;
@@ -1443,7 +1821,10 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     });
   }
 
-  run = save(ctx, { ...run, pullRequest: pr });
+  const prSaved = persistCheckpoint(ctx, { ...run, pullRequest: pr }, 'registro da pull request');
+  if (!prSaved.ok) return prSaved;
+  run = prSaved.value;
+
   logger.info(`Pull request #${pr.number}: ${pr.url}`);
 
   if (!ctx.policy.pullRequest.waitForChecks) return ok(run);
@@ -1471,7 +1852,13 @@ async function runCiLoop(
   /* Entrar em WAITING_CI antes da primeira consulta: a máquina de estados só
      admite o reparo a partir daqui, e é também o estado que o painel espera
      ver enquanto o CI roda. */
-  run = save(ctx, transition(run, 'WAITING_CI', 'Aguardando o CI do GitHub Actions.'));
+  const waitingSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'WAITING_CI', 'Aguardando o CI do GitHub Actions.'),
+    'entrada em WAITING_CI',
+  );
+  if (!waitingSaved.ok) return waitingSaved;
+  run = waitingSaved.value;
 
   for (;;) {
     /* A espera do CI é o trecho mais longo da execução; honrar a intenção aqui
@@ -1485,7 +1872,7 @@ async function runCiLoop(
       prNumber,
     });
     if (!current.ok) {
-      run = save(ctx, {
+      run = saveStop(ctx, {
         ...transition(run, 'CI_FAILED', 'Não foi possível obter o status do CI.'),
         lastError: current.error,
       });
@@ -1498,7 +1885,9 @@ async function runCiLoop(
     /* A espera é ancorada no head SHA: commit novo é CI novo e merece relógio
        novo, mas o contador de reparos atravessa o laço inteiro. */
     const wait = rebaseCiWaitOnHead(run.ciWait, checks.headSha, policy, at);
-    run = save(ctx, { ...run, checks, ciWait: wait });
+    const checksSaved = persistCheckpoint(ctx, { ...run, checks, ciWait: wait }, 'estado do CI');
+    if (!checksSaved.ok) return checksSaved;
+    run = checksSaved.value;
 
     const decision = decideCi({
       run,
@@ -1514,20 +1903,23 @@ async function runCiLoop(
     }
 
     if (decision.action === 'STOP') {
-      run = save(ctx, applyCiStop(ctx, run, decision.trigger, decision.reason, decision.evidence));
+      run = saveStop(ctx, applyCiStop(ctx, run, decision.trigger, decision.reason, decision.evidence));
       return ok(run);
     }
 
     if (decision.action === 'WAIT') {
-      run = save(ctx, {
-        ...transition(run, 'WAITING_CI', decision.reason),
-        ciWait: advanceCiWait(wait, policy, at),
-      });
+      const waitAdvanced = persistCheckpoint(
+        ctx,
+        { ...transition(run, 'WAITING_CI', decision.reason), ciWait: advanceCiWait(wait, policy, at) },
+        'avanço do orçamento de espera do CI',
+      );
+      if (!waitAdvanced.ok) return waitAdvanced;
+      run = waitAdvanced.value;
       try {
         await sleep(decision.waitSeconds * 1000, ctx.signal);
       } catch {
         const stopped = haltIfRequested(ctx, run, 'espera do CI interrompida');
-        return ok(stopped ?? save(ctx, transition(run, 'INTERRUPTED', 'Espera do CI cancelada.')));
+        return ok(stopped ?? saveStop(ctx, transition(run, 'INTERRUPTED', 'Espera do CI cancelada.')));
       }
       continue;
     }
@@ -1545,7 +1937,13 @@ async function runCiLoop(
 
     /* Commit novo enviado: volta a esperar, e a máquina de estados exige que
        o retorno passe por WAITING_CI antes de qualquer novo reparo. */
-    run = save(ctx, transition(run, 'WAITING_CI', 'Aguardando o CI do commit de reparo.'));
+    const waitingAgain = persistCheckpoint(
+      ctx,
+      transition(run, 'WAITING_CI', 'Aguardando o CI do commit de reparo.'),
+      'nova espera do CI após o reparo',
+    );
+    if (!waitingAgain.ok) return waitingAgain;
+    run = waitingAgain.value;
   }
 }
 
@@ -1599,7 +1997,7 @@ async function repairCi(
      não aconteceu. */
   const skillsForRepair = verifyRunSkills(run);
   if (!skillsForRepair.ok) {
-    run = save(ctx, stopRunBySkillMutation(run, skillsForRepair.error.message));
+    run = saveStop(ctx, stopRunBySkillMutation(run, skillsForRepair.error.message));
     return ok(run);
   }
 
@@ -1612,7 +2010,7 @@ async function repairCi(
     ),
   );
   if (!dirResult.ok) {
-    run = save(ctx, transition(run, 'FAILED', dirResult.error.message));
+    run = saveStop(ctx, transition(run, 'FAILED', dirResult.error.message));
     return dirResult;
   }
   const dir = dirResult.value;
@@ -1623,24 +2021,30 @@ async function repairCi(
   );
   writeExclusiveSync(path.join(dir, 'failure-fingerprint.txt'), `${fingerprint}\n`);
 
-  run = save(ctx, {
-    ...transition(run, 'RUNNING_CLAUDE', `Reparo de CI ${String(cycle)}: corrigindo ${failedChecks.join(', ')}.`),
-    ciRepairCycles: cycle,
-    ciFailureFingerprints: pushBounded(run.ciFailureFingerprints, fingerprint),
-    ciRepairs: [
-      ...run.ciRepairs,
-      {
-        cycle,
-        headShaBefore,
-        fingerprint,
-        failedChecks,
-        startedAt,
-        finishedAt: null,
-        outcome: 'AGENT_FAILED',
-        headShaAfter: null,
-      },
-    ],
-  });
+  const repairStarted = persistCheckpoint(
+    ctx,
+    {
+      ...transition(run, 'RUNNING_CLAUDE', `Reparo de CI ${String(cycle)}: corrigindo ${failedChecks.join(', ')}.`),
+      ciRepairCycles: cycle,
+      ciFailureFingerprints: pushBounded(run.ciFailureFingerprints, fingerprint),
+      ciRepairs: [
+        ...run.ciRepairs,
+        {
+          cycle,
+          headShaBefore,
+          fingerprint,
+          failedChecks,
+          startedAt,
+          finishedAt: null,
+          outcome: 'AGENT_FAILED',
+          headShaAfter: null,
+        },
+      ],
+    },
+    `abertura do reparo de CI ${String(cycle)}`,
+  );
+  if (!repairStarted.ok) return repairStarted;
+  run = repairStarted.value;
 
   const instruction = withSkills(
     buildCiRepairInstruction({
@@ -1675,7 +2079,7 @@ async function repairCi(
   if (afterRepairAgent) return ok(afterRepairAgent);
 
   if (!claude.ok) {
-    run = save(ctx, {
+    run = saveStop(ctx, {
       ...finishCiRepair(run, cycle, 'AGENT_FAILED', null),
       ...transition(run, 'CI_FAILED', `O executor falhou durante o reparo de CI ${String(cycle)}.`),
       lastError: claude.error,
@@ -1688,7 +2092,7 @@ async function repairCi(
   if (changed.value.length === 0) {
     /* O encerramento do ciclo entra como BASE da parada, não espalhado depois:
        espalhar sobrescreveria `ciRepairs` com a versão anterior do registro. */
-    run = save(
+    run = saveStop(
       ctx,
       applyCiStop(
         ctx,
@@ -1703,7 +2107,14 @@ async function repairCi(
 
   /* Testes locais antes do push: reenviar sem verificar transformaria o CI em
      ferramenta de depuração remota, gastando minutos de runner por tentativa. */
-  run = save(ctx, transition(run, 'RUNNING_TESTS', 'Validando o reparo de CI localmente.'));
+  const repairTestsSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'RUNNING_TESTS', 'Validando o reparo de CI localmente.'),
+    `reparo de CI ${String(cycle)}: entrada nos testes`,
+  );
+  if (!repairTestsSaved.ok) return repairTestsSaved;
+  run = repairTestsSaved.value;
+
   ctx.control.setStep(`reparo de CI ${String(cycle)}: testes locais`);
   const tests = await ctx.ports.tests.run({
     commands: ctx.policy.commands.tests,
@@ -1717,7 +2128,7 @@ async function repairCi(
   if (afterRepairTests) return ok(afterRepairTests);
 
   if (!tests.passed) {
-    run = save(
+    run = saveStop(
       ctx,
       applyCiStop(
         ctx,
@@ -1736,22 +2147,42 @@ async function repairCi(
   const beforeRepairCommit = haltIfRequested(ctx, run, `reparo de CI ${String(cycle)}: commit`);
   if (beforeRepairCommit) return ok(beforeRepairCommit);
 
-  const staged = await ctx.ports.git.addPaths(ctx.workingDir, changed.value);
-  if (!staged.ok) return staged;
-
   const message = `${ctx.policy.git.commitMessagePrefix} ${ctx.project.id}: reparo de CI ${String(cycle)}`.trim();
-  const commit = await ctx.ports.git.commit(ctx.workingDir, message);
+  const repairKey = `ci-repair-${String(cycle)}`;
+
+  /* O reparo de CI escreve na MESMA branch que segue para o merge, então a
+     janela entre `git commit` e a gravação do estado é a mesma — e o diário
+     que a fecha também. */
+  const commit = await commitWithJournal(ctx, run, {
+    promptId: repairKey,
+    attempt: cycle,
+    message,
+    changedFiles: changed.value,
+  });
   if (!commit.ok) return commit;
 
-  run = save(ctx, {
-    ...run,
-    commits: [
-      ...run.commits,
-      { promptId: `ci-repair-${String(cycle)}`, sha: commit.value, message, at: nowIso() },
-    ],
-  });
+  const repairCommitSaved = persistCheckpoint(
+    ctx,
+    {
+      ...run,
+      commits: [
+        ...run.commits,
+        { promptId: repairKey, sha: commit.value.sha, message, at: nowIso() },
+      ],
+    },
+    `reparo de CI ${String(cycle)}: registro do commit`,
+  );
+  if (!repairCommitSaved.ok) return repairCommitSaved;
+  run = repairCommitSaved.value;
+  settleCommitIntent(ctx.project.id, run.runId, commit.value.operationId, 'COMMITTED', commit.value.sha);
 
-  run = save(ctx, transition(run, 'PUSHING', 'Enviando o reparo de CI.'));
+  const repairPushSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'PUSHING', 'Enviando o reparo de CI.'),
+    `reparo de CI ${String(cycle)}: entrada em PUSHING`,
+  );
+  if (!repairPushSaved.ok) return repairPushSaved;
+  run = repairPushSaved.value;
   const pushed = await ctx.ports.git.push(
     ctx.workingDir,
     ctx.policy.repository.remote,
@@ -1759,16 +2190,23 @@ async function repairCi(
     false,
   );
   if (!pushed.ok) {
-    run = save(ctx, {
-      ...finishCiRepair(run, cycle, 'AGENT_FAILED', commit.value),
+    run = saveStop(ctx, {
+      ...finishCiRepair(run, cycle, 'AGENT_FAILED', commit.value.sha),
       ...transition(run, 'CI_FAILED', 'Falha ao enviar o reparo de CI.'),
       lastError: pushed.error,
     });
     return ok(run);
   }
 
-  run = save(ctx, finishCiRepair(run, cycle, 'REPAIRED', commit.value));
-  ctx.logger.info(`Reparo de CI ${String(cycle)} enviado (${commit.value.slice(0, 12)}).`);
+  const repairDone = persistCheckpoint(
+    ctx,
+    finishCiRepair(run, cycle, 'REPAIRED', commit.value.sha),
+    `reparo de CI ${String(cycle)}: conclusão`,
+  );
+  if (!repairDone.ok) return repairDone;
+  run = repairDone.value;
+
+  ctx.logger.info(`Reparo de CI ${String(cycle)} enviado (${commit.value.sha.slice(0, 12)}).`);
   return ok(run);
 }
 
@@ -1814,7 +2252,7 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
 
     const limit = Math.max(0, ctx.policy.mergeAudit.maxCorrectionCycles);
     if (run.mergeCorrectionCycles >= limit) {
-      run = save(
+      run = saveStop(
         ctx,
         applyMergeCorrectionStop(ctx, run, limit, round.value.requestedBy, round.value.reasons),
       );
@@ -1854,7 +2292,7 @@ async function auditRound(
     ok({ run: r, outcome: 'DONE', requestedBy: [], reasons: [] });
 
   if (!ctx.policy.merge.enabled || ctx.policy.merge.mode !== 'dual_ai_consensus') {
-    run = save(
+    run = saveStop(
       ctx,
       transition(run, 'COMPLETED', 'Merge automático desabilitado para este projeto.'),
     );
@@ -1863,7 +2301,7 @@ async function auditRound(
 
   const pr = run.pullRequest;
   if (!pr) {
-    run = save(ctx, transition(run, 'BLOCKED', 'Sem pull request: auditoria final não se aplica.'));
+    run = saveStop(ctx, transition(run, 'BLOCKED', 'Sem pull request: auditoria final não se aplica.'));
     return done(run);
   }
 
@@ -1876,10 +2314,18 @@ async function auditRound(
   });
   if (!fresh.ok) return fresh;
   const currentPr = fresh.value;
-  run = save(ctx, { ...run, pullRequest: currentPr });
+  const freshPrSaved = persistCheckpoint(ctx, { ...run, pullRequest: currentPr }, 'releitura da PR');
+  if (!freshPrSaved.ok) return freshPrSaved;
+  run = freshPrSaved.value;
 
   if (currentPr.headSha !== pr.headSha) {
-    run = save(ctx, invalidateMergeApprovals(run, 'O head SHA mudou antes da auditoria.'));
+    const invalidated = persistCheckpoint(
+      ctx,
+      invalidateMergeApprovals(run, 'O head SHA mudou antes da auditoria.'),
+      'invalidação das aprovações por mudança de head',
+    );
+    if (!invalidated.ok) return invalidated;
+    run = invalidated.value;
   }
 
   if (ctx.policy.pullRequest.markReadyBeforeMerge && currentPr.isDraft) {
@@ -1932,7 +2378,7 @@ async function auditRound(
   };
 
   /* --- Auditoria independente do Claude ------------------------------- */
-  run = save(
+  run = saveStop(
     ctx,
     transition(run, 'RUNNING_CLAUDE_MERGE_AUDIT', 'Auditoria final independente do Claude.'),
   );
@@ -1966,7 +2412,7 @@ async function auditRound(
   else logger.warn(`Auditoria do Claude indisponível: ${claudeAudit.ok ? 'JSON inválido' : claudeAudit.error.message}`);
 
   /* --- Auditoria independente do Codex -------------------------------- */
-  run = save(
+  run = saveStop(
     ctx,
     transition(run, 'RUNNING_CODEX_MERGE_AUDIT', 'Auditoria final independente do Codex.'),
   );
@@ -1999,10 +2445,22 @@ async function auditRound(
   if (codexRecord) reviews.push(codexRecord);
   else logger.warn(`Auditoria do Codex indisponível: ${codexAudit.ok ? 'JSON inválido' : codexAudit.error.message}`);
 
-  run = save(ctx, { ...run, mergeReviews: reviews });
+  const reviewsSaved = persistCheckpoint(
+    ctx,
+    { ...run, mergeReviews: reviews },
+    'registro das auditorias de merge',
+  );
+  if (!reviewsSaved.ok) return reviewsSaved;
+  run = reviewsSaved.value;
 
   /* --- Consenso e gates ------------------------------------------------ */
-  run = save(ctx, transition(run, 'MERGE_CONSENSUS_PENDING', 'Avaliando consenso e gates.'));
+  const consensusStateSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'MERGE_CONSENSUS_PENDING', 'Avaliando consenso e gates.'),
+    'entrada em MERGE_CONSENSUS_PENDING',
+  );
+  if (!consensusStateSaved.ok) return consensusStateSaved;
+  run = consensusStateSaved.value;
 
   const latestPr = await ports.github.getPullRequest({
     cwd: ctx.workingDir,
@@ -2015,7 +2473,15 @@ async function auditRound(
     repo: project.githubRepository,
     prNumber: currentPr.number,
   });
-  if (latestChecks.ok) run = save(ctx, { ...run, checks: latestChecks.value });
+  if (latestChecks.ok) {
+    const checksSaved = persistCheckpoint(
+      ctx,
+      { ...run, checks: latestChecks.value },
+      'releitura dos checks antes dos gates',
+    );
+    if (!checksSaved.ok) return checksSaved;
+    run = checksSaved.value;
+  }
 
   const claudeFinal = reviews.find((r) => r.auditor === 'claude') ?? null;
   const codexFinal = reviews.find((r) => r.auditor === 'codex') ?? null;
@@ -2039,7 +2505,13 @@ async function auditRound(
     codexReview: codexFinal,
   });
 
-  run = save(ctx, { ...run, consensus, gateReport, pullRequest: prForGates });
+  const gatesSaved = persistCheckpoint(
+    ctx,
+    { ...run, consensus, gateReport, pullRequest: prForGates },
+    'registro do consenso e dos gates',
+  );
+  if (!gatesSaved.ok) return gatesSaved;
+  run = gatesSaved.value;
 
   if (!consensus.reached || !gateReport.allPassed) {
     const reasons = [
@@ -2064,7 +2536,7 @@ async function auditRound(
     }
 
     logger.warn(`Merge NÃO autorizado. ${reasons.join(' | ')}`);
-    run = save(
+    run = saveStop(
       ctx,
       transition(run, 'BLOCKED', `Merge não autorizado: ${reasons.slice(0, 5).join(' | ')}`),
     );
@@ -2072,7 +2544,13 @@ async function auditRound(
   }
 
   /* --- Merge ----------------------------------------------------------- */
-  run = save(ctx, transition(run, 'MERGE_APPROVED', 'Todos os gates aprovados; merge autorizado.'));
+  const approvedSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'MERGE_APPROVED', 'Todos os gates aprovados; merge autorizado.'),
+    'autorização de merge',
+  );
+  if (!approvedSaved.ok) return approvedSaved;
+  run = approvedSaved.value;
 
   /*
    * ÚLTIMO portão antes da única ação irreversível do produto.
@@ -2084,10 +2562,19 @@ async function auditRound(
   const beforeMerge = haltIfRequested(ctx, run, 'execução do merge');
   if (beforeMerge) return ok({ run: beforeMerge, outcome: 'DONE', requestedBy: [], reasons: [] });
 
-  const persistedBeforeMerge = assertPersistence(ctx);
+  const persistedBeforeMerge = assertPersistence(ctx, 'execução do merge');
   if (!persistedBeforeMerge.ok) return persistedBeforeMerge;
 
-  run = save(ctx, transition(run, 'MERGING', 'Executando squash merge protegido por SHA.'));
+  /* O ÚLTIMO checkpoint antes da única ação irreversível do produto. Se ele
+     não chegar ao disco, o merge não acontece: um merge sem rastro é a pior
+     combinação possível entre efeito e ausência de registro. */
+  const mergingSaved = persistCheckpoint(
+    ctx,
+    transition(run, 'MERGING', 'Executando squash merge protegido por SHA.'),
+    'entrada em MERGING',
+  );
+  if (!mergingSaved.ok) return mergingSaved;
+  run = mergingSaved.value;
 
   ctx.control.setStep('executando o merge');
   const merged = await ctx.ports.merge.execute({
@@ -2101,17 +2588,20 @@ async function auditRound(
   });
 
   if (!merged.ok) {
-    run = save(ctx, {
+    run = saveStop(ctx, {
       ...transition(run, 'BLOCKED', `Merge não executado: ${merged.error.message}`),
       lastError: merged.error,
     });
     return done(run);
   }
 
-  run = save(ctx, {
-    ...transition(run, 'MERGED', 'Pull request mergeada com sucesso.'),
-    mergeOutcome: merged.value,
-  });
+  const mergedSaved = persistCheckpoint(
+    ctx,
+    { ...transition(run, 'MERGED', 'Pull request mergeada com sucesso.'), mergeOutcome: merged.value },
+    'registro do merge concluído',
+  );
+  if (!mergedSaved.ok) return mergedSaved;
+  run = mergedSaved.value;
   logger.info(`Merge concluído. SHA: ${merged.value.mergeSha ?? 'desconhecido'}`);
   return done(run);
 }
@@ -2194,7 +2684,7 @@ async function correctAfterAudit(
     ),
   );
   if (!dirResult.ok) {
-    run = save(ctx, transition(run, 'FAILED', dirResult.error.message));
+    run = saveStop(ctx, transition(run, 'FAILED', dirResult.error.message));
     return dirResult;
   }
   const dir = dirResult.value;
@@ -2203,45 +2693,58 @@ async function correctAfterAudit(
     `${JSON.stringify({ cycle, requestedBy, reasons, headShaBefore, startedAt }, null, 2)}\n`,
   );
 
-  run = save(ctx, {
-    ...run,
-    mergeCorrectionCycles: cycle,
-    mergeCorrections: [
-      ...run.mergeCorrections,
-      {
-        cycle,
-        headShaBefore,
-        requestedBy,
-        issueFingerprint,
-        startedAt,
-        finishedAt: null,
-        outcome: 'AGENT_FAILED',
-        headShaAfter: null,
-      },
-    ],
-  });
+  const correctionOpened = persistCheckpoint(
+    ctx,
+    {
+      ...run,
+      mergeCorrectionCycles: cycle,
+      mergeCorrections: [
+        ...run.mergeCorrections,
+        {
+          cycle,
+          headShaBefore,
+          requestedBy,
+          issueFingerprint,
+          startedAt,
+          finishedAt: null,
+          outcome: 'AGENT_FAILED',
+          headShaAfter: null,
+        },
+      ],
+    },
+    `abertura da correção pós-auditoria ${String(cycle)}`,
+  );
+  if (!correctionOpened.ok) return correctionOpened;
+  run = correctionOpened.value;
 
   /* A evidência antiga morre ANTES da correção começar: se o processo cair no
      meio, o que fica no disco não pode continuar afirmando que o código está
-     aprovado. */
-  run = save(
+     aprovado. Por isso é um checkpoint: sem a invalidação no disco, a correção
+     não começa. */
+  const invalidated = persistCheckpoint(
     ctx,
     invalidateMergeApprovals(
       run,
       `Ciclo de correção ${String(cycle)} solicitado por ${requestedBy.join(', ')}.`,
     ),
+    `invalidação das aprovações no ciclo ${String(cycle)}`,
   );
+  if (!invalidated.ok) return invalidated;
+  run = invalidated.value;
 
-  run = save(
+  const correctionRunning = persistCheckpoint(
     ctx,
     transition(run, 'RUNNING_CLAUDE', `Correção pós-auditoria ${String(cycle)}.`),
+    `correção pós-auditoria ${String(cycle)}: entrada em RUNNING_CLAUDE`,
   );
+  if (!correctionRunning.ok) return correctionRunning;
+  run = correctionRunning.value;
 
   /* Mesma razão do reparo de CI: este corretor produz um commit novo sobre a
      branch que vai para o merge, então as Skills da rodada valem aqui também. */
   const skillsForCorrection = verifyRunSkills(run);
   if (!skillsForCorrection.ok) {
-    run = save(ctx, stopRunBySkillMutation(run, skillsForCorrection.error.message));
+    run = saveStop(ctx, stopRunBySkillMutation(run, skillsForCorrection.error.message));
     return ok(run);
   }
 
@@ -2282,7 +2785,7 @@ async function correctAfterAudit(
   if (afterCorrectionAgent) return ok(afterCorrectionAgent);
 
   if (!claude.ok) {
-    run = save(ctx, {
+    run = saveStop(ctx, {
       ...finishMergeCorrection(run, cycle, 'AGENT_FAILED', null),
       ...transition(run, 'BLOCKED', `O executor falhou na correção pós-auditoria ${String(cycle)}.`),
       lastError: claude.error,
@@ -2293,7 +2796,7 @@ async function correctAfterAudit(
   const changed = await ctx.ports.git.changedFiles(ctx.workingDir);
   if (!changed.ok) return changed;
   if (changed.value.length === 0) {
-    run = save(
+    run = saveStop(
       ctx,
       transition(
         finishMergeCorrection(run, cycle, 'NO_CHANGES', null),
@@ -2304,7 +2807,14 @@ async function correctAfterAudit(
     return ok(run);
   }
 
-  run = save(ctx, transition(run, 'RUNNING_TESTS', 'Validando a correção pós-auditoria.'));
+  const correctionTests = persistCheckpoint(
+    ctx,
+    transition(run, 'RUNNING_TESTS', 'Validando a correção pós-auditoria.'),
+    `correção pós-auditoria ${String(cycle)}: entrada nos testes`,
+  );
+  if (!correctionTests.ok) return correctionTests;
+  run = correctionTests.value;
+
   ctx.control.setStep(`correção pós-auditoria ${String(cycle)}: testes locais`);
   const tests = await ctx.ports.tests.run({
     commands: ctx.policy.commands.tests,
@@ -2313,7 +2823,13 @@ async function correctAfterAudit(
     signal: ctx.signal,
   });
   writeExclusiveSync(path.join(dir, 'tests.json'), `${JSON.stringify(tests, null, 2)}\n`);
-  run = save(ctx, { ...run, finalTests: tests });
+  const correctionTestsSaved = persistCheckpoint(
+    ctx,
+    { ...run, finalTests: tests },
+    `correção pós-auditoria ${String(cycle)}: resultado dos testes`,
+  );
+  if (!correctionTestsSaved.ok) return correctionTestsSaved;
+  run = correctionTestsSaved.value;
 
   const afterCorrectionTests = haltIfRequested(
     ctx,
@@ -2323,7 +2839,7 @@ async function correctAfterAudit(
   if (afterCorrectionTests) return ok(afterCorrectionTests);
 
   if (!tests.passed) {
-    run = save(
+    run = saveStop(
       ctx,
       transition(
         finishMergeCorrection(run, cycle, 'TESTS_FAILED', null),
@@ -2344,23 +2860,42 @@ async function correctAfterAudit(
   );
   if (beforeCorrectionCommit) return ok(beforeCorrectionCommit);
 
-  const staged = await ctx.ports.git.addPaths(ctx.workingDir, changed.value);
-  if (!staged.ok) return staged;
-
   const message =
     `${ctx.policy.git.commitMessagePrefix} ${ctx.project.id}: correção pós-auditoria ${String(cycle)}`.trim();
-  const commit = await ctx.ports.git.commit(ctx.workingDir, message);
+  const correctionKey = `merge-correction-${String(cycle)}`;
+
+  /* Mesmo write-ahead log do commit de prompt: a correção também escreve na
+     branch que segue para o merge. */
+  const commit = await commitWithJournal(ctx, run, {
+    promptId: correctionKey,
+    attempt: cycle,
+    message,
+    changedFiles: changed.value,
+  });
   if (!commit.ok) return commit;
 
-  run = save(ctx, {
-    ...run,
-    commits: [
-      ...run.commits,
-      { promptId: `merge-correction-${String(cycle)}`, sha: commit.value, message, at: nowIso() },
-    ],
-  });
+  const correctionCommitSaved = persistCheckpoint(
+    ctx,
+    {
+      ...run,
+      commits: [
+        ...run.commits,
+        { promptId: correctionKey, sha: commit.value.sha, message, at: nowIso() },
+      ],
+    },
+    `correção pós-auditoria ${String(cycle)}: registro do commit`,
+  );
+  if (!correctionCommitSaved.ok) return correctionCommitSaved;
+  run = correctionCommitSaved.value;
+  settleCommitIntent(ctx.project.id, run.runId, commit.value.operationId, 'COMMITTED', commit.value.sha);
 
-  run = save(ctx, transition(run, 'PUSHING', 'Enviando a correção pós-auditoria.'));
+  const correctionPush = persistCheckpoint(
+    ctx,
+    transition(run, 'PUSHING', 'Enviando a correção pós-auditoria.'),
+    `correção pós-auditoria ${String(cycle)}: entrada em PUSHING`,
+  );
+  if (!correctionPush.ok) return correctionPush;
+  run = correctionPush.value;
   const pushed = await ctx.ports.git.push(
     ctx.workingDir,
     ctx.policy.repository.remote,
@@ -2368,15 +2903,21 @@ async function correctAfterAudit(
     false,
   );
   if (!pushed.ok) {
-    run = save(ctx, {
-      ...finishMergeCorrection(run, cycle, 'AGENT_FAILED', commit.value),
+    run = saveStop(ctx, {
+      ...finishMergeCorrection(run, cycle, 'AGENT_FAILED', commit.value.sha),
       ...transition(run, 'BLOCKED', 'Falha ao enviar a correção pós-auditoria.'),
       lastError: pushed.error,
     });
     return ok(run);
   }
 
-  run = save(ctx, finishMergeCorrection(run, cycle, 'CORRECTED', commit.value));
+  const correctionDone = persistCheckpoint(
+    ctx,
+    finishMergeCorrection(run, cycle, 'CORRECTED', commit.value.sha),
+    `correção pós-auditoria ${String(cycle)}: conclusão`,
+  );
+  if (!correctionDone.ok) return correctionDone;
+  run = correctionDone.value;
 
   /* Head novo exige CI novo: auditar sobre um commit cujo CI não rodou seria
      aprovar sem a evidência que o próprio gate exige. */
@@ -3006,16 +3547,27 @@ function canProceedToAudit(run: RunRecord): boolean {
  * A falha de escrita não é descartada: fica em `ctx.persistError` e vira parada
  * explícita no próximo portão crítico (`assertPersistence`).
  */
-function save(ctx: Context, run: RunRecord, mode: IntentWriteMode = 'MERGE'): RunRecord {
+/**
+ * Persiste e devolve o registro gravado, SEM interromper o fluxo em caso de
+ * falha.
+ *
+ * Reservado a um único uso: gravar um estado de PARADA (interrupção,
+ * cancelamento, bloqueio, falha), quando não há mais nenhuma etapa depois. Não
+ * existe efeito colateral a impedir, e lançar aqui trocaria a causa real da
+ * parada por um erro de escrita. A falha ainda é registrada e logada.
+ *
+ * Para qualquer gravação seguida de trabalho — chamada de IA, teste, Git,
+ * publicação, merge — use `persistCheckpoint`, que devolve `Result` e obriga o
+ * chamador a decidir.
+ */
+function saveStop(ctx: Context, run: RunRecord, mode: IntentWriteMode = 'MERGE'): RunRecord {
   const saved = saveRun(run, mode);
   if (!saved.ok) {
-    if (ctx.persistError === null) {
-      ctx.persistError = saved.error;
-      ctx.logger.error(
-        `Falha ao persistir o estado da execução ${run.runId}: ${saved.error.message}`,
-        { code: saved.error.code },
-      );
-    }
+    if (ctx.persistError === null) ctx.persistError = saved.error;
+    ctx.logger.error(
+      `Falha ao persistir o estado de parada da execução ${run.runId}: ${saved.error.message}`,
+      { code: saved.error.code },
+    );
     ctx.onUpdate?.(run);
     return run;
   }
@@ -3024,20 +3576,56 @@ function save(ctx: Context, run: RunRecord, mode: IntentWriteMode = 'MERGE'): Ru
 }
 
 /**
- * Portão de persistência: recusa avançar quando o estado não pôde ser gravado.
+ * Checkpoint FAIL-CLOSED: grava o estado e devolve `Result`.
  *
- * Sem ele, uma execução seguiria chamando IA, criando commits e abrindo PRs com
- * o disco parado numa versão antiga — e o operador só descobriria pela ausência
- * de qualquer rastro. É melhor parar declarando o motivo.
+ * Esta é a única forma legítima de gravar antes de qualquer coisa que produza
+ * efeito. O defeito que ela substitui: a versão anterior guardava o erro num
+ * campo do contexto e devolvia o objeto NÃO persistido, deixando a tentativa
+ * seguir — chamando testes, montando o pacote, chamando o Codex e commitando
+ * com o disco parado numa versão antiga. Um commit podia nascer sem que o
+ * estado persistido soubesse dele, que é exatamente o cenário que esta missão
+ * existe para eliminar.
+ *
+ * Quem chama é obrigado pelo tipo a tratar a falha, e a falha significa PARAR.
  */
-function assertPersistence(ctx: Context): Result<void> {
+function persistCheckpoint(
+  ctx: Context,
+  run: RunRecord,
+  step: string,
+  mode: IntentWriteMode = 'MERGE',
+): Result<RunRecord> {
+  const saved = saveRun(run, mode);
+  if (!saved.ok) {
+    if (ctx.persistError === null) ctx.persistError = saved.error;
+    ctx.logger.error(
+      `Estado não pôde ser persistido em "${step}" (${run.runId}): ${saved.error.message}. ` +
+        'A execução para aqui; nenhuma etapa posterior começa.',
+      { code: saved.error.code, step },
+    );
+    ctx.onUpdate?.(run);
+    return fail(
+      saved.error.code,
+      `Execução interrompida em "${step}": o estado não pôde ser persistido (${saved.error.message}). ` +
+        'Avançar sem registro deixaria trabalho sem rastro e retomada impossível.',
+      { ...(saved.error.details ?? {}), step, runId: run.runId },
+    );
+  }
+  ctx.onUpdate?.(saved.value);
+  return ok(saved.value);
+}
+
+/**
+ * Portão de persistência para pontos que não acabaram de gravar nada, mas estão
+ * prestes a produzir efeito. Recusa avançar se ALGUMA gravação anterior falhou.
+ */
+function assertPersistence(ctx: Context, step: string): Result<void> {
   const error = ctx.persistError;
   if (error === null) return ok(undefined);
   return fail(
     error.code,
-    `Execução interrompida: o estado não pôde ser persistido (${error.message}). ` +
+    `Execução interrompida em "${step}": o estado não pôde ser persistido (${error.message}). ` +
       'Avançar sem registro deixaria trabalho sem rastro e retomada impossível.',
-    error.details,
+    { ...(error.details ?? {}), step },
   );
 }
 
@@ -3168,7 +3756,7 @@ function haltIfRequested(ctx: Context, run: RunRecord, step: string): RunRecord 
   ctx.control.setStep(step);
   const stop = externalStop(ctx, run);
   if (stop === null) return null;
-  return save(ctx, applyExternalStop(ctx, run, stop, step));
+  return saveStop(ctx, applyExternalStop(ctx, run, stop, step));
 }
 
 function mapAgentErrorState(code: string): RunState {

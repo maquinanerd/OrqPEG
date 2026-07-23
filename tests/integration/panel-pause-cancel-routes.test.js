@@ -50,6 +50,12 @@ const { ensureDataLayout, projectPromptsDir } = require('../../dist/utils/paths'
 const { createRunInput } = require('../helpers/policy');
 
 const {
+  registerRun,
+  releaseRun,
+  resetRunControlForTests,
+} = require('../../dist/execution/run-control');
+
+const {
   isAlive,
   killAllWitnesses,
   runLongChild,
@@ -223,6 +229,12 @@ function longPorts(workDir, registry) {
       async commitLog() {
         return OK('');
       },
+      async listCommitsSince() {
+        return OK([]);
+      },
+      async commitChangedFiles() {
+        return OK([]);
+      },
     },
     worktree: {
       async prepare(input) {
@@ -287,9 +299,15 @@ test('POST /pause responde 200 apenas depois de o controlador vivo aceitar', asy
   const registry = [];
   const witness = spawnWitness();
 
-  let response = null;
-  const stopTrigger = whenProcessStarts(path.join(workDir, 'pids-claude-0.json'), async () => {
-    response = await post(`/api/projects/${project.id}/pause`);
+  /*
+   * A resposta é aguardada SEPARADAMENTE da execução: a rota confirma o
+   * término antes de responder, e `runProject` resolve no mesmo instante em
+   * que o controlador é liberado. Ler `response` logo após a execução leria
+   * uma requisição ainda em voo.
+   */
+  let responsePromise = null;
+  const stopTrigger = whenProcessStarts(path.join(workDir, 'pids-claude-0.json'), () => {
+    responsePromise = post(`/api/projects/${project.id}/pause`);
   });
 
   const result = await runProject({
@@ -301,11 +319,19 @@ test('POST /pause responde 200 apenas depois de o controlador vivo aceitar', asy
   });
   stopTrigger();
 
+  assert.equal(responsePromise !== null, true, 'a rota não chegou a ser chamada');
+  const response = await responsePromise;
+
   assert.equal(result.ok, true, result.ok ? '' : JSON.stringify(result.error));
-  assert.equal(response !== null, true, 'a rota não chegou a ser chamada');
   assert.equal(response.status, 200, `resposta inesperada: ${response.body}`);
   assert.equal(response.json.paused, true);
   assert.equal(response.json.accepted, true, 'a rota respondeu sucesso sem aceitação do controlador');
+  assert.equal(
+    response.json.terminated,
+    true,
+    'a rota respondeu 200 sem confirmar o encerramento da árvore',
+  );
+  assert.equal(response.json.intentPersisted, true, 'a intenção não foi declarada como persistida');
   assert.equal(typeof response.json.step, 'string');
   assert.equal(response.json.runId, result.value.runId);
 
@@ -328,10 +354,13 @@ test('POST /cancel é idempotente antes e depois do término da execução', asy
   const workDir = tempDir('orqpeg-route-cancel-');
   const registry = [];
 
-  const respostas = [];
-  const stopTrigger = whenProcessStarts(path.join(workDir, 'pids-claude-0.json'), async () => {
-    respostas.push(await post(`/api/projects/${project.id}/cancel`));
-    respostas.push(await post(`/api/projects/${project.id}/cancel`));
+  let respostasPromise = null;
+  const stopTrigger = whenProcessStarts(path.join(workDir, 'pids-claude-0.json'), () => {
+    /* As duas chamadas partem juntas e são resolvidas depois: cada uma aguarda
+       a confirmação de término antes de responder. */
+    const primeira = post(`/api/projects/${project.id}/cancel`);
+    const segunda = primeira.then(() => post(`/api/projects/${project.id}/cancel`));
+    respostasPromise = Promise.all([primeira, segunda]);
   });
 
   const result = await runProject({
@@ -346,13 +375,13 @@ test('POST /cancel é idempotente antes e depois do término da execução', asy
   assert.equal(result.ok, true, result.ok ? '' : JSON.stringify(result.error));
   assert.equal(result.value.state, 'CANCELLED');
 
+  assert.equal(respostasPromise !== null, true, 'as chamadas não aconteceram');
+  const respostas = await respostasPromise;
   assert.equal(respostas.length, 2, 'as duas chamadas precisavam ter acontecido');
   for (const resposta of respostas) {
     assert.equal(resposta.status, 200, `resposta inesperada: ${resposta.body}`);
     assert.equal(resposta.json.cancelled, true);
   }
-  assert.equal(respostas[0].json.alreadyRequested, false);
-  assert.equal(respostas[1].json.alreadyRequested, true);
 
   const pids = registry.flatMap((entry) => [entry.pid, entry.grandchildPid]);
   assert.equal(await waitUntilDead(pids), true);
@@ -387,9 +416,11 @@ test('erro ao persistir a pausa responde 500 e NÃO reporta sucesso', async () =
   const criado = runState.saveRun(run);
   assert.equal(criado.ok, true);
 
-  const original = runState.saveRun;
+  /* A fronteira persiste a intenção por `recordRunIntent`, que faz a leitura e
+     a escrita dentro do mesmo lock de estado. É ele o ponto de injeção. */
+  const original = runState.recordRunIntent;
   let chamadas = 0;
-  runState.saveRun = (...args) => {
+  runState.recordRunIntent = () => {
     chamadas += 1;
     return {
       ok: false,
@@ -401,12 +432,13 @@ test('erro ao persistir a pausa responde 500 e NÃO reporta sucesso', async () =
   try {
     resposta = await post(`/api/projects/${project.id}/pause`);
   } finally {
-    runState.saveRun = original;
+    runState.recordRunIntent = original;
   }
 
   assert.equal(chamadas, 1, 'a rota não tentou persistir a intenção');
   assert.equal(resposta.status, 500, `resposta inesperada: ${resposta.body}`);
   assert.equal(resposta.json.paused, false, 'a API declarou pausa que não foi registrada');
+  assert.equal(resposta.json.intentPersisted, false);
   assert.equal(resposta.json.code, 'IO_FAILED');
   assert.match(resposta.json.error, /NÃO foi registrada/);
 
@@ -426,8 +458,8 @@ test('erro ao persistir o cancelamento responde 500 e NÃO reporta sucesso', asy
   const criado = runState.saveRun(run);
   assert.equal(criado.ok, true);
 
-  const original = runState.saveRun;
-  runState.saveRun = () => ({
+  const original = runState.recordRunIntent;
+  runState.recordRunIntent = () => ({
     ok: false,
     error: { code: 'STATE_REGRESSION', message: 'gravação obsoleta (falha injetada)' },
   });
@@ -436,7 +468,7 @@ test('erro ao persistir o cancelamento responde 500 e NÃO reporta sucesso', asy
   try {
     resposta = await post(`/api/projects/${project.id}/cancel`);
   } finally {
-    runState.saveRun = original;
+    runState.recordRunIntent = original;
   }
 
   assert.equal(resposta.status, 500, `resposta inesperada: ${resposta.body}`);
@@ -474,6 +506,62 @@ test('sem execução nenhuma o cancelamento responde 404', async () => {
   const project = makeProject();
   const resposta = await post(`/api/projects/${project.id}/cancel`);
   assert.equal(resposta.status, 404, `resposta inesperada: ${resposta.body}`);
+});
+
+/* ------------------------------------------------------------------------ */
+/* Janela antes de o RunRecord existir                                       */
+/* ------------------------------------------------------------------------ */
+
+test('pausa imediata, com controlador vivo e SEM RunRecord, NÃO responde 404', async () => {
+  const project = makeProject();
+
+  /*
+   * A janela real: `runProject` publica o controlador antes do primeiro
+   * `await`, mas o registro em disco só nasce depois da validação. A rota
+   * antiga procurava o registro primeiro e respondia 404 a um pedido que
+   * tinha quem atender.
+   */
+  const controller = registerRun({ projectId: project.id });
+  assert.notEqual(controller, null);
+  assert.equal(controller.runId, null, 'o cenário exige que o runId ainda não exista');
+
+  try {
+    const resposta = await post(`/api/projects/${project.id}/pause`);
+
+    assert.notEqual(resposta.status, 404, `a rota respondeu 404 na janela: ${resposta.body}`);
+    assert.equal(resposta.status, 202, `resposta inesperada: ${resposta.body}`);
+    assert.equal(resposta.json.paused, true);
+    assert.equal(resposta.json.accepted, true, 'o controlador vivo não recebeu o pedido');
+    assert.equal(
+      resposta.json.terminated,
+      false,
+      'a rota afirmou encerramento sem que nada tivesse terminado',
+    );
+
+    /* O pedido chegou ao controlador e abortou o sinal: nenhuma etapa
+       posterior pode começar. */
+    assert.equal(controller.signal.aborted, true, 'o sinal não foi abortado');
+    assert.equal(controller.intent, 'PAUSE');
+  } finally {
+    releaseRun(controller);
+    resetRunControlForTests();
+  }
+});
+
+test('cancelamento imediato na mesma janela é aceito e marca intenção terminal', async () => {
+  const project = makeProject();
+  const controller = registerRun({ projectId: project.id });
+
+  try {
+    const resposta = await post(`/api/projects/${project.id}/cancel`);
+    assert.notEqual(resposta.status, 404, `a rota respondeu 404 na janela: ${resposta.body}`);
+    assert.equal(resposta.json.cancelled, true);
+    assert.equal(resposta.json.accepted, true);
+    assert.equal(controller.intent, 'CANCEL');
+  } finally {
+    releaseRun(controller);
+    resetRunControlForTests();
+  }
 });
 
 /* ------------------------------------------------------------------------ */

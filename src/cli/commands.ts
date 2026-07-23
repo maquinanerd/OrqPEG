@@ -16,14 +16,7 @@ import {
 import { normalizeProjectConfig, validateProjectConfig } from '../projects/project-validator';
 import { toSlug } from '../projects/slug';
 import { discoverPrompts, ensurePromptsDir } from '../prompts/prompt-store';
-import {
-  findActiveRun,
-  latestRun,
-  listRuns,
-  requestCancel,
-  requestPause,
-  saveRun,
-} from '../state/run-state';
+import { findActiveRun, latestRun, listRuns, recordRunIntent } from '../state/run-state';
 import { runProject, describeRunState } from '../execution/orchestrator';
 import { createDefaultPorts } from '../execution/default-ports';
 import { buildDryRunPlan, renderDryRunPlan } from '../execution/dry-run';
@@ -554,14 +547,18 @@ async function commandPause(args: string[]): Promise<number> {
     return EXIT_OK;
   }
   /*
-   * A intenção é PERSISTIDA primeiro e o controlador vivo é acionado depois.
+   * A intenção é PERSISTIDA primeiro, por um caminho SERIALIZADO, e o
+   * controlador vivo é acionado depois.
    *
-   * Uma pausa que não chega ao disco não sobrevive a nada — nem a um reinício,
-   * nem à retomada — então falhar a gravação precisa reprovar o comando em vez
-   * de interromper o trabalho sem deixar registro do porquê.
+   * `recordRunIntent` relê o registro e grava dentro do mesmo lock de estado.
+   * A versão anterior lia aqui (`findActiveRun`) e gravava depois: entre uma
+   * coisa e outra o orquestrador podia gravar progresso a partir da mesma
+   * revisão, e a pausa desaparecia. Uma pausa que não chega ao disco não
+   * sobrevive a nada — nem a um reinício, nem à retomada — então falhar a
+   * gravação precisa reprovar o comando em vez de interromper o trabalho sem
+   * deixar registro do porquê.
    */
-  const paused = requestPause(active.value);
-  const saved = saveRun(paused);
+  const saved = recordRunIntent(projectId, active.value.runId, 'PAUSE');
   if (!saved.ok) {
     print('  A pausa NÃO foi registrada. Nada foi interrompido.');
     print(formatError(saved.error));
@@ -660,8 +657,7 @@ async function commandCancel(args: string[]): Promise<number> {
     return EXIT_OK;
   }
 
-  const cancelled = requestCancel(active.value);
-  const saved = saveRun(cancelled);
+  const saved = recordRunIntent(projectId, active.value.runId, 'CANCEL');
   if (!saved.ok) {
     print('  O cancelamento NÃO foi registrado. Nada foi interrompido.');
     print(formatError(saved.error));
