@@ -330,6 +330,8 @@ export function createRun(input: CreateRunInput): RunRecord {
     schemaVersion: 1,
     runId: newRunId(),
     projectId: input.projectId,
+    /* Nasce em zero: a primeira gravação bem-sucedida a leva para 1. */
+    revision: 0,
     state: 'IDLE',
     previousState: null,
     createdAt: at,
@@ -393,10 +395,36 @@ export function createRun(input: CreateRunInput): RunRecord {
 /* ------------------------------------------------------------------------- */
 
 /**
- * Grava o registro de forma atômica. `updatedAt` é carimbado no próprio objeto
- * recebido para que o chamador continue com o registro coerente com o disco.
+ * Modo de escrita da intenção de pausa/cancelamento.
+ *
+ * `MERGE` (padrão): as marcas `pauseRequested` e `cancelRequested` são
+ * MONOTÔNICAS — uma gravação nunca as apaga. É o que impede o caso real em que
+ * o painel registra a pausa enquanto o orquestrador segura uma cópia antiga do
+ * registro e, na gravação seguinte, devolve `false` por cima do pedido.
+ *
+ * `REPLACE`: a intenção do registro entregue vale como autoridade, inclusive
+ * para desligá-la. Existe para UM caso e só ele: a retomada, que começa
+ * deliberadamente com a folha limpa. Passar `REPLACE` em qualquer outro lugar
+ * reabre exatamente o defeito que `MERGE` fecha.
  */
-export function saveRun(run: RunRecord): Result<void> {
+export type IntentWriteMode = 'MERGE' | 'REPLACE';
+
+/**
+ * Grava o registro de forma atômica, com compare-and-swap por revisão.
+ *
+ * O que a função devolve é o registro REALMENTE persistido — com a revisão
+ * nova e a intenção já reconciliada com o disco. Quem grava deve continuar com
+ * esse valor: é assim que o orquestrador enxerga, na volta seguinte do laço,
+ * uma pausa pedida pelo painel no meio de uma etapa.
+ *
+ * Três garantias:
+ *  1. a revisão só cresce, mesmo quando o registro em memória está atrasado;
+ *  2. em `MERGE`, intenção registrada no disco nunca é apagada;
+ *  3. progresso não retrocede: uma escrita obsoleta que apagaria commits já
+ *     persistidos é RECUSADA com `STATE_REGRESSION` em vez de aceita em
+ *     silêncio.
+ */
+export function saveRun(run: RunRecord, mode: IntentWriteMode = 'MERGE'): Result<RunRecord> {
   const projectCheck = validateIdentifier(run.projectId, 'id do projeto');
   if (!projectCheck.ok) return projectCheck;
   const runCheck = validateIdentifier(run.runId, 'id da execução');
@@ -413,8 +441,159 @@ export function saveRun(run: RunRecord): Result<void> {
     );
   }
 
-  run.updatedAt = nowIso();
-  return writeJsonAtomicSync(runStatePath(projectCheck.value, runCheck.value), run);
+  const filePath = runStatePath(projectCheck.value, runCheck.value);
+  const onDisk = readPersistedRun(filePath, projectCheck.value, runCheck.value);
+
+  const incomingRevision = normalizeRevision(run.revision);
+  const diskRevision = onDisk === null ? -1 : normalizeRevision(onDisk.revision);
+  const stale = diskRevision > incomingRevision;
+
+  if (stale && onDisk !== null) {
+    const regression = describeProgressRegression(onDisk, run);
+    if (regression !== null) {
+      return fail(
+        'STATE_REGRESSION',
+        `Gravação obsoleta recusada para ${projectCheck.value}/${runCheck.value}: ${regression}. ` +
+          `O disco está na revisão ${String(diskRevision)} e a gravação veio da revisão ${String(incomingRevision)}.`,
+        {
+          projectId: projectCheck.value,
+          runId: runCheck.value,
+          diskRevision,
+          incomingRevision,
+          reason: regression,
+        },
+      );
+    }
+  }
+
+  const merged: RunRecord = { ...run };
+  merged.revision = Math.max(incomingRevision, diskRevision) + 1;
+
+  if (mode === 'MERGE' && onDisk !== null) {
+    merged.pauseRequested = run.pauseRequested || onDisk.pauseRequested === true;
+    merged.cancelRequested = run.cancelRequested || onDisk.cancelRequested === true;
+  }
+
+  merged.updatedAt = nowIso();
+
+  const written = writeJsonAtomicSync(filePath, merged);
+  if (!written.ok) return written;
+
+  /*
+   * O objeto do chamador é carimbado com o que foi de fato gravado.
+   *
+   * Chamadores antigos guardavam a referência e continuavam usando-a depois do
+   * `saveRun`; devolver só a cópia deixaria essas referências com a revisão
+   * velha, e a gravação seguinte pareceria obsoleta sem motivo.
+   */
+  run.revision = merged.revision;
+  run.updatedAt = merged.updatedAt;
+  run.pauseRequested = merged.pauseRequested;
+  run.cancelRequested = merged.cancelRequested;
+
+  return ok(merged);
+}
+
+/**
+ * Registra a intenção externa (pausa ou cancelamento) sobre o estado MAIS
+ * RECENTE do disco, com repetição limitada em caso de corrida.
+ *
+ * Quem pede pausa pela API não tem o registro em mãos — tem um identificador.
+ * Reler imediatamente antes de gravar fecha a janela em que o orquestrador
+ * gravou algo entre a leitura do handler e a escrita.
+ */
+export function recordRunIntent(
+  projectId: string,
+  runId: string,
+  intent: 'PAUSE' | 'CANCEL',
+): Result<RunRecord> {
+  const MAX_ATTEMPTS = 3;
+  let lastError: Result<RunRecord> | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    const loaded = loadRun(projectId, runId);
+    if (!loaded.ok) return loaded;
+
+    const marked = intent === 'CANCEL' ? requestCancel(loaded.value) : requestPause(loaded.value);
+    const saved = saveRun(marked);
+    if (saved.ok) return saved;
+    if (saved.error.code !== 'STATE_REGRESSION') return saved;
+    lastError = saved;
+  }
+
+  return (
+    lastError ??
+    fail('STATE_REGRESSION', `Não foi possível registrar a intenção em ${projectId}/${runId}.`, {
+      projectId,
+      runId,
+      intent,
+    })
+  );
+}
+
+/** Lê apenas a intenção persistida, sem validar o registro inteiro. */
+export function readPersistedIntent(
+  projectId: string,
+  runId: string,
+): { pauseRequested: boolean; cancelRequested: boolean; revision: number } | null {
+  const projectCheck = validateIdentifier(projectId, 'id do projeto');
+  if (!projectCheck.ok) return null;
+  const runCheck = validateIdentifier(runId, 'id da execução');
+  if (!runCheck.ok) return null;
+
+  const filePath = runStatePath(projectCheck.value, runCheck.value);
+  const read = readJsonSync<Record<string, unknown>>(filePath);
+  if (!read.ok) return null;
+
+  return {
+    pauseRequested: read.value['pauseRequested'] === true,
+    cancelRequested: read.value['cancelRequested'] === true,
+    revision: normalizeRevision(read.value['revision']),
+  };
+}
+
+function normalizeRevision(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+/** Lê o registro do disco para o compare-and-swap, sem exigir validade total. */
+function readPersistedRun(
+  filePath: string,
+  projectId: string,
+  runId: string,
+): RunRecord | null {
+  if (!fileExists(filePath)) return null;
+  const read = readJsonSync<unknown>(filePath);
+  if (!read.ok) return null;
+  const validated = validateRunRecord(read.value, filePath, { projectId, runId });
+  return validated.ok ? validated.value : null;
+}
+
+/**
+ * Descreve a perda de progresso que a gravação causaria, ou `null` quando não
+ * há perda.
+ *
+ * Só é consultada quando a gravação já se sabe obsoleta. Em operação normal —
+ * um único escritor por execução — revisões coincidem e este caminho nunca é
+ * percorrido; quando ele dispara, há de fato dois escritores, e a recusa é o
+ * que impede que o mais lento apague o trabalho do mais rápido.
+ */
+function describeProgressRegression(disk: RunRecord, incoming: RunRecord): string | null {
+  if (disk.commits.length > incoming.commits.length) {
+    return `o disco tem ${String(disk.commits.length)} commit(s) e a gravação traria ${String(incoming.commits.length)}`;
+  }
+
+  const approvedOnDisk = disk.prompts.filter((prompt) => prompt.status === 'APPROVED').length;
+  const approvedIncoming = incoming.prompts.filter((prompt) => prompt.status === 'APPROVED').length;
+  if (approvedOnDisk > approvedIncoming) {
+    return `o disco tem ${String(approvedOnDisk)} prompt(s) aprovado(s) e a gravação traria ${String(approvedIncoming)}`;
+  }
+
+  if (isTerminal(disk.state) && !isTerminal(incoming.state)) {
+    return `o disco já está no estado terminal ${disk.state} e a gravação traria ${incoming.state}`;
+  }
+
+  return null;
 }
 
 export function loadRun(projectId: string, runId: string): Result<RunRecord> {
@@ -637,8 +816,13 @@ export function invalidateMergeApprovals(run: RunRecord, reason: string): RunRec
 /* ------------------------------------------------------------------------- */
 
 /**
- * Marca o pedido de pausa. O orquestrador honra a marcação no próximo ponto
- * seguro do ciclo; nenhum processo em andamento é morto por aqui.
+ * Marca o pedido de pausa NO REGISTRO.
+ *
+ * Esta é a metade persistente do mecanismo: é o que sobrevive a um reinício e
+ * o que uma execução hospedada em OUTRO processo enxerga. A metade que
+ * interrompe o processo filho em curso é o controlador vivo
+ * (`execution/run-control`), acionado pela mesma rota/comando que chama esta
+ * função. Sozinha, esta marca não para nada — foi exatamente esse o defeito.
  */
 export function requestPause(run: RunRecord): RunRecord {
   const at = nowIso();
@@ -656,7 +840,11 @@ export function requestPause(run: RunRecord): RunRecord {
   return updated;
 }
 
-/** Marca o pedido de cancelamento, honrado no próximo ponto seguro do ciclo. */
+/**
+ * Marca o pedido de cancelamento NO REGISTRO. Idempotente: repetir não produz
+ * efeito adicional além de mais um evento na linha do tempo. A interrupção do
+ * processo filho vem do controlador vivo, não daqui.
+ */
 export function requestCancel(run: RunRecord): RunRecord {
   const at = nowIso();
   const updated = appendEvent(run, {
@@ -769,6 +957,9 @@ function validateRunRecord(
    * chama `requireEffectivePolicy` e recebe `POLICY_SNAPSHOT_MISSING`.
    */
   const record = value as RunRecord;
+  /* Execuções gravadas antes do compare-and-swap existir entram na revisão
+     zero: a primeira gravação nova já as coloca à frente. */
+  record.revision = normalizeRevision(record.revision);
   if (record.effectivePolicy === undefined) record.effectivePolicy = null;
   if (record.sourceSnapshots === undefined) record.sourceSnapshots = null;
   /* Execução gravada antes das Skills entrarem na execução: ausência vira

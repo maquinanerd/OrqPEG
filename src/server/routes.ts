@@ -24,13 +24,21 @@ import {
 } from '../projects/project-store';
 import { normalizeProjectConfig, validateProjectConfig } from '../projects/project-validator';
 import { discoverPrompts, readPrompt } from '../prompts/prompt-store';
-import { findActiveRun, listRuns, loadRun, requestCancel, requestPause, saveRun } from '../state/run-state';
+import {
+  findActiveRun,
+  latestRun,
+  listRuns,
+  loadRun,
+  requestCancel,
+  requestPause,
+  saveRun,
+} from '../state/run-state';
 import { runDiagnostics } from '../cli/diagnostics';
 import { buildDryRunPlan } from '../execution/dry-run';
 import { buildRunReport } from '../reports/report-generator';
 import { readTextSync } from '../utils/fs-atomic';
 import { nowIso } from '../utils/time';
-import { startRunInBackground } from './run-manager';
+import { cancelRun, pauseRun, startRunInBackground } from './run-manager';
 import { openTarget } from './open-target';
 import { describeOverrides, grantManualOverride } from '../execution/override';
 import type { GrantOverrideOutput } from '../execution/override';
@@ -1008,6 +1016,20 @@ async function handleStartRun(ctx: RouteContext): Promise<void> {
   });
 }
 
+/**
+ * Pausa: persiste a intenção e SÓ ENTÃO aciona o controlador vivo.
+ *
+ * A ordem não é arbitrária. A marca no disco é o que sobrevive a um reinício e
+ * o que uma execução hospedada em outro processo enxerga; se ela não puder ser
+ * gravada, nada deve ser interrompido e a resposta precisa dizer isso. Antes,
+ * o `Result` da gravação era descartado e a API respondia 200 mesmo quando o
+ * pedido não chegava a lugar nenhum.
+ *
+ * `200` é reservado para o caso em que um controlador vivo NESTE processo
+ * aceitou o pedido. Quando só houve registro — execução em outro processo —
+ * a resposta é `202`: a intenção está gravada e será honrada, mas ninguém aqui
+ * pode afirmar que o processo filho já parou.
+ */
 async function handlePause(ctx: RouteContext): Promise<void> {
   const id = requireId(ctx, 0);
   if (id === null) return;
@@ -1016,10 +1038,41 @@ async function handlePause(ctx: RouteContext): Promise<void> {
     sendJson(ctx.res, 404, { error: 'Nenhuma execução ativa para pausar.' });
     return;
   }
+
   const paused = requestPause(active.value);
-  saveRun(paused);
-  ctx.deps.events.publishRun(paused, 'Pausa solicitada.');
-  sendJson(ctx.res, 200, { paused: true, runId: paused.runId });
+  const saved = saveRun(paused);
+  if (!saved.ok) {
+    sendJson(ctx.res, 500, {
+      error: `A pausa NÃO foi registrada: ${saved.error.message}`,
+      code: saved.error.code,
+      paused: false,
+    });
+    return;
+  }
+
+  const accepted = pauseRun(id);
+  ctx.deps.events.publishRun(saved.value, 'Pausa solicitada.');
+
+  if (accepted === null) {
+    sendJson(ctx.res, 202, {
+      paused: true,
+      accepted: false,
+      runId: saved.value.runId,
+      note:
+        'Intenção de pausa registrada. Nenhuma execução viva neste processo do painel: ' +
+        'se a rodada estiver na CLI, ela lerá a intenção e interromperá a etapa em curso.',
+    });
+    return;
+  }
+
+  sendJson(ctx.res, 200, {
+    paused: true,
+    accepted: true,
+    runId: saved.value.runId,
+    step: accepted.step,
+    alreadyRequested: accepted.alreadyRequested,
+    note: 'Processo filho da etapa em curso interrompido. Código, branch, worktree e artefatos preservados.',
+  });
 }
 
 async function handleResume(ctx: RouteContext): Promise<void> {
@@ -1059,21 +1112,72 @@ async function handleResume(ctx: RouteContext): Promise<void> {
   sendJson(ctx.res, 202, { resumed: true, runId: resumable.runId });
 }
 
+/**
+ * Cancelamento: idempotente por contrato.
+ *
+ * Cancelar duas vezes precisa responder sucesso nas duas. Como a primeira
+ * chamada leva a execução a um estado TERMINAL, a segunda não encontraria mais
+ * "execução ativa" e a rota respondia 404 — o operador leria "não havia nada
+ * para cancelar" logo depois de cancelar. A execução mais recente é consultada
+ * justamente para distinguir "nunca houve" de "já foi cancelada".
+ */
 async function handleCancel(ctx: RouteContext): Promise<void> {
   const id = requireId(ctx, 0);
   if (id === null) return;
+
   const active = findActiveRun(id);
   if (!active.ok || !active.value) {
+    const previous = latestRun(id);
+    const last = previous.ok ? previous.value : null;
+    if (last && (last.state === 'CANCELLED' || last.cancelRequested)) {
+      sendJson(ctx.res, 200, {
+        cancelled: true,
+        accepted: false,
+        alreadyCancelled: true,
+        runId: last.runId,
+        state: last.state,
+        note: 'A execução já estava cancelada. Nada foi alterado.',
+      });
+      return;
+    }
     sendJson(ctx.res, 404, { error: 'Nenhuma execução ativa para cancelar.' });
     return;
   }
+
   const cancelled = requestCancel(active.value);
-  saveRun(cancelled);
-  ctx.deps.events.publishRun(cancelled, 'Cancelamento solicitado.');
+  const saved = saveRun(cancelled);
+  if (!saved.ok) {
+    sendJson(ctx.res, 500, {
+      error: `O cancelamento NÃO foi registrado: ${saved.error.message}`,
+      code: saved.error.code,
+      cancelled: false,
+    });
+    return;
+  }
+
+  const accepted = cancelRun(id);
+  ctx.deps.events.publishRun(saved.value, 'Cancelamento solicitado.');
+
+  const note =
+    'Cancelamento seguro: código, branch, worktree, logs e artefatos são preservados.';
+
+  if (accepted === null) {
+    sendJson(ctx.res, 202, {
+      cancelled: true,
+      accepted: false,
+      runId: saved.value.runId,
+      note: `${note} Nenhuma execução viva neste processo do painel; a intenção ficou registrada.`,
+    });
+    return;
+  }
+
   sendJson(ctx.res, 200, {
     cancelled: true,
-    runId: cancelled.runId,
-    note: 'Cancelamento seguro: código, branch, worktree, logs e artefatos são preservados.',
+    accepted: true,
+    runId: saved.value.runId,
+    step: accepted.step,
+    alreadyRequested: accepted.alreadyRequested,
+    note: `${note} Processo filho da etapa em curso interrompido.`,
   });
 }
 

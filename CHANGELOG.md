@@ -5,6 +5,103 @@ Todas as mudanças relevantes deste projeto são documentadas neste arquivo.
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o
 versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [Não publicado]
+
+### Fixed
+
+#### Pausa e cancelamento passam a interromper de verdade
+
+- **`handlePause`/`handleCancel` e os comandos da CLI gravavam uma marca no
+  `RunRecord` que a execução em curso nunca relia.** O `AbortController` do
+  painel não chegava a lugar nenhum (`abortRun` sequer tinha chamador), e o
+  único ponto que consultava a intenção era o topo do laço de prompts — depois
+  de a etapa em andamento ter rodado até o fim. Na prática: botão apertado,
+  Claude, Codex ou a suíte de testes seguindo por até 60 minutos.
+- Novo `execution/run-control`: registro em memória, publicado pelo próprio
+  orquestrador, com `AbortController`, promessa de término, etapa corrente e
+  identidade da execução. Vale para execuções do painel **e** da CLI — antes só
+  as do painel apareciam em algum mapa.
+- Novo `execution/intent-watcher`: vigília da intenção PERSISTIDA, que é o que
+  faz `PAUSAR.cmd`, rodando em outro processo, interromper a etapa em curso de
+  uma rodada hospedada no painel. Não é polling entre etapas: ao detectar a
+  intenção, aborta na hora e derruba a árvore de processos.
+- O `AbortSignal` do controlador é propagado a **toda** chamada de agente e de
+  suíte de testes, e a interrupção é consultada entre as etapas INTERNAS de uma
+  tentativa — antes do Claude, depois do Claude, antes e depois dos testes,
+  antes e depois do Codex, antes do commit, do push, da PR, das auditorias e do
+  merge. Nenhuma etapa começa depois de a intenção ter sido aceita.
+- Cancelamento termina em `CANCELLED` e é idempotente: pedir de novo responde
+  sucesso, não gera segunda transição e não altera o registro.
+- `Ctrl+C` no painel agora **aguarda** o término real das execuções antes de
+  fechar (`shutdownRuns`), em vez de apenas sinalizar e sair deixando filhos
+  vivos.
+- Operações Git curtas (`add`, `commit`, `push`) continuam **não** recebendo o
+  sinal, por decisão explícita: matar um `git commit` a meio caminho deixaria
+  `.git/index.lock` e destruiria o worktree que a pausa existe para preservar.
+  Elas são bloqueadas antes de começar.
+
+#### A API não reporta mais sucesso pelo que não fez
+
+- `POST /pause` e `POST /cancel` descartavam o `Result` de `saveRun` e
+  respondiam `200` incondicionalmente. Agora: `500` quando a intenção não pôde
+  ser persistida (e nada é interrompido), `200` só depois que um controlador
+  vivo aceitou o pedido, e `202` quando houve apenas registro — a rodada está
+  em outro processo e ninguém aqui pode afirmar que o processo filho parou.
+- `POST /cancel` sobre uma execução já cancelada respondia `404`. Agora
+  responde `200` com `alreadyCancelled: true`.
+
+#### O `catch` do orquestrador não apaga mais o progresso
+
+- O `catch` externo gravava a referência de `run` capturada **antes** da
+  pipeline. Como a pipeline reatribui uma variável local, uma exceção no
+  terceiro prompt sobrescrevia o estado com a cópia inicial e apagava os dois
+  prompts aprovados e seus commits — e a retomada refazia trabalho aprovado.
+  Agora o registro é RELIDO do disco e a falha é acrescentada a ele.
+- Se a exceção veio de uma parada pedida pelo usuário, o desfecho honra a
+  intenção (`CANCELLED`/`INTERRUPTED`) em vez de rotular tudo como `FAILED`.
+
+#### Estado persistido com compare-and-swap
+
+- Novo campo `RunRecord.revision`, monotônico, incrementado por `saveRun`.
+  Execuções gravadas antes dele entram na revisão zero.
+- `saveRun` passa a devolver `Result<RunRecord>` com o registro REALMENTE
+  gravado: é por esse retorno que o orquestrador enxerga, na etapa seguinte,
+  uma pausa pedida pelo painel no meio de uma chamada de IA.
+- A intenção de pausa/cancelamento é **monotônica**: nenhuma gravação a apaga.
+  Só a retomada limpa a folha, gravando em modo `REPLACE` — e o faz de forma
+  deliberada e registrada.
+- Gravação obsoleta que apagaria commits, aprovações de prompt ou um estado
+  terminal é recusada com o novo código `STATE_REGRESSION`, em vez de aceita em
+  silêncio.
+- Novos `recordRunIntent` (relê antes de gravar, com repetição limitada em caso
+  de corrida) e `readPersistedIntent`.
+
+#### Retomada não duplica trabalho
+
+- `commitPrompt` recusa criar um segundo commit para um prompt que já tem
+  commit no registro. O caso real: a execução parou depois do commit e antes de
+  o estado alcançar a etapa seguinte; ao retomar, a tentativa recomeçava e
+  produzia um commit duplicado na branch que segue para o merge.
+- Uma tentativa abortada devolve o prompt de `RUNNING` para `PENDING`, sem
+  zerar o contador de tentativas: a tentativa custou assinatura e a retomada
+  não finge que ela não existiu.
+
+#### Falha de escrita não é mais descartada
+
+- O `save` interno registra a primeira falha de persistência no contexto e a
+  transforma em parada explícita nos portões críticos: antes de cada tentativa,
+  antes da publicação e antes do merge. Seguir chamando IA e commitando com o
+  disco parado numa versão antiga deixaria trabalho sem rastro e retomada
+  impossível.
+
+### Added
+
+- `tests/e2e/pause-cancel-control.test.js`, `tests/unit/process-tree-kill.test.js`,
+  `tests/integration/run-state-cas.test.js` e
+  `tests/integration/panel-pause-cancel-routes.test.js`: 34 testes novos que
+  exercitam PROCESSOS REAIS — com PID, com neto e com testemunhas irmãs que
+  precisam sobreviver — em vez de dublês de função que nunca resolvem.
+
 ## [1.0.0] - 2026-07-22
 
 Primeira versão do OrqPEG, o orquestrador local que coordena os executáveis

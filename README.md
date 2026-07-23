@@ -718,21 +718,52 @@ RETOMAR.cmd           :: continua de onde parou
 CANCELAR-ETAPA.cmd    :: cancelamento seguro da execução atual
 ```
 
+O controle tem **duas metades**, e as duas são obrigatórias:
+
+1. a **intenção persistida** no arquivo de estado — é ela que sobrevive a um
+   reinício e é ela que uma execução hospedada em outro processo enxerga;
+2. o **controlador vivo** da execução — um registro em memória com o
+   `AbortController`, a etapa corrente e a identidade da rodada.
+
+Quem pede pausa ou cancelamento grava a intenção **e** fala com o controlador.
+A API do painel só responde `200` depois que um controlador vivo aceitou o
+pedido; quando houve apenas registro (a rodada está em outro processo), ela
+responde `202` e diz isso na resposta. Se a intenção não puder ser gravada, a
+resposta é `500` e **nada é interrompido** — uma pausa que não chega ao disco
+não sobreviveria à retomada.
+
 Garantias:
 
-- **Pausar** grava a solicitação no estado. A etapa em andamento termina de
-  forma limpa; código, worktree, branch, commits e logs são preservados.
-- **Retomar** encontra a execução em `INTERRUPTED`, `BLOCKED`, `CI_FAILED`,
-  `AUTH_REQUIRED` ou `USAGE_LIMIT_REACHED` e continua dali. **Prompts já
-  aprovados não são reexecutados.**
-- **Cancelar** pede confirmação explícita e não executa nenhum reset
-  destrutivo, nenhuma limpeza e nenhuma remoção. Nada do seu trabalho é perdido.
-- `Ctrl+C` durante uma execução é tratado como interrupção: os processos filhos
-  são encerrados e o estado é gravado antes da saída.
+- **Pausar** persiste a intenção, **encerra a árvore de processos da etapa em
+  curso** (Claude, Codex ou a suíte de testes, com `taskkill /T /F` restrito ao
+  PID daquela árvore), impede o início da etapa seguinte e aguarda a terminação
+  antes de gravar um estado retomável. Código, worktree, branch, commits,
+  artefatos e tentativas consumidas são preservados.
+- **Retomar** relê o estado **do disco**, encontra a execução em `INTERRUPTED`,
+  `BLOCKED`, `CI_FAILED`, `AUTH_REQUIRED`, `USAGE_LIMIT_REACHED` ou
+  `LOOP_GUARD_TRIGGERED` e continua dali. **Prompts já aprovados não são
+  reexecutados, e um commit já registrado nunca é refeito.**
+- **Cancelar** pede confirmação explícita, encerra a árvore, impede qualquer
+  etapa, commit, push, PR ou merge posterior e termina em `CANCELLED`. É
+  **idempotente**: pedir de novo responde sucesso e não altera nada. Nenhum
+  reset destrutivo, nenhuma limpeza, nenhuma remoção.
+- `Ctrl+C` no painel interrompe as execuções vivas **e aguarda** o término real
+  antes de fechar, para não deixar processo órfão. Uma queda do processo
+  hospedeiro é registrada como `INTERRUPTED` sem marcar pausa nem cancelamento:
+  pausa, queda, cancelamento e falha continuam sendo quatro coisas distintas.
+
+Operações Git curtas (`commit`, `add`, `push`) **não** são mortas no meio de
+propósito: matar um `git commit` a meio caminho deixaria `.git/index.lock` para
+trás e destruiria justamente o worktree que a pausa existe para preservar. Elas
+são bloqueadas **antes de começar**, e é por isso que nenhum commit, push ou PR
+acontece depois de a intenção ter sido aceita.
 
 Todo o estado fica em `data/projects/<id>/state/<runId>.json`, escrito de forma
 atômica (arquivo temporário + `rename`), de modo que uma queda de energia não
-deixa um estado meio gravado.
+deixa um estado meio gravado. Cada gravação carrega uma **revisão** monotônica,
+usada como compare-and-swap: uma gravação que ficou para trás do disco não
+apaga a intenção registrada por outro caminho, e é recusada com
+`STATE_REGRESSION` se apagaria commits ou aprovações já persistidos.
 
 ---
 

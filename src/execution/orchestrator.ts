@@ -11,6 +11,7 @@ import type {
   LoopGuardTrigger,
   MergeReview,
   MergeReviewRecord,
+  OrqError,
   PromptBudget,
   ProjectConfig,
   PromptFile,
@@ -55,6 +56,7 @@ import {
   transition,
   updatePromptProgress,
 } from '../state/run-state';
+import type { IntentWriteMode } from '../state/run-state';
 import { listLocks, withLock } from '../state/locks';
 import { buildMergeAuditPackage, buildReviewPackage } from '../review/review-package';
 import type { AuditedPromptContent } from '../review/review-package';
@@ -120,6 +122,10 @@ import {
 import type { ResolvedSkills } from '../skills/skill-catalog';
 import { renderPullRequestBody } from './pr-body';
 import type { OrchestratorPorts } from './ports';
+import { registerRun, releaseRun } from './run-control';
+import type { RunController } from './run-control';
+import { watchPersistedIntent } from './intent-watcher';
+import type { IntentWatcher } from './intent-watcher';
 
 /**
  * Orquestrador do OrqPEG.
@@ -156,7 +162,26 @@ interface Context {
   config: GlobalConfig;
   logger: Logger;
   ports: OrchestratorPorts;
-  signal: AbortSignal | undefined;
+  /**
+   * Sinal do controlador vivo desta execução. SEMPRE definido.
+   *
+   * Antes ele era opcional e, na prática, nunca abortava: a pausa e o
+   * cancelamento gravavam uma marca no JSON que o laço em curso jamais relia.
+   * Agora ele é a mesma coisa que o `AbortSignal` de `run-control`, propagado a
+   * toda porta que cria processo filho.
+   */
+  signal: AbortSignal;
+  /** Controlador vivo: intenção corrente, etapa e identidade da execução. */
+  control: RunController;
+  /**
+   * Primeira falha de persistência observada, se houve.
+   *
+   * `save` não pode lançar (interromperia o fluxo em pontos onde há trabalho a
+   * preservar), mas o erro também não pode ser descartado: ele é registrado
+   * aqui e transformado em parada explícita nos portões críticos, antes de
+   * qualquer chamada de IA, commit, push, PR ou merge.
+   */
+  persistError: OrqError | null;
   onUpdate: ((run: RunRecord) => void) | undefined;
   prompts: PromptFile[];
   workingDir: string;
@@ -188,20 +213,51 @@ interface Context {
 /* ------------------------------------------------------------------------- */
 
 export async function runProject(options: RunOptions): Promise<Result<RunRecord>> {
-  const locked = await withLock(
-    {
-      scope: 'project',
-      key: options.projectId,
-      projectId: options.projectId,
-      operation: options.dryRun ? 'dry-run' : 'execução',
-    },
-    async () => executeWithinLock(options),
-  );
-  if (!locked.ok) return locked;
-  return locked.value;
+  /*
+   * O controlador é publicado ANTES de qualquer `await`.
+   *
+   * Isso não é detalhe de estilo: quem dispara a execução em segundo plano
+   * (`startRunInBackground`) precisa que o controlador já exista quando a
+   * chamada retorna, senão haveria uma janela — a aquisição do lock, a
+   * validação das CLIs — em que pausar ou cancelar não encontraria ninguém
+   * para atender e responderia sucesso sem ter parado nada.
+   */
+  const control = registerRun({
+    projectId: options.projectId,
+    externalSignal: options.signal,
+  });
+  if (control === null) {
+    return fail(
+      'LOCK_HELD',
+      `Já existe uma execução em andamento para o projeto "${options.projectId}" neste processo.`,
+      { projectId: options.projectId },
+    );
+  }
+
+  try {
+    const locked = await withLock(
+      {
+        scope: 'project',
+        key: options.projectId,
+        projectId: options.projectId,
+        operation: options.dryRun ? 'dry-run' : 'execução',
+      },
+      async () => executeWithinLock(options, control),
+    );
+    if (!locked.ok) return locked;
+    return locked.value;
+  } finally {
+    /* Limpeza em sucesso, falha, cancelamento e exceção — sem exceção. Deixar o
+       registro sujo faria a execução seguinte do mesmo projeto ser recusada
+       por um controlador que já não existe. */
+    releaseRun(control);
+  }
 }
 
-async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>> {
+async function executeWithinLock(
+  options: RunOptions,
+  control: RunController,
+): Promise<Result<RunRecord>> {
   const { logger, config, ports } = options;
 
   const projectResult = getProject(options.projectId);
@@ -251,7 +307,21 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
     if (!asserted.ok) return asserted;
     policy = asserted.value;
 
-    run = { ...loaded.value, pauseRequested: false, cancelRequested: false };
+    /*
+     * A retomada é o ÚNICO ponto em que a intenção é desligada, e por isso é o
+     * único que grava em modo `REPLACE`.
+     *
+     * Limpar apenas na memória não bastaria: a marca continuaria no disco, e a
+     * vigília de intenção — que existe justamente para enxergar pedidos vindos
+     * de outro processo — leria a pausa antiga e pararia a retomada no primeiro
+     * tique. Fica registrado no disco que a folha foi limpa deliberadamente.
+     */
+    const cleared = saveRun(
+      { ...loaded.value, pauseRequested: false, cancelRequested: false },
+      'REPLACE',
+    );
+    if (!cleared.ok) return cleared;
+    run = cleared.value;
     logger.info(
       `Retomando execução ${run.runId} no estado ${run.state}, sob a política congelada em ${policy.capturedAt}.`,
     );
@@ -298,12 +368,18 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
     );
   }
 
+  /* A identidade só existe agora; a partir daqui quem pedir pausa ou
+     cancelamento sabe exatamente qual execução está atendendo. */
+  control.bindRun(run.runId);
+
   const ctx: Context = {
     project,
     config,
     logger,
     ports,
-    signal: options.signal,
+    signal: control.signal,
+    control,
+    persistError: null,
     onUpdate: options.onUpdate,
     prompts,
     workingDir: run.workingDirectory ?? project.repositoryPath,
@@ -318,20 +394,86 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
     lastReviewEvidenceComplete: true,
   };
 
+  /* Vigília da intenção persistida: é o que faz `PAUSAR.cmd`, rodando em outro
+     processo, interromper de fato o processo filho desta execução. */
+  const watcher: IntentWatcher = watchPersistedIntent({
+    projectId: project.id,
+    runId: run.runId,
+    controller: control,
+    onAdopted: (intent) => {
+      logger.warn(
+        `Intenção de ${intent === 'CANCEL' ? 'cancelamento' : 'pausa'} lida do estado persistido; ` +
+          `a etapa "${control.step}" será interrompida.`,
+      );
+    },
+  });
+
   try {
     return await pipeline(ctx, run);
   } catch (error) {
-    const failedRun: RunRecord = {
-      ...transition(run, 'FAILED', 'Falha inesperada na execução.'),
-      lastError: {
-        code: 'INTERNAL',
-        message: error instanceof Error ? error.message : String(error),
-      },
-    };
-    saveRun(failedRun);
-    ctx.onUpdate?.(failedRun);
-    return fail('INTERNAL', 'Falha inesperada na execução.', { runId: run.runId }, error);
+    return await failFromException(ctx, run, error);
+  } finally {
+    watcher.stop();
   }
+}
+
+/**
+ * Encerramento por exceção, SEM apagar o que já foi persistido.
+ *
+ * O defeito que esta função substitui: o `catch` externo gravava a referência
+ * de `run` capturada ANTES da pipeline. Como a pipeline reatribui uma variável
+ * local, tudo o que ela havia persistido — prompts aprovados, commits, PR —
+ * era sobrescrito pela cópia inicial. Uma exceção no terceiro prompt apagava os
+ * dois primeiros do arquivo de estado, e a retomada refazia trabalho aprovado.
+ *
+ * Agora o registro é RELIDO do disco e a falha é ACRESCENTADA a ele. E se a
+ * exceção veio de uma parada pedida pelo usuário, o estado final honra a
+ * intenção em vez de rotular tudo como `FAILED` — pausa, cancelamento e falha
+ * continuam sendo três coisas distintas.
+ */
+async function failFromException(
+  ctx: Context,
+  initial: RunRecord,
+  error: unknown,
+): Promise<Result<RunRecord>> {
+  const reloaded = loadRun(initial.projectId, initial.runId);
+  if (!reloaded.ok) {
+    ctx.logger.error(
+      `Não foi possível reler o estado de ${initial.runId} após a exceção: ${reloaded.error.message}. ` +
+        'A falha será registrada sobre a última cópia em memória.',
+    );
+  }
+  /* O fallback é a cópia em memória — nunca a inicial capturada antes da
+     pipeline, que é justamente a que apagava o progresso. */
+  const base = reloaded.ok ? reloaded.value : initial;
+
+  const message = error instanceof Error ? error.message : String(error);
+  const stop = externalStop(ctx, base);
+
+  const finished: RunRecord =
+    stop === null
+      ? {
+          ...transition(base, 'FAILED', 'Falha inesperada na execução.'),
+          lastError: { code: 'INTERNAL', message },
+        }
+      : {
+          ...applyExternalStop(ctx, base, stop, `exceção: ${message}`),
+          lastError: { code: 'CANCELLED', message },
+        };
+
+  const saved = saveRun(finished);
+  if (!saved.ok) {
+    ctx.logger.error(
+      `Falha ao persistir o desfecho da exceção em ${initial.runId}: ${saved.error.message}`,
+      { code: saved.error.code },
+    );
+  }
+  ctx.onUpdate?.(saved.ok ? saved.value : finished);
+
+  if (stop !== null) {
+    return ok(saved.ok ? saved.value : finished);
+  }
+  return fail('INTERNAL', 'Falha inesperada na execução.', { runId: initial.runId }, error);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -341,10 +483,16 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
 async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRecord>> {
   let run = initial;
 
+  const beforePreparing = haltIfRequested(ctx, run, 'preparação');
+  if (beforePreparing) return ok(beforePreparing);
+
   const prepared = await prepare(ctx, run);
   if (!prepared.ok) return prepared;
   run = prepared.value;
   ctx.workingDir = run.workingDirectory ?? ctx.project.repositoryPath;
+
+  const afterPreparing = haltIfRequested(ctx, run, 'após a preparação');
+  if (afterPreparing) return ok(afterPreparing);
 
   if (run.dryRun) {
     run = save(ctx, transition(run, 'COMPLETED', 'Dry-run concluído: nenhuma alteração real.'));
@@ -386,6 +534,17 @@ async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRec
     return ok(run);
   }
 
+  /* Nenhuma publicação começa depois que a intenção foi aceita: push, PR e
+     merge são justamente o que o cancelamento precisa impedir. */
+  const beforePublish = haltIfRequested(ctx, run, 'publicação');
+  if (beforePublish) {
+    writeRunReport({ project: ctx.project, run: beforePublish });
+    return ok(beforePublish);
+  }
+
+  const persistedOk = assertPersistence(ctx);
+  if (!persistedOk.ok) return persistedOk;
+
   const published = await publish(ctx, run);
   if (!published.ok) return published;
   run = published.value;
@@ -395,6 +554,12 @@ async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRec
   if (!canProceedToAudit(run)) {
     writeRunReport({ project: ctx.project, run });
     return ok(run);
+  }
+
+  const beforeAudit = haltIfRequested(ctx, run, 'auditoria final');
+  if (beforeAudit) {
+    writeRunReport({ project: ctx.project, run: beforeAudit });
+    return ok(beforeAudit);
   }
 
   const audited = await auditAndMerge(ctx, run);
@@ -621,11 +786,8 @@ async function executePromptLoop(ctx: Context, input: RunRecord): Promise<Result
       continue;
     }
 
-    const interrupted = checkInterrupt(ctx, run);
-    if (interrupted) {
-      run = save(ctx, transition(run, interrupted, 'Execução interrompida pelo usuário.'));
-      return ok(run);
-    }
+    const halted = haltIfRequested(ctx, run, `prompt ${promptFile.id}`);
+    if (halted) return ok(halted);
 
     const parsed = readPrompt(promptFile);
     if (!parsed.ok) return parsed;
@@ -675,6 +837,18 @@ async function executeSinglePrompt(
   const effectiveMaxAttempts = maxAttempts + pendingOverrideCount(run, promptFile.id);
 
   for (let attempt = alreadyAttempted + 1; attempt <= effectiveMaxAttempts; attempt += 1) {
+    /* Nenhuma tentativa nova depois de a intenção ter sido aceita, e nenhuma
+       tentativa nova com o estado sem conseguir ser gravado. */
+    const beforeAttempt = haltIfRequested(
+      ctx,
+      run,
+      `${promptFile.id}: início da tentativa ${String(attempt)}`,
+    );
+    if (beforeAttempt) return ok(beforeAttempt);
+
+    const persistedOk = assertPersistence(ctx);
+    if (!persistedOk.ok) return persistedOk;
+
     /* ---------------------------------------------------------------------
      * Portão do Loop Guard.
      *
@@ -790,6 +964,10 @@ async function executeSinglePrompt(
 
     const instruction = withSkills(baseInstruction, skillsIntact.value.claude);
 
+    const beforeClaude = haltIfRequested(ctx, run, `${promptFile.id}: chamada do Claude`);
+    if (beforeClaude) return ok(beforeClaude);
+
+    ctx.control.setStep(`${promptFile.id}: Claude implementando (tentativa ${String(attempt)})`);
     const claude = await ports.agents.runClaude({
       role: attempt === 1 ? 'executor' : 'corrector',
       config,
@@ -799,11 +977,17 @@ async function executeSinglePrompt(
       model: ctx.policy.agents.claudeModel,
       artifactDir,
       readOnly: false,
-      ...(ctx.signal ? { signal: ctx.signal } : {}),
+      signal: ctx.signal,
     });
 
     // A chamada é contabilizada mesmo quando falha: ela consumiu orçamento.
     run = save(ctx, recordAgentCall(run, promptFile.id, 'claude'));
+
+    /* O Claude pode ter sido derrubado pelo aborto. Parar AQUI é o que impede
+       a etapa seguinte (a suíte de testes) de começar depois de uma pausa —
+       exatamente o comportamento que faltava. */
+    const afterClaude = haltIfRequested(ctx, run, `${promptFile.id}: após o Claude`);
+    if (afterClaude) return ok(afterClaude);
 
     if (!claude.ok) {
       const state = mapAgentErrorState(claude.error.code);
@@ -816,14 +1000,19 @@ async function executeSinglePrompt(
 
     /* --- OrqPEG executa os testes oficiais ---------------------------- */
     run = save(ctx, transition(run, 'RUNNING_TESTS', 'Executando a suíte oficial de testes.'));
+    ctx.control.setStep(`${promptFile.id}: suíte de testes (tentativa ${String(attempt)})`);
     const tests = await ports.tests.run({
       commands: ctx.policy.commands.tests,
       cwd: ctx.workingDir,
       timeoutSeconds: ctx.policy.commands.timeoutSeconds,
-      ...(ctx.signal ? { signal: ctx.signal } : {}),
+      signal: ctx.signal,
       onCommandStart: (command) => logger.info(`  → ${command}`),
     });
     lastTests = tests;
+
+    const afterTests = haltIfRequested(ctx, run, `${promptFile.id}: após os testes`);
+    if (afterTests) return ok(afterTests);
+
     writeArtifactSync(
       path.join(artifactDir, 'tests-summary.json'),
       `${JSON.stringify(tests, null, 2)}\n`,
@@ -905,6 +1094,10 @@ async function executeSinglePrompt(
       return ok(run);
     }
 
+    const beforeCodex = haltIfRequested(ctx, run, `${promptFile.id}: revisão do Codex`);
+    if (beforeCodex) return ok(beforeCodex);
+
+    ctx.control.setStep(`${promptFile.id}: Codex revisando (tentativa ${String(attempt)})`);
     const codex = await ports.agents.runCodex({
       role: 'prompt-reviewer',
       config,
@@ -933,10 +1126,13 @@ async function executeSinglePrompt(
       model: ctx.policy.agents.codexModel,
       artifactDir,
       readOnly: true,
-      ...(ctx.signal ? { signal: ctx.signal } : {}),
+      signal: ctx.signal,
     });
 
     run = save(ctx, recordAgentCall(run, promptFile.id, 'codex'));
+
+    const afterCodex = haltIfRequested(ctx, run, `${promptFile.id}: após o Codex`);
+    if (afterCodex) return ok(afterCodex);
 
     if (!codex.ok) {
       // Sem revisor não há aprovação possível: o prompt fica bloqueado. Jamais
@@ -1073,6 +1269,36 @@ async function commitPrompt(
   changedFiles: string[],
 ): Promise<Result<RunRecord>> {
   let run = input;
+
+  /*
+   * Commit já existente NUNCA é refeito.
+   *
+   * O caso real: a execução foi pausada ou caiu depois de commitar o prompt,
+   * mas antes de o registro alcançar o estado seguinte. Ao retomar, a tentativa
+   * recomeça — e sem esta guarda produziria um SEGUNDO commit para o mesmo
+   * prompt, duplicando trabalho aprovado na branch que segue para o merge.
+   * O registro persistido é a prova: se ele já lista um commit deste prompt, o
+   * trabalho está feito.
+   */
+  const existingCommit = run.commits.find((entry) => entry.promptId === promptFile.id);
+  if (existingCommit) {
+    ctx.logger.info(
+      `Prompt ${promptFile.id} já possui o commit ${existingCommit.sha.slice(0, 12)} no registro; ` +
+        'nenhum commit novo será criado.',
+    );
+    return ok(
+      save(
+        ctx,
+        updatePromptProgress(run, promptFile.id, {
+          status: 'APPROVED',
+          approvedAt: nowIso(),
+          commitSha: existingCommit.sha,
+          lastVerdict: 'APPROVED',
+        }),
+      ),
+    );
+  }
+
   if (!ctx.policy.git.commitAfterApproval) {
     return ok(save(ctx, updatePromptProgress(run, promptFile.id, {
       status: 'APPROVED',
@@ -1091,6 +1317,11 @@ async function commitPrompt(
       lastVerdict: 'APPROVED',
     })));
   }
+
+  /* Cancelamento aceito impede o commit: é uma escrita na branch que o
+     usuário acabou de mandar parar. */
+  const beforeCommit = haltIfRequested(ctx, run, `${promptFile.id}: commit`);
+  if (beforeCommit) return ok(beforeCommit);
 
   run = save(ctx, transition(run, 'COMMITTING', `Criando commit de ${promptFile.id}.`));
 
@@ -1126,14 +1357,18 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
   const { project, ports, logger } = ctx;
 
   run = save(ctx, transition(run, 'RUNNING_TESTS', 'Executando a suíte completa.'));
+  ctx.control.setStep('suíte completa antes da publicação');
   const finalTests = await ports.tests.run({
     commands: ctx.policy.commands.tests,
     cwd: ctx.workingDir,
     timeoutSeconds: ctx.policy.commands.timeoutSeconds,
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    signal: ctx.signal,
     onCommandStart: (command) => logger.info(`  → ${command}`),
   });
   run = save(ctx, { ...run, finalTests });
+
+  const afterFinalTests = haltIfRequested(ctx, run, 'após a suíte completa');
+  if (afterFinalTests) return ok(afterFinalTests);
 
   if (!finalTests.passed) {
     run = save(
@@ -1147,6 +1382,9 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     run = save(ctx, transition(run, 'COMPLETED', 'Execução concluída sem push (política do projeto).'));
     return ok(run);
   }
+
+  const beforePush = haltIfRequested(ctx, run, 'push da branch');
+  if (beforePush) return ok(beforePush);
 
   run = save(ctx, transition(run, 'PUSHING', 'Enviando a branch ao remoto.'));
   const branch = run.branchName;
@@ -1167,6 +1405,9 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     run = save(ctx, transition(run, 'COMPLETED', 'Execução concluída sem PR (política do projeto).'));
     return ok(run);
   }
+
+  const beforePr = haltIfRequested(ctx, run, 'criação da pull request');
+  if (beforePr) return ok(beforePr);
 
   run = save(ctx, transition(run, 'CREATING_PR', 'Criando pull request.'));
 
@@ -1233,9 +1474,10 @@ async function runCiLoop(
   run = save(ctx, transition(run, 'WAITING_CI', 'Aguardando o CI do GitHub Actions.'));
 
   for (;;) {
-    if (ctx.signal?.aborted === true) {
-      return ok(save(ctx, transition(run, 'INTERRUPTED', 'Espera do CI cancelada.')));
-    }
+    /* A espera do CI é o trecho mais longo da execução; honrar a intenção aqui
+       distingue "pausado pelo usuário" de "abortado sem motivo declarado". */
+    const halted = haltIfRequested(ctx, run, 'espera do CI');
+    if (halted) return ok(halted);
 
     const current = await ctx.ports.github.getChecks({
       cwd: ctx.workingDir,
@@ -1284,7 +1526,8 @@ async function runCiLoop(
       try {
         await sleep(decision.waitSeconds * 1000, ctx.signal);
       } catch {
-        return ok(save(ctx, transition(run, 'INTERRUPTED', 'Espera do CI cancelada.')));
+        const stopped = haltIfRequested(ctx, run, 'espera do CI interrompida');
+        return ok(stopped ?? save(ctx, transition(run, 'INTERRUPTED', 'Espera do CI cancelada.')));
       }
       continue;
     }
@@ -1412,6 +1655,10 @@ async function repairCi(
   );
   writeExclusiveSync(path.join(dir, 'claude-instruction.md'), instruction);
 
+  const beforeRepair = haltIfRequested(ctx, run, `reparo de CI ${String(cycle)}`);
+  if (beforeRepair) return ok(beforeRepair);
+
+  ctx.control.setStep(`reparo de CI ${String(cycle)}: Claude corrigindo`);
   const claude = await ctx.ports.agents.runClaude({
     role: 'corrector',
     config: ctx.config,
@@ -1421,8 +1668,11 @@ async function repairCi(
     model: ctx.policy.agents.claudeModel,
     artifactDir: dir,
     readOnly: false,
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    signal: ctx.signal,
   });
+
+  const afterRepairAgent = haltIfRequested(ctx, run, `após o reparo de CI ${String(cycle)}`);
+  if (afterRepairAgent) return ok(afterRepairAgent);
 
   if (!claude.ok) {
     run = save(ctx, {
@@ -1454,13 +1704,17 @@ async function repairCi(
   /* Testes locais antes do push: reenviar sem verificar transformaria o CI em
      ferramenta de depuração remota, gastando minutos de runner por tentativa. */
   run = save(ctx, transition(run, 'RUNNING_TESTS', 'Validando o reparo de CI localmente.'));
+  ctx.control.setStep(`reparo de CI ${String(cycle)}: testes locais`);
   const tests = await ctx.ports.tests.run({
     commands: ctx.policy.commands.tests,
     cwd: ctx.workingDir,
     timeoutSeconds: ctx.policy.commands.timeoutSeconds,
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    signal: ctx.signal,
   });
   writeExclusiveSync(path.join(dir, 'tests.json'), `${JSON.stringify(tests, null, 2)}\n`);
+
+  const afterRepairTests = haltIfRequested(ctx, run, `reparo de CI ${String(cycle)}: após os testes`);
+  if (afterRepairTests) return ok(afterRepairTests);
 
   if (!tests.passed) {
     run = save(
@@ -1478,6 +1732,9 @@ async function repairCi(
 
   const patch = await ctx.ports.git.diffPatch(ctx.workingDir);
   if (patch.ok) writeExclusiveSync(path.join(dir, 'diff.patch'), patch.value);
+
+  const beforeRepairCommit = haltIfRequested(ctx, run, `reparo de CI ${String(cycle)}: commit`);
+  if (beforeRepairCommit) return ok(beforeRepairCommit);
 
   const staged = await ctx.ports.git.addPaths(ctx.workingDir, changed.value);
   if (!staged.ok) return staged;
@@ -1682,7 +1939,11 @@ async function auditRound(
   const claudeSchema = loadSchema('claude-merge-review.schema.json');
   if (!claudeSchema.ok) return claudeSchema;
 
+  const beforeClaudeAudit = haltIfRequested(ctx, run, 'auditoria final do Claude');
+  if (beforeClaudeAudit) return ok({ run: beforeClaudeAudit, outcome: 'DONE', requestedBy: [], reasons: [] });
+
   const claudeDir = ensureDir(mergeAuditArtifactDir(project.id, run.runId, 'claude', headSha));
+  ctx.control.setStep('auditoria final do Claude');
   const claudeAudit = await ports.agents.runClaude({
     role: 'merge-auditor',
     config,
@@ -1695,7 +1956,7 @@ async function auditRound(
     model: ctx.policy.agents.claudeModel,
     artifactDir: claudeDir,
     readOnly: true,
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    signal: ctx.signal,
   });
 
   const claudeRecord = claudeAudit.ok
@@ -1712,7 +1973,11 @@ async function auditRound(
   const codexSchema = loadSchema('codex-merge-review.schema.json');
   if (!codexSchema.ok) return codexSchema;
 
+  const beforeCodexAudit = haltIfRequested(ctx, run, 'auditoria final do Codex');
+  if (beforeCodexAudit) return ok({ run: beforeCodexAudit, outcome: 'DONE', requestedBy: [], reasons: [] });
+
   const codexDir = ensureDir(mergeAuditArtifactDir(project.id, run.runId, 'codex', headSha));
+  ctx.control.setStep('auditoria final do Codex');
   const codexAudit = await ports.agents.runCodex({
     role: 'merge-auditor',
     config,
@@ -1725,7 +1990,7 @@ async function auditRound(
     model: ctx.policy.agents.codexModel,
     artifactDir: codexDir,
     readOnly: true,
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    signal: ctx.signal,
   });
 
   const codexRecord = codexAudit.ok
@@ -1808,8 +2073,23 @@ async function auditRound(
 
   /* --- Merge ----------------------------------------------------------- */
   run = save(ctx, transition(run, 'MERGE_APPROVED', 'Todos os gates aprovados; merge autorizado.'));
+
+  /*
+   * ÚLTIMO portão antes da única ação irreversível do produto.
+   *
+   * A partir de `MERGING` não há mais volta: o merge é a fronteira em que um
+   * cancelamento tardio deixaria de ser cancelamento. Aqui a intenção ainda é
+   * honrada; depois daqui, não seria honesto prometer que seria.
+   */
+  const beforeMerge = haltIfRequested(ctx, run, 'execução do merge');
+  if (beforeMerge) return ok({ run: beforeMerge, outcome: 'DONE', requestedBy: [], reasons: [] });
+
+  const persistedBeforeMerge = assertPersistence(ctx);
+  if (!persistedBeforeMerge.ok) return persistedBeforeMerge;
+
   run = save(ctx, transition(run, 'MERGING', 'Executando squash merge protegido por SHA.'));
 
+  ctx.control.setStep('executando o merge');
   const merged = await ctx.ports.merge.execute({
     project,
     run,
@@ -1978,6 +2258,10 @@ async function correctAfterAudit(
   );
   writeExclusiveSync(path.join(dir, 'claude-instruction.md'), instruction);
 
+  const beforeCorrection = haltIfRequested(ctx, run, `correção pós-auditoria ${String(cycle)}`);
+  if (beforeCorrection) return ok(beforeCorrection);
+
+  ctx.control.setStep(`correção pós-auditoria ${String(cycle)}: Claude corrigindo`);
   const claude = await ctx.ports.agents.runClaude({
     role: 'corrector',
     config: ctx.config,
@@ -1987,8 +2271,16 @@ async function correctAfterAudit(
     model: ctx.policy.agents.claudeModel,
     artifactDir: dir,
     readOnly: false,
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    signal: ctx.signal,
   });
+
+  const afterCorrectionAgent = haltIfRequested(
+    ctx,
+    run,
+    `após a correção pós-auditoria ${String(cycle)}`,
+  );
+  if (afterCorrectionAgent) return ok(afterCorrectionAgent);
+
   if (!claude.ok) {
     run = save(ctx, {
       ...finishMergeCorrection(run, cycle, 'AGENT_FAILED', null),
@@ -2013,14 +2305,22 @@ async function correctAfterAudit(
   }
 
   run = save(ctx, transition(run, 'RUNNING_TESTS', 'Validando a correção pós-auditoria.'));
+  ctx.control.setStep(`correção pós-auditoria ${String(cycle)}: testes locais`);
   const tests = await ctx.ports.tests.run({
     commands: ctx.policy.commands.tests,
     cwd: ctx.workingDir,
     timeoutSeconds: ctx.policy.commands.timeoutSeconds,
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    signal: ctx.signal,
   });
   writeExclusiveSync(path.join(dir, 'tests.json'), `${JSON.stringify(tests, null, 2)}\n`);
   run = save(ctx, { ...run, finalTests: tests });
+
+  const afterCorrectionTests = haltIfRequested(
+    ctx,
+    run,
+    `correção pós-auditoria ${String(cycle)}: após os testes`,
+  );
+  if (afterCorrectionTests) return ok(afterCorrectionTests);
 
   if (!tests.passed) {
     run = save(
@@ -2036,6 +2336,13 @@ async function correctAfterAudit(
 
   const patch = await ctx.ports.git.diffPatch(ctx.workingDir);
   if (patch.ok) writeExclusiveSync(path.join(dir, 'diff.patch'), patch.value);
+
+  const beforeCorrectionCommit = haltIfRequested(
+    ctx,
+    run,
+    `correção pós-auditoria ${String(cycle)}: commit`,
+  );
+  if (beforeCorrectionCommit) return ok(beforeCorrectionCommit);
 
   const staged = await ctx.ports.git.addPaths(ctx.workingDir, changed.value);
   if (!staged.ok) return staged;
@@ -2688,17 +2995,180 @@ function canProceedToAudit(run: RunRecord): boolean {
   return run.pullRequest !== null;
 }
 
-function save(ctx: Context, run: RunRecord): RunRecord {
-  saveRun(run);
-  ctx.onUpdate?.(run);
-  return run;
+/**
+ * Persiste e devolve o registro REALMENTE gravado.
+ *
+ * Devolver o resultado da gravação não é detalhe: `saveRun` reconcilia a
+ * intenção com o disco, então é por este retorno que o orquestrador enxerga uma
+ * pausa pedida pelo painel entre uma etapa e a seguinte. Continuar com o objeto
+ * de entrada reintroduziria o defeito.
+ *
+ * A falha de escrita não é descartada: fica em `ctx.persistError` e vira parada
+ * explícita no próximo portão crítico (`assertPersistence`).
+ */
+function save(ctx: Context, run: RunRecord, mode: IntentWriteMode = 'MERGE'): RunRecord {
+  const saved = saveRun(run, mode);
+  if (!saved.ok) {
+    if (ctx.persistError === null) {
+      ctx.persistError = saved.error;
+      ctx.logger.error(
+        `Falha ao persistir o estado da execução ${run.runId}: ${saved.error.message}`,
+        { code: saved.error.code },
+      );
+    }
+    ctx.onUpdate?.(run);
+    return run;
+  }
+  ctx.onUpdate?.(saved.value);
+  return saved.value;
 }
 
-function checkInterrupt(ctx: Context, run: RunRecord): RunState | null {
-  if (run.cancelRequested) return 'CANCELLED';
-  if (run.pauseRequested) return 'INTERRUPTED';
-  if (ctx.signal?.aborted) return 'INTERRUPTED';
+/**
+ * Portão de persistência: recusa avançar quando o estado não pôde ser gravado.
+ *
+ * Sem ele, uma execução seguiria chamando IA, criando commits e abrindo PRs com
+ * o disco parado numa versão antiga — e o operador só descobriria pela ausência
+ * de qualquer rastro. É melhor parar declarando o motivo.
+ */
+function assertPersistence(ctx: Context): Result<void> {
+  const error = ctx.persistError;
+  if (error === null) return ok(undefined);
+  return fail(
+    error.code,
+    `Execução interrompida: o estado não pôde ser persistido (${error.message}). ` +
+      'Avançar sem registro deixaria trabalho sem rastro e retomada impossível.',
+    error.details,
+  );
+}
+
+/** Descrição de uma parada pedida de fora da execução. */
+interface ExternalStop {
+  state: 'CANCELLED' | 'INTERRUPTED';
+  trigger: 'USER_CANCELLED' | 'USER_PAUSED';
+  reason: string;
+}
+
+/**
+ * Lê a intenção externa a partir das DUAS fontes, nesta ordem de precedência:
+ * cancelamento vence pausa, e qualquer das duas vence um aborto sem intenção
+ * declarada (desligamento do painel, sinal do chamador).
+ *
+ * As duas fontes existem porque cobrem casos diferentes: o controlador vivo
+ * atende o painel no mesmo processo, e o registro persistido atende a CLI, que
+ * roda em outro. Nenhuma delas sozinha cobre o produto inteiro.
+ */
+function externalStop(ctx: Context, run: RunRecord): ExternalStop | null {
+  if (run.cancelRequested || ctx.control.cancelRequested) {
+    return {
+      state: 'CANCELLED',
+      trigger: 'USER_CANCELLED',
+      reason: 'Cancelamento solicitado pelo usuário.',
+    };
+  }
+  if (run.pauseRequested || ctx.control.pauseRequested) {
+    return {
+      state: 'INTERRUPTED',
+      trigger: 'USER_PAUSED',
+      reason:
+        ctx.control.intent === 'SHUTDOWN'
+          ? 'Execução interrompida pelo desligamento do processo hospedeiro.'
+          : 'Pausa solicitada pelo usuário.',
+    };
+  }
+  if (ctx.signal.aborted) {
+    return {
+      state: 'INTERRUPTED',
+      trigger: 'USER_PAUSED',
+      reason: 'Execução abortada por sinal externo.',
+    };
+  }
   return null;
+}
+
+/**
+ * Aplica a parada externa preservando TUDO: branch, worktree, commits,
+ * artefatos, tentativas consumidas e aprovações já emitidas.
+ *
+ * O único ajuste no progresso é devolver a `PENDING` o prompt que estava em
+ * `RUNNING`: a tentativa foi abortada, não concluída, e deixá-la como "em
+ * execução" descreveria um trabalho que não está acontecendo. O contador de
+ * tentativas continua onde estava — a tentativa custou assinatura e a retomada
+ * não pode fingir que ela não existiu.
+ */
+function applyExternalStop(
+  ctx: Context,
+  run: RunRecord,
+  stop: ExternalStop,
+  step: string,
+): RunRecord {
+  /* Idempotência: pedir de novo o que já foi feito não produz nova transição
+     nem novo estado final. */
+  if (run.state === stop.state) return run;
+
+  const decision: LoopGuardDecision = {
+    allowed: false,
+    severity: severityOf(stop.trigger),
+    trigger: stop.trigger,
+    reason: stop.reason,
+    evidence: {
+      step,
+      intent: ctx.control.intent,
+      intentSource: ctx.control.intentSource,
+      pauseRequested: run.pauseRequested,
+      cancelRequested: run.cancelRequested,
+      aborted: ctx.signal.aborted,
+    },
+    nextActions:
+      stop.state === 'CANCELLED'
+        ? ['OPEN_REPORT', 'START_NEW_RUN']
+        : ['OPEN_REPORT', 'MARK_FOR_MANUAL_REVIEW'],
+  };
+
+  ctx.logger.warn(`${stop.trigger}: ${stop.reason} Etapa interrompida: ${step}.`);
+
+  /*
+   * A intenção do controlador é espelhada NO REGISTRO.
+   *
+   * Quando o pedido chega pelo arquivo de estado, a marca já está lá; quando
+   * chega pelo controlador vivo (painel no mesmo processo), ela precisa ser
+   * gravada aqui, senão o estado persistido diria "interrompido" sem dizer por
+   * quem. `SHUTDOWN` de propósito não marca nada: queda do processo hospedeiro
+   * não é decisão do usuário, e confundi-las apagaria a distinção que o
+   * operador usa para saber o que fazer em seguida.
+   */
+  const intent = ctx.control.intent;
+
+  return {
+    ...transition(rewindInFlightPrompt(run), stop.state, `${stop.trigger}: ${stop.reason}`, {
+      trigger: stop.trigger,
+      step,
+    }),
+    pauseRequested: run.pauseRequested || intent === 'PAUSE',
+    cancelRequested: run.cancelRequested || intent === 'CANCEL',
+    lastLoopGuard: decision,
+  };
+}
+
+/** Devolve a `PENDING` o prompt cuja tentativa foi abortada no meio. */
+function rewindInFlightPrompt(run: RunRecord): RunRecord {
+  const running = run.prompts.find((prompt) => prompt.status === 'RUNNING');
+  if (!running) return run;
+  return updatePromptProgress(run, running.promptId, { status: 'PENDING' });
+}
+
+/**
+ * Portão de interrupção, consultado ENTRE ETAPAS INTERNAS — não apenas entre
+ * prompts.
+ *
+ * Devolve `null` quando é seguro prosseguir; caso contrário devolve o registro
+ * já persistido no estado de parada. Quem chamar deve retornar imediatamente:
+ * nenhuma etapa posterior pode começar depois que a intenção foi aceita.
+ */
+function haltIfRequested(ctx: Context, run: RunRecord, step: string): RunRecord | null {
+  ctx.control.setStep(step);
+  const stop = externalStop(ctx, run);
+  if (stop === null) return null;
+  return save(ctx, applyExternalStop(ctx, run, stop, step));
 }
 
 function mapAgentErrorState(code: string): RunState {

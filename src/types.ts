@@ -33,6 +33,8 @@ export type ErrorCode =
   | 'LOCK_HELD'
   | 'LOCK_FAILED'
   | 'STATE_CORRUPT'
+  /** Gravação de estado recusada por ser obsoleta e apagar progresso já persistido. */
+  | 'STATE_REGRESSION'
   | 'POLICY_SNAPSHOT_MISSING'
   | 'WORKTREE_NOT_REGISTERED'
   | 'WORKTREE_OWNERSHIP_MISMATCH'
@@ -1130,6 +1132,17 @@ export interface RunRecord {
   schemaVersion: 1;
   runId: string;
   projectId: string;
+  /**
+   * Contador monotônico de gravações, incrementado por `saveRun`.
+   *
+   * É o que permite detectar que o registro em memória ficou para trás do
+   * disco — o caso em que o painel gravou um pedido de pausa enquanto o
+   * orquestrador segurava uma cópia antiga. Sem ele, a gravação seguinte do
+   * orquestrador apagaria a intenção sem que nada denunciasse a perda.
+   *
+   * Execuções gravadas antes deste campo existir são normalizadas para `0`.
+   */
+  revision: number;
   state: RunState;
   previousState: RunState | null;
   createdAt: string;
