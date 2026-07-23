@@ -3,10 +3,11 @@ import type { GlobalConfig, ProjectConfig, Result } from '../types';
 import { ok } from '../utils/errors';
 import { inspectApiEnvironment } from '../security/api-guard';
 import { buildRunBranchName } from '../security/branch-name';
-import { getProject } from '../projects/project-store';
+import { getProject, readDeclaredLoopGuard } from '../projects/project-store';
 import { discoverPrompts } from '../prompts/prompt-store';
 import { defaultWorktreePath } from '../git/worktree';
 import { GATE_DEFINITIONS } from '../merge/gates';
+import { resolveEffectiveExecutionPolicy } from './effective-policy';
 import { describeLoopGuardPolicy } from './loop-guard-config';
 import { compactStamp } from '../utils/time';
 
@@ -31,6 +32,14 @@ export interface DryRunPlan {
   pullRequestPolicy: string[];
   mergePolicy: string[];
   loopGuardPolicy: Array<[string, string]>;
+  /**
+   * Hash da política que ESTE plano descreve.
+   *
+   * O plano é uma previsão feita sobre o cadastro de agora. Registrar o hash
+   * permite conferir depois se a execução realmente rodou sob a política que
+   * foi revisada, ou se o cadastro mudou entre a revisão e o início.
+   */
+  policyEffectiveHash: string | null;
   gates: Array<{ index: number; id: string; title: string }>;
   apiGuard: { presentKeys: string[]; warnKeys: string[]; blocked: boolean };
   warnings: string[];
@@ -60,8 +69,21 @@ export function buildDryRunPlan(
       )
     : null;
 
+  /* Mesma composição de camadas que a execução real usará, para que o plano
+     descreva a política efetiva e não apenas o que está no project.json. */
+  const resolvedPolicy = resolveEffectiveExecutionPolicy({
+    globalConfig: config,
+    projectConfig: project,
+    declaredProjectLoopGuard: readDeclaredLoopGuard(project.id),
+    roundConfig: null,
+  });
+
   const guard = inspectApiEnvironment({ config });
   const warnings: string[] = [];
+
+  if (!resolvedPolicy.ok) {
+    warnings.push(`Política efetiva incoerente: ${resolvedPolicy.error.message}`);
+  }
 
   if (prompts.length === 0) {
     warnings.push(
@@ -119,7 +141,8 @@ export function buildDryRunPlan(
       `invalidar aprovação se o head SHA mudar: ${yesNo(project.merge.invalidateApprovalOnHeadChange)}`,
       `apagar branch após merge: ${yesNo(project.merge.deleteBranchAfterMerge)}`,
     ],
-    loopGuardPolicy: describeLoopGuardPolicy(project.execution.loopGuard),
+    loopGuardPolicy: describeLoopGuardPolicy(resolvedPolicy.ok ? resolvedPolicy.value.loopGuard : project.execution.loopGuard),
+    policyEffectiveHash: resolvedPolicy.ok ? resolvedPolicy.value.effectiveHash : null,
     gates: GATE_DEFINITIONS.map((gate) => ({
       index: gate.index,
       id: gate.id,

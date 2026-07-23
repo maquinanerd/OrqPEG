@@ -15,6 +15,7 @@ import { writeArtifactSync } from '../utils/fs-atomic';
 import { ensureDir, projectReportsDir } from '../utils/paths';
 import { formatDuration, nowIso } from '../utils/time';
 import { redactText } from '../utils/redact';
+import { inspectAttemptArtifacts, renderArtifactIntegrity } from './artifact-integrity';
 
 /**
  * Geração de relatórios nos três formatos exigidos: JSON, Markdown e HTML.
@@ -165,6 +166,11 @@ function buildRunMarkdown(input: RunReportInput): string {
   lines.push(`- **Início:** ${run.createdAt}`);
   lines.push(`- **Fim:** ${run.finishedAt ?? '—'}`);
   lines.push('');
+
+  /* Antes dos prompts de propósito: se os artefatos não descrevem o que a
+     numeração sugere, quem lê precisa saber disso antes de interpretá-los. */
+  const integrity = renderArtifactIntegrity(inspectAttemptArtifacts(project.id, run));
+  if (integrity.length > 0) lines.push(integrity);
 
   lines.push('## Prompts');
   lines.push('');

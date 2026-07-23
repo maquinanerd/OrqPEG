@@ -1,7 +1,7 @@
 import type { GlobalConfig, Result } from '../types';
 import { ok } from '../utils/errors';
 import * as git from '../git/git';
-import { reuseOrCreateWorktree } from '../git/worktree';
+import { reuseOrCreateWorktree, verifyWorktreeOwnership } from '../git/worktree';
 import { detectClaude, detectCodex } from '../agents/agent-detect';
 import { runClaude } from '../agents/claude-agent';
 import { runCodex } from '../agents/codex-agent';
@@ -81,6 +81,18 @@ export function createDefaultPorts(): OrchestratorPorts {
           branch: input.branch,
           baseRef: input.baseRef,
           reuseWhenSafe: input.reuseWhenSafe,
+        });
+        if (!result.ok) return result;
+        return ok({ path: result.value.path, branch: result.value.branch });
+      },
+
+      async verifyOwnership(input) {
+        const result = await verifyWorktreeOwnership({
+          repoDir: input.repoDir,
+          worktreePath: input.worktreePath,
+          canonicalPath: input.canonicalPath,
+          branch: input.branch,
+          allowedRoot: input.allowedRoot,
         });
         if (!result.ok) return result;
         return ok({ path: result.value.path, branch: result.value.branch });

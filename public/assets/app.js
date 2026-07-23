@@ -1649,6 +1649,8 @@
         if (run && runResult.data) {
           run.__loopGuard = runResult.data.loopGuard || null;
           run.__override = runResult.data.override || null;
+          run.__policyUnavailable = runResult.data.policyUnavailable || null;
+          run.__policyDrift = runResult.data.projectConfigDrift || null;
         }
 
         renderRun(projectId, runId, run, prompts, consensusPayload);
@@ -1848,6 +1850,7 @@
     var decision = run.lastLoopGuard || null;
 
     renderLoopGuardAlert(decision);
+    renderPolicyNotice(run);
 
     if (!budget) {
       setHtml('loopguard-metrics', '<p class="empty">Sem orçamento registrado</p>');
@@ -2056,6 +2059,54 @@
   /** Prompt alvo do diálogo aberto; definido ao abrir. */
   var currentOverridePromptId = '';
 
+  /**
+   * Declara a situação da política histórica desta execução.
+   *
+   * Dois avisos distintos, deliberadamente:
+   *
+   *  - política indisponível: execução criada antes do congelamento. Os
+   *    numeradores continuam válidos; os denominadores não existem e o painel
+   *    diz isso em vez de exibir o cadastro de hoje.
+   *  - cadastro alterado: a política da execução continua valendo. O aviso é
+   *    informativo, não uma troca de limites.
+   */
+  function renderPolicyNotice(run) {
+    var box = $('loopguard-policy');
+    if (!box) return;
+
+    var unavailable = run.__policyUnavailable || null;
+    var drift = run.__policyDrift || null;
+
+    if (unavailable) {
+      box.hidden = false;
+      box.className = 'warn-box';
+      box.innerHTML =
+        '<p class="warn-box__title">' +
+        esc(unavailable.title || 'POLÍTICA HISTÓRICA NÃO DISPONÍVEL') +
+        '</p><p>' +
+        esc(unavailable.message || 'Execução criada antes do snapshot de política.') +
+        '</p><p class="faint">' +
+        esc(
+          'Os valores consumidos continuam corretos. Os limites daquela execução não foram registrados e não serão deduzidos da configuração atual.'
+        ) +
+        '</p>';
+      return;
+    }
+
+    if (drift && drift.changed === true) {
+      box.hidden = false;
+      box.className = 'warn-box';
+      box.innerHTML =
+        '<p class="warn-box__title">Cadastro do projeto alterado</p><p>' +
+        esc(drift.message || '') +
+        '</p>';
+      return;
+    }
+
+    box.hidden = true;
+    box.innerHTML = '';
+  }
+
   function renderLoopGuardAlert(decision) {
     var box = $('loopguard-alert');
     if (!box) return;
@@ -2133,7 +2184,9 @@
       if (u >= l) tone = 'failed';
       else if (u / l >= 0.67) tone = 'waiting';
     }
-    var value = l > 0 ? u + ' / ' + l : String(u);
+    /* Sem limite conhecido, o painel mostra o consumido e um travessão: um
+       número inventado seria pior que a ausência declarada. */
+    var value = limit === null || limit === undefined ? u + ' / —' : l > 0 ? u + ' / ' + l : String(u);
     return metric(value, label, tone);
   }
 
@@ -2181,14 +2234,32 @@
    * denominador é uma referência, não a configuração em vigor.
    */
   function loopLimits(run) {
+    /*
+     * Sem política congelada NÃO há denominador.
+     *
+     * O padrão do produto como fallback produzia exatamente o número errado
+     * que este bloco existe para evitar: numeradores históricos, vindos de
+     * run.budgets, divididos por um limite que aquela execução talvez nunca
+     * tenha usado. 'null' faz a métrica mostrar só o consumido.
+     */
+    if (run.__policyUnavailable) {
+      return {
+        attempts: null,
+        claude: null,
+        codex: null,
+        total: null,
+        promptMinutes: null,
+        overrides: null,
+      };
+    }
     var guard = run.__loopGuard || {};
     return {
-      attempts: num(guard.maxAttemptsPerPrompt) || 3,
-      claude: num(guard.maxClaudeCallsPerPrompt) || 3,
-      codex: num(guard.maxCodexCallsPerPrompt) || 5,
-      total: num(guard.maxTotalAgentCallsPerPrompt) || 8,
-      promptMinutes: num(guard.maxPromptDurationMinutes) || 90,
-      overrides: num(guard.maxManualOverridesPerPrompt) || 1,
+      attempts: num(guard.maxAttemptsPerPrompt) || null,
+      claude: num(guard.maxClaudeCallsPerPrompt) || null,
+      codex: num(guard.maxCodexCallsPerPrompt) || null,
+      total: num(guard.maxTotalAgentCallsPerPrompt) || null,
+      promptMinutes: num(guard.maxPromptDurationMinutes) || null,
+      overrides: num(guard.maxManualOverridesPerPrompt) || null,
     };
   }
 

@@ -237,6 +237,17 @@ export function projectConfigHash(config: unknown): string {
   return sha(stableStringify(clone));
 }
 
+/**
+ * Hash de um objeto por conteúdo, insensível à ordem das chaves.
+ *
+ * A ordem das propriedades no JSON e o espaçamento do arquivo não têm
+ * significado; um hash que reagisse a eles interromperia execuções por
+ * reformatação.
+ */
+export function stableHash(value: unknown): string {
+  return sha(stableStringify(value));
+}
+
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;

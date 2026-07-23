@@ -225,8 +225,16 @@ test('contexto do projeto alterado bloqueia', () => {
   assert.equal(triggerOf(scenario({ top: { contextHashNow: 'OUTRO' } })), 'PROJECT_CONTEXT_CHANGED');
 });
 
-test('configuração do projeto alterada bloqueia', () => {
-  assert.equal(triggerOf(scenario({ top: { configHashNow: 'OUTRO' } })), 'PROJECT_CONTEXT_CHANGED');
+test('configuração do projeto alterada bloqueia com gatilho próprio', () => {
+  // Gatilho separado de PROJECT_CONTEXT_CHANGED: reaproveitar aquele mandava o
+  // operador procurar PROJECT-CONTEXT.md e encontrar um arquivo intacto.
+  assert.equal(triggerOf(scenario({ top: { configHashNow: 'OUTRO' } })), 'PROJECT_CONFIG_CHANGED');
+});
+
+test('PROJECT_CONFIG_CHANGED é parada dura e não admite override', () => {
+  const { isOverridable } = require('../../dist/execution/override');
+  assert.equal(isOverridable('PROJECT_CONFIG_CHANGED'), false);
+  assert.equal(isOverridable('POLICY_SNAPSHOT_MISSING'), false);
 });
 
 /* ------------------------------------------------------------------------ */

@@ -57,6 +57,19 @@ export interface WorktreePort {
     baseRef: string;
     reuseWhenSafe: boolean;
   }): Promise<Result<{ path: string; branch: string | null }>>;
+  /**
+   * Prova que o worktree pertence a esta execução, antes de adotá-lo numa
+   * retomada. Falha com `WORKTREE_NOT_REGISTERED`,
+   * `WORKTREE_OWNERSHIP_MISMATCH`, `WORKTREE_OUTSIDE_ALLOWED_ROOT` ou
+   * `GIT_OPERATION_IN_PROGRESS`.
+   */
+  verifyOwnership(input: {
+    repoDir: string;
+    worktreePath: string;
+    canonicalPath: string;
+    branch: string;
+    allowedRoot: string;
+  }): Promise<Result<{ path: string; branch: string | null }>>;
 }
 
 export interface GitHubPort {

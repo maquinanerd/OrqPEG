@@ -616,7 +616,7 @@ test('retomar continua a numeração e não sobrescreve artefatos anteriores', a
     promptId: '010-fundacao',
     justification: 'Ajustei o ambiente manualmente; mais uma tentativa deve resolver.',
     authorizedBy: 'teste',
-    loopGuard: project.execution.loopGuard,
+    policy: require('../helpers/policy').loopGuardPolicyFor(project),
   });
   assert.equal(concedido.ok, true, concedido.ok ? '' : concedido.error.message);
   saveRun(concedido.value.run);
@@ -657,6 +657,154 @@ test('retomar continua a numeração e não sobrescreve artefatos anteriores', a
       `attempt-${n} precisa existir e não ter sido sobrescrito`,
     );
   }
+});
+
+/*
+ * Regra 2 do congelamento de política, ponta a ponta: uma alteração REAL no
+ * cadastro entre a parada e a retomada interrompe a execução em vez de ser
+ * absorvida em silêncio. O hash "de agora" precisa vir do disco — se viesse do
+ * objeto em memória do início, a comparação seria contra ela mesma e nunca
+ * falharia. Um override pendente não dispensa: mutação de config é parada dura.
+ */
+test('retomada detecta alteração REAL no cadastro em disco e para com PROJECT_CONFIG_CHANGED', async () => {
+  const { updateProject } = require('../../dist/projects/project-store');
+  const { grantManualOverride } = require('../../dist/execution/override');
+  const { saveRun, loadRun } = require('../../dist/state/run-state');
+  const { loopGuardPolicyFor } = require('../helpers/policy');
+
+  const project = makeProject();
+
+  let rodada = 0;
+  const revisaoDistinta = () => {
+    rodada += 1;
+    return agentResult(
+      promptReviewJson('CHANGES_REQUESTED', {
+        requiredActions: ['Ajuste ' + rodada + '.'],
+        blockingIssues: [
+          { severity: 'blocking', title: 'Item ' + rodada, description: 'Detalhe ' + rodada + '.' },
+        ],
+      }),
+    );
+  };
+
+  const primeira = await execute(project, { codexReview: revisaoDistinta, varyingDiff: true });
+  assert.equal(primeira.result.value.state, 'LOOP_GUARD_TRIGGERED');
+  assert.equal(primeira.result.value.lastLoopGuard.trigger, 'MAX_ATTEMPTS_REACHED');
+
+  // Autorização pendente: sem ela o laço nem chegaria a reavaliar na retomada.
+  const concedido = grantManualOverride({
+    run: primeira.result.value,
+    promptId: '010-fundacao',
+    justification: 'Achei que mais uma tentativa resolveria; vou tentar.',
+    authorizedBy: 'teste',
+    policy: loopGuardPolicyFor(project),
+  });
+  assert.equal(concedido.ok, true, concedido.ok ? '' : concedido.error.message);
+  saveRun(concedido.value.run);
+
+  // Alteração REAL e relevante à execução: troca a suíte de testes no disco.
+  const editado = updateProject(project.id, { commands: { tests: ['npm', 'run', 'outra-suite'] } });
+  assert.equal(editado.ok, true, editado.ok ? '' : editado.error.message);
+
+  const { ports, spy } = makePorts({ codexReview: revisaoDistinta, varyingDiff: true });
+  const chamadasAntes = spy.claudeCalls.length;
+  const retomada = await runProject({
+    projectId: project.id,
+    dryRun: false,
+    resumeRunId: primeira.result.value.runId,
+    config: defaultGlobalConfig(),
+    logger: nullLogger(),
+    ports,
+  });
+
+  assert.equal(retomada.ok, true, retomada.ok ? '' : JSON.stringify(retomada.error));
+  assert.equal(
+    retomada.value.lastLoopGuard.trigger,
+    'PROJECT_CONFIG_CHANGED',
+    'a mudança real no cadastro precisa interromper a retomada',
+  );
+  assert.equal(
+    spy.claudeCalls.length,
+    chamadasAntes,
+    'nenhuma tentativa nova pode rodar depois da mutação detectada',
+  );
+
+  // A autorização NÃO foi consumida: parada dura não gasta o override.
+  const persistido = loadRun(project.id, primeira.result.value.runId).value;
+  assert.equal(
+    persistido.overrides.filter((o) => o.consumed === false).length,
+    1,
+    'o override pendente sobrevive a uma parada dura',
+  );
+  // E a política congelada continua sendo a original, não a editada.
+  assert.equal(persistido.effectivePolicy.commands.tests.join(' '), 'npm test');
+});
+
+/*
+ * O reverso, igualmente importante: um resave BENIGNO — que só mexe em campos
+ * irrelevantes à execução, como `updatedAt` — NÃO pode ser confundido com
+ * mutação. Se o hash canônico reagisse a `updatedAt`, toda retomada após um
+ * simples salvamento do projeto pararia com PROJECT_CONFIG_CHANGED.
+ */
+test('retomada após resave benigno (updatedAt) prossegue sem falso positivo de mutação', async () => {
+  const { updateProject, getProject } = require('../../dist/projects/project-store');
+  const { grantManualOverride } = require('../../dist/execution/override');
+  const { saveRun } = require('../../dist/state/run-state');
+  const { loopGuardPolicyFor } = require('../helpers/policy');
+
+  const project = makeProject();
+
+  let rodada = 0;
+  const revisaoDistinta = () => {
+    rodada += 1;
+    return agentResult(
+      promptReviewJson('CHANGES_REQUESTED', {
+        requiredActions: ['Ajuste ' + rodada + '.'],
+        blockingIssues: [
+          { severity: 'blocking', title: 'Item ' + rodada, description: 'Detalhe ' + rodada + '.' },
+        ],
+      }),
+    );
+  };
+
+  const primeira = await execute(project, { codexReview: revisaoDistinta, varyingDiff: true });
+  assert.equal(primeira.result.value.state, 'LOOP_GUARD_TRIGGERED');
+
+  const concedido = grantManualOverride({
+    run: primeira.result.value,
+    promptId: '010-fundacao',
+    justification: 'Ambiente ajustado à mão; mais uma tentativa deve fechar.',
+    authorizedBy: 'teste',
+    policy: loopGuardPolicyFor(project),
+  });
+  assert.equal(concedido.ok, true, concedido.ok ? '' : concedido.error.message);
+  saveRun(concedido.value.run);
+
+  // Resave que NÃO toca nenhum campo relevante à execução: só `updatedAt` muda.
+  const antes = getProject(project.id).value.updatedAt;
+  const resave = updateProject(project.id, { name: project.name });
+  assert.equal(resave.ok, true, resave.ok ? '' : resave.error.message);
+  assert.notEqual(resave.value.updatedAt, antes, 'o resave precisa de fato bumpar updatedAt');
+
+  const { ports } = makePorts({ codexReview: revisaoDistinta, varyingDiff: true });
+  const retomada = await runProject({
+    projectId: project.id,
+    dryRun: false,
+    resumeRunId: primeira.result.value.runId,
+    config: defaultGlobalConfig(),
+    logger: nullLogger(),
+    ports,
+  });
+
+  assert.equal(retomada.ok, true, retomada.ok ? '' : JSON.stringify(retomada.error));
+  const depois = retomada.value.budgets.find((b) => b.promptId === '010-fundacao');
+  assert.equal(depois.attempts, 4, 'a tentativa extra autorizada rodou: nenhum falso positivo de mutação');
+  assert.equal(depois.manualOverridesUsed, 1, 'a autorização foi de fato exercida');
+  assert.notEqual(
+    retomada.value.lastLoopGuard.trigger,
+    'PROJECT_CONFIG_CHANGED',
+    'um resave benigno jamais pode ser lido como mutação de configuração',
+  );
 });
 
 test('o orçamento consumido fica registrado por prompt', async () => {

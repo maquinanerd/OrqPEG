@@ -1,4 +1,5 @@
 import type {
+  EffectiveLoopGuardPolicy,
   LoopGuardDecision,
   LoopGuardNextAction,
   ProjectConfig,
@@ -21,6 +22,14 @@ export interface LoopGuardReportInput {
   promptId: string;
   decision: LoopGuardDecision;
   budget: PromptBudget;
+  /**
+   * Política CONGELADA da execução.
+   *
+   * A coluna "Limite" descreve os tetos sob os quais a parada aconteceu. Lê-la
+   * do cadastro atual reescrevia relatórios já emitidos toda vez que alguém
+   * editava o projeto.
+   */
+  policy: EffectiveLoopGuardPolicy;
 }
 
 const ACTION_LABEL: Record<LoopGuardNextAction, string> = {
@@ -41,7 +50,7 @@ const ACTION_LABEL: Record<LoopGuardNextAction, string> = {
 };
 
 export function renderLoopGuardReport(input: LoopGuardReportInput): string {
-  const { decision, budget, project, run, promptId } = input;
+  const { decision, budget, project, run, promptId, policy } = input;
   const lines: string[] = [];
 
   lines.push('# Proteção contra looping');
@@ -68,12 +77,12 @@ export function renderLoopGuardReport(input: LoopGuardReportInput): string {
   lines.push('');
 
   /* --- Orçamento ------------------------------------------------------- */
-  const loop = project.execution.loopGuard;
+  const loop = policy;
   lines.push('## Orçamento consumido');
   lines.push('');
   lines.push('| Recurso | Consumido | Limite |');
   lines.push('| --- | --- | --- |');
-  lines.push(`| Tentativas | ${budget.attempts} | ${project.execution.maxAttemptsPerPrompt} |`);
+  lines.push(`| Tentativas | ${budget.attempts} | ${policy.maxAttemptsPerPrompt} |`);
   lines.push(`| Chamadas do Claude | ${budget.claudeCalls} | ${loop.maxClaudeCallsPerPrompt} |`);
   lines.push(`| Chamadas do Codex | ${budget.codexCalls} | ${loop.maxCodexCallsPerPrompt} |`);
   lines.push(

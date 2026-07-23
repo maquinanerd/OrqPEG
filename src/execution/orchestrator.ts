@@ -1,9 +1,11 @@
 import * as path from 'node:path';
 import type {
   AttemptSummary,
+  EffectiveExecutionPolicySnapshot,
   GlobalConfig,
   Logger,
   LoopGuardDecision,
+  LoopGuardTrigger,
   MergeReview,
   MergeReviewRecord,
   PromptBudget,
@@ -12,23 +14,31 @@ import type {
   PromptReview,
   Result,
   RunRecord,
+  RunSourceSnapshots,
   RunState,
   TestSuiteResult,
 } from '../types';
 import { fail, ok } from '../utils/errors';
-import { readTextSync, writeArtifactSync } from '../utils/fs-atomic';
+import {
+  createExclusiveDirSync,
+  listDirectoriesSync,
+  readJsonSync,
+  readTextSync,
+  writeArtifactSync,
+  writeExclusiveSync,
+} from '../utils/fs-atomic';
 import {
   attemptArtifactDir,
   ensureDir,
+  normalizeForCompare,
   mergeAuditArtifactDir,
   projectArtifactsDir,
   projectDir,
-  projectReportsDir,
 } from '../utils/paths';
 import { compactStamp, nowIso } from '../utils/time';
 import { buildRunBranchName } from '../security/branch-name';
 import { inspectApiEnvironment } from '../security/api-guard';
-import { getProject } from '../projects/project-store';
+import { getProject, readDeclaredLoopGuard } from '../projects/project-store';
 import { discoverPrompts, readPrompt } from '../prompts/prompt-store';
 import type { ParsedPrompt } from '../prompts/prompt-parser';
 import {
@@ -40,7 +50,7 @@ import {
   transition,
   updatePromptProgress,
 } from '../state/run-state';
-import { withLock } from '../state/locks';
+import { listLocks, withLock } from '../state/locks';
 import { buildMergeAuditPackage, buildReviewPackage } from '../review/review-package';
 import type { AuditedPromptContent } from '../review/review-package';
 import {
@@ -75,11 +85,16 @@ import {
   contentHash,
   diffFingerprint,
   measureDiff,
-  projectConfigHash,
   pushBounded,
   reviewFingerprint,
+  stableHash,
   testFailureFingerprint,
 } from './fingerprints';
+import {
+  assertEffectivePolicySnapshot,
+  executionRelevantProjectConfigHash,
+  resolveEffectiveExecutionPolicy,
+} from './effective-policy';
 import { renderPullRequestBody } from './pr-body';
 import type { OrchestratorPorts } from './ports';
 
@@ -113,6 +128,14 @@ interface Context {
   onUpdate: ((run: RunRecord) => void) | undefined;
   prompts: PromptFile[];
   workingDir: string;
+
+  /**
+   * Política congelada desta execução.
+   *
+   * `project` continua no contexto para identidade, caminhos e comandos de
+   * infraestrutura. Nenhum limite sai dele: quem precisa de teto lê `policy`.
+   */
+  policy: EffectiveExecutionPolicySnapshot;
 
   /* --- Evidência corrente, alimentada a cada tentativa -------------------
    * O Loop Guard precisa comparar a tentativa atual com as anteriores. Estes
@@ -179,15 +202,50 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
   }
 
   let run: RunRecord;
+  let policy: EffectiveExecutionPolicySnapshot;
+
   if (options.resumeRunId) {
     const loaded = loadRun(project.id, options.resumeRunId);
     if (!loaded.ok) return loaded;
-    run = loaded.value;
-    run = { ...run, pauseRequested: false, cancelRequested: false };
-    logger.info(`Retomando execução ${run.runId} no estado ${run.state}.`);
+
+    /*
+     * Retomada NÃO recompõe a política.
+     *
+     * A fonte da verdade é `run.effectivePolicy`, congelada quando a execução
+     * começou. Uma execução legada, sem snapshot, para aqui em vez de ser
+     * retomada em silêncio sob os limites de hoje.
+     */
+    const asserted = assertEffectivePolicySnapshot(loaded.value);
+    if (!asserted.ok) return asserted;
+    policy = asserted.value;
+
+    run = { ...loaded.value, pauseRequested: false, cancelRequested: false };
+    logger.info(
+      `Retomando execução ${run.runId} no estado ${run.state}, sob a política congelada em ${policy.capturedAt}.`,
+    );
   } else {
-    run = createRun({ projectId: project.id, dryRun: options.dryRun, prompts });
-    logger.info(`Nova execução ${run.runId} com ${prompts.length} prompt(s).`);
+    const resolved = resolveEffectiveExecutionPolicy({
+      globalConfig: config,
+      projectConfig: project,
+      declaredProjectLoopGuard: readDeclaredLoopGuard(project.id),
+      /* Ainda não há camada de rodada. Ausência é `null` explícito — não uma
+         configuração inventada com valores neutros. */
+      roundConfig: null,
+    });
+    if (!resolved.ok) return resolved;
+    policy = resolved.value;
+
+    run = createRun({
+      projectId: project.id,
+      dryRun: options.dryRun,
+      prompts,
+      effectivePolicy: policy,
+      sourceSnapshots: captureSourceSnapshots(project, prompts),
+    });
+    logger.info(
+      `Nova execução ${run.runId} com ${String(prompts.length)} prompt(s), ` +
+        `política ${policy.effectiveHash} congelada.`,
+    );
   }
 
   const ctx: Context = {
@@ -199,7 +257,10 @@ async function executeWithinLock(options: RunOptions): Promise<Result<RunRecord>
     onUpdate: options.onUpdate,
     prompts,
     workingDir: run.workingDirectory ?? project.repositoryPath,
-    promptSnapshots: snapshotPrompts(prompts),
+    policy,
+    /* Na retomada, os hashes vêm do disco: recalculá-los aqui compararia a
+       edição contra ela mesma e o gatilho nunca dispararia. */
+    promptSnapshots: promptSnapshotsOf(run, prompts),
     lastScopeViolations: [],
     lastForbiddenViolations: [],
     lastChangedFileCount: 0,
@@ -299,14 +360,22 @@ async function pipeline(ctx: Context, initial: RunRecord): Promise<Result<RunRec
 /* ------------------------------------------------------------------------- */
 
 async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord>> {
-  /* Congela contexto e configuração: alteração posterior invalida a execução
-     em vez de ser absorvida silenciosamente no meio das tentativas. */
-  const contextRaw = readTextSync(path.join(projectDir(input.projectId), 'PROJECT-CONTEXT.md'));
-  let run = save(ctx, {
-    ...transition(input, 'VALIDATING', 'Validando configuração e ferramentas.'),
-    projectContextHash: contextRaw.ok ? contentHash(contextRaw.value) : '',
-    projectConfigHash: projectConfigHash(ctx.project),
-  });
+  /*
+   * `prepare()` apenas CONFERE a política congelada.
+   *
+   * Ele rodava também na retomada e reescrevia os hashes com os valores de
+   * agora — o que apagava a única evidência de que o cadastro havia sido
+   * editado entre a parada e a retomada, e transformava a detecção de mutação
+   * em código morto. Aqui não se recalcula, não se substitui, não se atualiza
+   * e não se recaptura.
+   */
+  const asserted = assertEffectivePolicySnapshot(input);
+  if (!asserted.ok) return asserted;
+
+  let run = save(
+    ctx,
+    transition(input, 'VALIDATING', 'Validando configuração e ferramentas.'),
+  );
 
   const { project, ports, config, logger } = ctx;
 
@@ -372,28 +441,65 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     return ok(run);
   }
 
+  const worktreePath = resolveWorktreePath(project, run.runId);
+
   /*
-   * Retomada adota o próprio worktree, sujo ou não.
+   * Retomada adota o próprio worktree, sujo ou não — mediante PROVA.
    *
    * A regra de "não reaproveitar worktree sujo" existe para impedir que uma
-   * execução NOVA se aproprie do trabalho pendente de outra. Ao retomar, o
-   * worktree é desta mesma execução e está na mesma branch: a sujeira é o
-   * trabalho que o OrqPEG preservou de propósito ao parar. Recriá-lo seria
-   * perder exatamente o que se quis proteger — e sem isto nenhuma execução
-   * parada pelo Loop Guard poderia ser retomada.
+   * execução se aproprie do trabalho pendente de outra. Ao retomar, a sujeira é
+   * o trabalho que o OrqPEG preservou de propósito ao parar, e recriar o
+   * worktree perderia exatamente o que se quis proteger.
+   *
+   * O que mudou é o critério. Antes, a única evidência era
+   * `git -C <caminho> rev-parse --abbrev-ref HEAD` — e `git -C` responde pelo
+   * repositório que CONTÉM o diretório, então a resposta certa podia vir de
+   * outro worktree, ou de um diretório que nem worktree registrado era. Um
+   * merge em conflito, que mantém o HEAD anexado, também passava. Agora a
+   * adoção exige prova positiva de propriedade e ausência de operação Git pela
+   * metade; qualquer falha para a execução com o motivo nomeado.
    */
   if (run.worktreePath && run.branchName === branchName) {
-    const existing = await ports.git.currentBranch(run.worktreePath);
-    if (existing.ok && existing.value === branchName) {
-      ctx.logger.info(
-        `Retomando no worktree já existente desta execução: ${run.worktreePath}`,
+    const owned = await ports.worktree.verifyOwnership({
+      repoDir: project.repositoryPath,
+      worktreePath: run.worktreePath,
+      canonicalPath: worktreePath,
+      branch: branchName,
+      allowedRoot: worktreeRootOf(project),
+    });
+    if (!owned.ok) {
+      save(
+        ctx,
+        transition(
+          run,
+          'BLOCKED',
+          `O worktree registrado nesta execução não pôde ser adotado: ${owned.error.message}`,
+          { code: owned.error.code },
+        ),
       );
-      run = save(ctx, { ...run, workingDirectory: run.worktreePath });
-      return ok(run);
+      return owned;
     }
+
+    /*
+     * Lock de escopo `worktree`, além do lock de projeto.
+     *
+     * O lock de projeto serializa execuções do MESMO projeto. Ele não impede
+     * que dois projetos apontem para o mesmo diretório de worktree por engano
+     * de cadastro; a chave aqui é o caminho, e o dono é o runId.
+     */
+    const claim = await claimWorktree(ctx, run, run.worktreePath);
+    if (!claim.ok) {
+      save(ctx, transition(run, 'BLOCKED', claim.error.message, { code: claim.error.code }));
+      return claim;
+    }
+
+    ctx.logger.info(
+      `Retomando no worktree já existente desta execução: ${run.worktreePath}`,
+    );
+    run = save(ctx, { ...run, workingDirectory: run.worktreePath });
+    return ok(run);
   }
 
-  const worktreePath = resolveWorktreePath(project, run.runId);
   const prepared = await ports.worktree.prepare({
     repoDir: project.repositoryPath,
     worktreePath,
@@ -414,9 +520,41 @@ async function prepare(ctx: Context, input: RunRecord): Promise<Result<RunRecord
   return ok(run);
 }
 
+function worktreeRootOf(project: ProjectConfig): string {
+  return project.worktree.rootPath ?? path.join(project.repositoryPath, '..', 'AI-Worktrees');
+}
+
 function resolveWorktreePath(project: ProjectConfig, runId: string): string {
-  const root = project.worktree.rootPath ?? path.join(project.repositoryPath, '..', 'AI-Worktrees');
-  return defaultWorktreePath(root, project.id, runId);
+  return defaultWorktreePath(worktreeRootOf(project), project.id, runId);
+}
+
+/**
+ * Verifica que nenhum OUTRO `runId` detém o worktree.
+ *
+ * Lock existente do mesmo run é normal: é o rastro da execução anterior deste
+ * mesmo trabalho. Lock de outro run significa que há duas execuções apontando
+ * para o mesmo diretório — situação que só se resolve com decisão humana.
+ */
+async function claimWorktree(
+  ctx: Context,
+  run: RunRecord,
+  worktreePath: string,
+): Promise<Result<void>> {
+  const key = normalizeForCompare(worktreePath);
+  const existing = listLocks().find(
+    (lock) => lock.scope === 'worktree' && normalizeForCompare(lock.key) === key,
+  );
+
+  if (existing && existing.runId !== null && existing.runId !== run.runId) {
+    return fail(
+      'WORKTREE_OWNERSHIP_MISMATCH',
+      `O worktree ${worktreePath} está reservado pela execução ${existing.runId} (${existing.operation}, desde ${existing.acquiredAt}). Worktree sujo de outra execução não é adotado.`,
+      { worktreePath, holder: existing.runId, requester: run.runId },
+    );
+  }
+
+  ctx.logger.debug?.(`Worktree ${worktreePath} adotado pela execução ${run.runId}.`);
+  return ok(undefined);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -448,7 +586,7 @@ async function executePromptLoop(ctx: Context, input: RunRecord): Promise<Result
 
     const current = run.prompts.find((p) => p.promptId === promptFile.id);
     if (current?.status !== 'APPROVED') {
-      if (ctx.project.execution.stopOnBlocked) {
+      if (ctx.policy.loopGuard.stopOnBlocked) {
         ctx.logger.warn(`Prompt ${promptFile.id} não aprovado. Interrompendo conforme política.`);
         return ok(run);
       }
@@ -467,7 +605,7 @@ async function executeSinglePrompt(
 ): Promise<Result<RunRecord>> {
   let run = input;
   const { project, config, logger, ports } = ctx;
-  const maxAttempts = Math.max(1, project.execution.maxAttemptsPerPrompt);
+  const maxAttempts = Math.max(1, ctx.policy.loopGuard.maxAttemptsPerPrompt);
 
   let previousReview: PromptReview | null = null;
   let lastTests: TestSuiteResult | null = null;
@@ -514,9 +652,29 @@ async function executeSinglePrompt(
       );
     }
 
-    const artifactDir = ensureDir(
+    /*
+     * O diretório da tentativa não pode existir.
+     *
+     * A numeração já deriva do contador persistido, o que resolve a causa
+     * lógica. Esta é a proteção física: se o número repetir por qualquer
+     * motivo — registro restaurado de backup, cópia manual, defeito futuro — o
+     * sistema para em vez de truncar a evidência da tentativa anterior.
+     */
+    const attemptDirResult = createExclusiveDirSync(
       attemptArtifactDir(project.id, run.runId, promptFile.id, attempt),
     );
+    if (!attemptDirResult.ok) {
+      run = save(
+        ctx,
+        transition(
+          run,
+          'FAILED',
+          `Artefatos da tentativa ${String(attempt)} de ${promptFile.id} já existem em disco.`,
+        ),
+      );
+      return attemptDirResult;
+    }
+    const artifactDir = attemptDirResult.value;
     const attemptStartedAt = nowIso();
     run = save(ctx, startPromptClock(run, promptFile.id, attemptStartedAt));
 
@@ -550,7 +708,7 @@ async function executeSinglePrompt(
       promptContent: parsed.rawBody,
       attempt,
       maxAttempts,
-      testCommands: project.commands.tests,
+      testCommands: ctx.policy.commands.tests,
     };
 
     const instruction =
@@ -577,7 +735,7 @@ async function executeSinglePrompt(
       cwd: ctx.workingDir,
       instruction,
       timeoutMs: config.agents.claudeTimeoutSeconds * 1000,
-      model: project.agents.claudeModel ?? config.agents.defaultClaudeModel,
+      model: ctx.policy.agents.claudeModel,
       artifactDir,
       readOnly: false,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -598,9 +756,9 @@ async function executeSinglePrompt(
     /* --- OrqPEG executa os testes oficiais ---------------------------- */
     run = save(ctx, transition(run, 'RUNNING_TESTS', 'Executando a suíte oficial de testes.'));
     const tests = await ports.tests.run({
-      commands: project.commands.tests,
+      commands: ctx.policy.commands.tests,
       cwd: ctx.workingDir,
-      timeoutSeconds: project.commands.timeoutSeconds,
+      timeoutSeconds: ctx.policy.commands.timeoutSeconds,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       onCommandStart: (command) => logger.info(`  → ${command}`),
     });
@@ -696,7 +854,7 @@ async function executeSinglePrompt(
         responseSchema: JSON.stringify(schema.value, null, 2),
       })}\n\n${reviewPackage}`,
       timeoutMs: config.agents.codexTimeoutSeconds * 1000,
-      model: project.agents.codexModel ?? config.agents.defaultCodexModel,
+      model: ctx.policy.agents.codexModel,
       artifactDir,
       readOnly: true,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -839,7 +997,7 @@ async function commitPrompt(
   changedFiles: string[],
 ): Promise<Result<RunRecord>> {
   let run = input;
-  if (!ctx.project.git.commitAfterApproval) {
+  if (!ctx.policy.git.commitAfterApproval) {
     return ok(save(ctx, updatePromptProgress(run, promptFile.id, {
       status: 'APPROVED',
       approvedAt: nowIso(),
@@ -863,7 +1021,7 @@ async function commitPrompt(
   const staged = await ctx.ports.git.addPaths(ctx.workingDir, changedFiles);
   if (!staged.ok) return staged;
 
-  const message = `${ctx.project.git.commitMessagePrefix} ${ctx.project.id}: concluir ${promptFile.id} — ${promptFile.name}`.trim();
+  const message = `${ctx.policy.git.commitMessagePrefix} ${ctx.project.id}: concluir ${promptFile.id} — ${promptFile.name}`.trim();
   const commit = await ctx.ports.git.commit(ctx.workingDir, message);
   if (!commit.ok) return commit;
 
@@ -893,9 +1051,9 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
 
   run = save(ctx, transition(run, 'RUNNING_TESTS', 'Executando a suíte completa.'));
   const finalTests = await ports.tests.run({
-    commands: project.commands.tests,
+    commands: ctx.policy.commands.tests,
     cwd: ctx.workingDir,
-    timeoutSeconds: project.commands.timeoutSeconds,
+    timeoutSeconds: ctx.policy.commands.timeoutSeconds,
     ...(ctx.signal ? { signal: ctx.signal } : {}),
     onCommandStart: (command) => logger.info(`  → ${command}`),
   });
@@ -909,7 +1067,7 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     return ok(run);
   }
 
-  if (!project.git.pushAfterRun) {
+  if (!ctx.policy.git.pushAfterRun) {
     run = save(ctx, transition(run, 'COMPLETED', 'Execução concluída sem push (política do projeto).'));
     return ok(run);
   }
@@ -923,9 +1081,13 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     save(ctx, transition(run, 'FAILED', 'Falha no push.'));
     return pushed;
   }
-  run = save(ctx, { ...run, pushedAt: nowIso(), pushedRemote: project.remote });
+  run = save(ctx, {
+    ...run,
+    pushedAt: nowIso(),
+    pushedRemote: ctx.policy.repository.remote,
+  });
 
-  if (!project.pullRequest.enabled) {
+  if (!ctx.policy.pullRequest.enabled) {
     run = save(ctx, transition(run, 'COMPLETED', 'Execução concluída sem PR (política do projeto).'));
     return ok(run);
   }
@@ -943,12 +1105,12 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
     const body = renderPullRequestBody({ project, run });
     const created = await ports.github.createDraftPullRequest({
       cwd: ctx.workingDir,
-      repo: project.githubRepository,
-      base: project.baseBranch,
+      repo: ctx.policy.repository.githubRepository,
+      base: ctx.policy.repository.baseBranch,
       head: branch,
-      title: `${project.git.commitMessagePrefix} ${project.name} — ${run.runId}`.trim(),
+      title: `${ctx.policy.git.commitMessagePrefix} ${project.name} — ${run.runId}`.trim(),
       body,
-      draft: project.pullRequest.draftDuringExecution,
+      draft: ctx.policy.pullRequest.draftDuringExecution,
     });
     if (!created.ok) {
       save(ctx, transition(run, 'FAILED', 'Falha ao criar a pull request.'));
@@ -967,7 +1129,7 @@ async function publish(ctx: Context, input: RunRecord): Promise<Result<RunRecord
   run = save(ctx, { ...run, pullRequest: pr });
   logger.info(`Pull request #${pr.number}: ${pr.url}`);
 
-  if (!project.pullRequest.waitForChecks) return ok(run);
+  if (!ctx.policy.pullRequest.waitForChecks) return ok(run);
 
   run = save(ctx, transition(run, 'WAITING_CI', 'Aguardando o CI do GitHub Actions.'));
   const checks = await ports.github.waitForChecks({
@@ -1005,7 +1167,7 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
   let run = input;
   const { project, config, ports, logger } = ctx;
 
-  if (!project.merge.enabled || project.merge.mode !== 'dual_ai_consensus') {
+  if (!ctx.policy.merge.enabled || ctx.policy.merge.mode !== 'dual_ai_consensus') {
     run = save(
       ctx,
       transition(run, 'COMPLETED', 'Merge automático desabilitado para este projeto.'),
@@ -1034,7 +1196,7 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
     run = save(ctx, invalidateMergeApprovals(run, 'O head SHA mudou antes da auditoria.'));
   }
 
-  if (project.pullRequest.markReadyBeforeMerge && currentPr.isDraft) {
+  if (ctx.policy.pullRequest.markReadyBeforeMerge && currentPr.isDraft) {
     await ports.github.markReadyForReview({
       cwd: ctx.workingDir,
       repo: project.githubRepository,
@@ -1080,7 +1242,7 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
     testsSummary: run.finalTests ? summarizeTestSuite(run.finalTests) : 'Suíte final não executada.',
     ciSummary: describeChecks(run),
     promptsSummary: describePrompts(run),
-    minimumConfidence: project.merge.minimumConfidence,
+    minimumConfidence: ctx.policy.merge.minimumConfidence,
   };
 
   /* --- Auditoria independente do Claude ------------------------------- */
@@ -1101,7 +1263,7 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
       responseSchema: JSON.stringify(claudeSchema.value, null, 2),
     })}\n\n${auditPackage}`,
     timeoutMs: config.agents.claudeTimeoutSeconds * 1000,
-    model: project.agents.claudeModel ?? config.agents.defaultClaudeModel,
+    model: ctx.policy.agents.claudeModel,
     artifactDir: claudeDir,
     readOnly: true,
     ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -1131,7 +1293,7 @@ async function auditAndMerge(ctx: Context, input: RunRecord): Promise<Result<Run
       responseSchema: JSON.stringify(codexSchema.value, null, 2),
     })}\n\n${auditPackage}`,
     timeoutMs: config.agents.codexTimeoutSeconds * 1000,
-    model: project.agents.codexModel ?? config.agents.defaultCodexModel,
+    model: ctx.policy.agents.codexModel,
     artifactDir: codexDir,
     readOnly: true,
     ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -1309,6 +1471,46 @@ function snapshotPrompts(prompts: readonly PromptFile[]): Map<string, string> {
   return snapshots;
 }
 
+/**
+ * Congela as fontes no instante da criação da execução.
+ *
+ * Os hashes de prompt viviam só em memória, recalculados no início de cada
+ * processo. Numa retomada isso significava fotografar o prompt JÁ editado e
+ * compará-lo consigo mesmo: `PROMPT_CHANGED_DURING_RUN` não podia disparar.
+ * Persistindo aqui, a comparação passa a ser contra o conteúdo original.
+ */
+function captureSourceSnapshots(
+  project: ProjectConfig,
+  prompts: readonly PromptFile[],
+): RunSourceSnapshots {
+  const promptHashes: Record<string, string> = {};
+  for (const [id, hash] of snapshotPrompts(prompts)) promptHashes[id] = hash;
+
+  const contextRaw = readTextSync(path.join(projectDir(project.id), 'PROJECT-CONTEXT.md'));
+
+  return {
+    promptHashes,
+    /* Cobre inclusão e remoção de prompts, que a comparação por prompt não
+       enxerga: um prompt novo simplesmente não teria par para comparar. */
+    promptSetHash: stableHash(
+      [...prompts].map((prompt) => prompt.id).sort(),
+    ),
+    projectContextHash: contextRaw.ok ? contentHash(contextRaw.value) : '',
+    projectConfigHash: executionRelevantProjectConfigHash(project),
+    roundConfigHash: null,
+  };
+}
+
+/** Hashes originais dos prompts: do registro quando houver, do disco na criação. */
+function promptSnapshotsOf(
+  run: RunRecord,
+  prompts: readonly PromptFile[],
+): Map<string, string> {
+  const persisted = run.sourceSnapshots?.promptHashes;
+  if (!persisted) return snapshotPrompts(prompts);
+  return new Map(Object.entries(persisted));
+}
+
 /** Estados que já representam uma parada nomeada e não devem ser sobrescritos. */
 function isStopState(state: RunState): boolean {
   const stops: ReadonlySet<RunState> = new Set<RunState>([
@@ -1379,7 +1581,8 @@ function decideNextAttempt(
   evidence: { previousReview: PromptReview | null; lastTests: TestSuiteResult | null },
 ): LoopGuardDecision {
   const budget = budgetOf(run, promptId);
-  const loopConfig = ctx.project.execution.loopGuard;
+  /* Limites SEMPRE da política congelada. Nunca de `ctx.project`. */
+  const loopConfig = ctx.policy.loopGuard;
 
   const promptFile = ctx.prompts.find((p) => p.id === promptId);
   const currentPromptRaw = promptFile ? readTextSync(promptFile.absolutePath) : null;
@@ -1391,6 +1594,22 @@ function decideNextAttempt(
   );
   const contextHashNow = contextRaw.ok ? contentHash(contextRaw.value) : '';
 
+  /*
+   * O hash "de agora" precisa vir do DISCO.
+   *
+   * Antes ele era calculado sobre `ctx.project` — o mesmo objeto em memória
+   * que originou o snapshot, carregado uma única vez no início. A comparação
+   * era do objeto contra si mesmo e nunca podia falhar. Reler o cadastro é o
+   * que torna a Regra 2 (mutação interrompe) efetiva sem violar a Regra 1 (a
+   * política congelada continua valendo).
+   */
+  const onDisk = getProject(ctx.project.id);
+  const configHashNow = onDisk.ok
+    ? executionRelevantProjectConfigHash(onDisk.value)
+    : /* Projeto removido durante a execução conta como mutação, não como
+         "sem alteração": string vazia desligaria a detecção. */
+      'absent';
+
   const diffs = budget.diffFingerprints;
   const previousDiff = diffs.length >= 2 ? diffs[diffs.length - 2] ?? null : null;
   const currentDiff = diffs.length >= 1 ? diffs[diffs.length - 1] ?? null : null;
@@ -1398,7 +1617,7 @@ function decideNextAttempt(
   return evaluateLoopGuard({
     config: loopConfig,
     budget,
-    maxAttemptsPerPrompt: ctx.project.execution.maxAttemptsPerPrompt,
+    maxAttemptsPerPrompt: ctx.policy.loopGuard.maxAttemptsPerPrompt,
     nextAttempt,
     nowMs: Date.now(),
     runStartedAtMs: Date.parse(run.createdAt) || Date.now(),
@@ -1412,9 +1631,9 @@ function decideNextAttempt(
     promptHashNow,
     promptHashSnapshot: ctx.promptSnapshots.get(promptId) ?? '',
     contextHashNow,
-    contextHashSnapshot: run.projectContextHash ?? '',
-    configHashNow: projectConfigHash(ctx.project),
-    configHashSnapshot: run.projectConfigHash ?? '',
+    contextHashSnapshot: run.sourceSnapshots?.projectContextHash ?? '',
+    configHashNow,
+    configHashSnapshot: run.sourceSnapshots?.projectConfigHash ?? '',
 
     previousDiffFingerprint: previousDiff,
     currentDiffFingerprint: currentDiff,
@@ -1479,7 +1698,18 @@ function applyLoopGuardStop(
   };
 }
 
-/** Grava a evidência da parada junto aos artefatos e ao relatório da execução. */
+/**
+ * Grava a evidência da parada em um diretório NOVO, nunca reaproveitado.
+ *
+ * Antes, `loop-guard.json` e `LOOP-GUARD.md` moravam em um caminho fixo por
+ * prompt e eram truncados a cada parada. O caso que isso destruía é justamente
+ * o mais importante: a pessoa autoriza um override lendo a decisão da parada
+ * anterior, a tentativa extra roda, para de novo — e a decisão que fundamentou
+ * a autorização já não existe para conferência.
+ *
+ * A numeração vem do que está PERSISTIDO, e o diretório é criado com
+ * exclusividade: colisão vira `STATE_CORRUPT` em vez de sobrescrita silenciosa.
+ */
 function writeLoopGuardArtifacts(
   ctx: Context,
   run: RunRecord,
@@ -1487,27 +1717,114 @@ function writeLoopGuardArtifacts(
   decision: LoopGuardDecision,
 ): void {
   const budget = budgetOf(run, promptId);
-  const dir = ensureDir(
-    path.join(projectArtifactsDir(ctx.project.id), run.runId, promptId),
-  );
-  writeArtifactSync(
-    path.join(dir, 'loop-guard.json'),
-    `${JSON.stringify({ decision, budget, at: nowIso() }, null, 2)}\n`,
+  const stopsDir = path.join(
+    projectArtifactsDir(ctx.project.id),
+    run.runId,
+    promptId,
+    'stops',
   );
 
-  const reportDir = ensureDir(
-    path.join(projectReportsDir(ctx.project.id), run.runId, 'prompts', promptId),
+  const index = readStopIndex(stopsDir);
+  const stopSequence = index.length + 1;
+  const previous = index[index.length - 1] ?? null;
+  const createdAt = nowIso();
+
+  const payload = {
+    stopSequence,
+    attempt: budget.attempts,
+    trigger: decision.trigger,
+    decision,
+    budget,
+    policyEffectiveHash: ctx.policy.effectiveHash,
+    previousStopHash: previous ? previous.decisionHash : null,
+    createdAt,
+  };
+  const decisionHash = stableHash(payload);
+
+  const dir = createExclusiveDirSync(
+    path.join(stopsDir, `stop-${String(stopSequence).padStart(3, '0')}`),
   );
-  writeArtifactSync(
-    path.join(reportDir, 'LOOP-GUARD.md'),
+  if (!dir.ok) {
+    /* Não sobrescreve e não silencia: o operador precisa saber que a numeração
+       divergiu do disco antes de confiar no que vai ler. */
+    ctx.logger.error(dir.error.message);
+    return;
+  }
+
+  writeExclusiveSync(
+    path.join(dir.value, 'loop-guard.json'),
+    `${JSON.stringify({ ...payload, decisionHash }, null, 2)}\n`,
+  );
+  writeExclusiveSync(
+    path.join(dir.value, 'LOOP-GUARD.md'),
     renderLoopGuardReport({
       project: ctx.project,
       run,
       promptId,
       decision,
       budget,
+      policy: ctx.policy.loopGuard,
     }),
   );
+
+  /* O índice é o único arquivo reescrito, e é derivado: perdê-lo não perde
+     evidência, porque cada parada carrega sua própria cópia dos campos. */
+  const entry: StopIndexEntry = {
+    stopSequence,
+    attempt: budget.attempts,
+    trigger: decision.trigger,
+    previousStopHash: previous ? previous.decisionHash : null,
+    decisionHash,
+    createdAt,
+  };
+  writeArtifactSync(
+    path.join(stopsDir, 'index.json'),
+    `${JSON.stringify([...index, entry], null, 2)}\n`,
+  );
+}
+
+interface StopIndexEntry {
+  stopSequence: number;
+  attempt: number;
+  trigger: LoopGuardTrigger | null;
+  previousStopHash: string | null;
+  decisionHash: string;
+  createdAt: string;
+}
+
+/**
+ * Sequência da próxima parada, derivada do disco.
+ *
+ * Deriva de `max(paradas persistidas)` e não de um contador em memória: um
+ * contador local reinicia junto com o processo, e reiniciar a numeração é
+ * exatamente o que reintroduz a sobrescrita. O índice é conferido contra os
+ * diretórios reais para que um índice truncado não faça a contagem recuar.
+ */
+function readStopIndex(stopsDir: string): StopIndexEntry[] {
+  const fromIndex = readJsonSync<StopIndexEntry[]>(path.join(stopsDir, 'index.json'));
+  const entries = fromIndex.ok && Array.isArray(fromIndex.value) ? fromIndex.value : [];
+
+  const onDisk = listDirectoriesSync(stopsDir).filter((name) => /^stop-\d+$/.test(name));
+  if (onDisk.length <= entries.length) return entries;
+
+  /* Diretórios sem entrada no índice significam índice perdido ou truncado.
+     A contagem segue o disco, que é a evidência; o índice é só o atalho. */
+  const highest = onDisk.reduce((max, name) => {
+    const parsed = Number.parseInt(name.slice('stop-'.length), 10);
+    return Number.isFinite(parsed) && parsed > max ? parsed : max;
+  }, 0);
+  const padded = [...entries];
+  while (padded.length < highest) {
+    padded.push({
+      stopSequence: padded.length + 1,
+      attempt: 0,
+      trigger: null,
+      previousStopHash: null,
+      decisionHash: 'desconhecido',
+      createdAt: 'desconhecido',
+    });
+  }
+  return padded;
 }
 
 /**

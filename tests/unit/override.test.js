@@ -22,6 +22,7 @@ const {
 } = require('../../dist/execution/override');
 const { evaluateLoopGuard, createPromptBudget, wasOverrideApplied } = require('../../dist/execution/loop-guard');
 const { defaultLoopGuardConfig } = require('../../dist/execution/loop-guard-config');
+const { syntheticLoopGuardPolicy } = require('../helpers/policy');
 
 const JUSTIFICATIVA = 'O teste falhava por uma dependencia que acabei de instalar manualmente.';
 
@@ -44,7 +45,7 @@ function grant(run, extra = {}) {
     promptId: '010-x',
     justification: JUSTIFICATIVA,
     authorizedBy: 'pablo',
-    loopGuard: defaultLoopGuardConfig(),
+    policy: syntheticLoopGuardPolicy(),
     ...extra,
   });
 }
@@ -176,8 +177,8 @@ test('override pendente impede conceder outro', () => {
 });
 
 test('projeto com limite zero não permite override algum', () => {
-  const config = { ...defaultLoopGuardConfig(), maxManualOverridesPerPrompt: 0 };
-  const result = grant(runWith('NO_PROGRESS', 'soft_stop'), { loopGuard: config });
+  const config = syntheticLoopGuardPolicy({ maxManualOverridesPerPrompt: 0 });
+  const result = grant(runWith('NO_PROGRESS', 'soft_stop'), { policy: config });
   assert.equal(result.ok, false);
   assert.match(result.error.message, /não permite override/i);
 });
@@ -268,7 +269,7 @@ test('override NÃO libera cota nem autenticação', () => {
 /* ------------------------------------------------------------------------ */
 
 test('describeOverrides explica por que o botão não aparece', () => {
-  const config = defaultLoopGuardConfig();
+  const config = syntheticLoopGuardPolicy();
 
   const duro = describeOverrides(
     runWith('FORBIDDEN_AREA_CHANGED', 'hard_stop'),

@@ -1,5 +1,5 @@
 import type {
-  LoopGuardConfig,
+  EffectiveLoopGuardPolicy,
   LoopGuardTrigger,
   ManualOverride,
   PromptBudget,
@@ -62,7 +62,8 @@ export interface GrantOverrideInput {
   promptId: string;
   justification: string;
   authorizedBy: string;
-  loopGuard: LoopGuardConfig;
+  /** Política CONGELADA da execução. Nunca o cadastro atual do projeto. */
+  policy: EffectiveLoopGuardPolicy;
 }
 
 export interface GrantOverrideOutput {
@@ -76,7 +77,7 @@ export interface GrantOverrideOutput {
  * chamador, que já controla a gravação atômica.
  */
 export function grantManualOverride(input: GrantOverrideInput): Result<GrantOverrideOutput> {
-  const { run, promptId, loopGuard } = input;
+  const { run, promptId, policy } = input;
 
   const decision = run.lastLoopGuard;
   if (!decision || decision.trigger === null) {
@@ -126,7 +127,7 @@ export function grantManualOverride(input: GrantOverrideInput): Result<GrantOver
     });
   }
 
-  const limit = Math.max(0, loopGuard.maxManualOverridesPerPrompt);
+  const limit = Math.max(0, policy.maxManualOverridesPerPrompt);
   if (limit === 0) {
     return fail(
       'VALIDATION_FAILED',
@@ -210,7 +211,7 @@ export function describeOverrides(
   run: RunRecord,
   promptId: string,
   budget: PromptBudget | undefined,
-  loopGuard: LoopGuardConfig,
+  policy: EffectiveLoopGuardPolicy,
 ): {
   limit: number;
   used: number;
@@ -219,7 +220,7 @@ export function describeOverrides(
   reason: string;
 } {
   const trigger = run.lastLoopGuard?.trigger ?? null;
-  const limit = Math.max(0, loopGuard.maxManualOverridesPerPrompt);
+  const limit = Math.max(0, policy.maxManualOverridesPerPrompt);
   const used = budget ? budget.manualOverridesUsed : 0;
   const pending = pendingOverrideCount(run, promptId);
 

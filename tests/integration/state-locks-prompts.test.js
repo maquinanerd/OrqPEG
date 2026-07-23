@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createRunInput } = require('../helpers/policy');
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'orqpeg-int-'));
 process.env.ORQPEG_HOME = HOME;
@@ -220,7 +221,7 @@ test('newRunId produz identificador único e seguro para caminho', () => {
 
 test('estado é persistido e relido integralmente', () => {
   const project = makeProject();
-  const run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+  const run = createRun(createRunInput(project, promptFiles()));
 
   assert.equal(saveRun(run).ok, true);
   const loaded = loadRun(project.id, run.runId);
@@ -232,7 +233,7 @@ test('estado é persistido e relido integralmente', () => {
 
 test('transições válidas são aceitas e registram evento', () => {
   const project = makeProject();
-  let run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+  let run = createRun(createRunInput(project, promptFiles()));
   run = transition(run, 'VALIDATING', 'validando');
   run = transition(run, 'PREPARING_WORKTREE', 'worktree');
   run = transition(run, 'RUNNING_CLAUDE', 'claude');
@@ -302,7 +303,7 @@ test('a cadeia completa do orquestrador é percorrível sem transição rejeitad
 
 test('a cadeia percorrida de fato muda o estado (nenhuma transição é ignorada)', () => {
   const project = makeProject();
-  let run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+  let run = createRun(createRunInput(project, promptFiles()));
 
   const cadeia = [
     'VALIDATING', 'PREPARING_WORKTREE', 'RUNNING_CLAUDE', 'RUNNING_TESTS',
@@ -349,7 +350,7 @@ test('LOOP_GUARD_TRIGGERED é alcançável de todo estado ativo do fluxo', () =>
 
 test('a parada do Loop Guard muda o estado de verdade, sem rejeição', () => {
   const project = makeProject();
-  let run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+  let run = createRun(createRunInput(project, promptFiles()));
   const caminho = [
     'VALIDATING',
     'RUNNING_CLAUDE',
@@ -386,7 +387,7 @@ test('variantes do fluxo também são percorríveis', () => {
 
 test('progresso de prompt e agregados', () => {
   const project = makeProject();
-  let run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+  let run = createRun(createRunInput(project, promptFiles()));
 
   assert.equal(allPromptsApproved(run), false);
   assert.equal(nextPendingPrompt(run).promptId, '010-a');
@@ -402,7 +403,7 @@ test('progresso de prompt e agregados', () => {
 
 test('invalidateMergeApprovals invalida TODAS as auditorias e zera o consenso', () => {
   const project = makeProject();
-  let run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+  let run = createRun(createRunInput(project, promptFiles()));
   run = {
     ...run,
     mergeReviews: [
@@ -422,7 +423,7 @@ test('invalidateMergeApprovals invalida TODAS as auditorias e zera o consenso', 
 
 test('pausa e cancelamento marcam o pedido sem destruir estado', () => {
   const project = makeProject();
-  let run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+  let run = createRun(createRunInput(project, promptFiles()));
   run = updatePromptProgress(run, '010-a', { status: 'APPROVED' });
 
   const paused = requestPause(run);
@@ -436,7 +437,7 @@ test('pausa e cancelamento marcam o pedido sem destruir estado', () => {
 
 test('listRuns e findActiveRun refletem o que foi gravado', () => {
   const project = makeProject();
-  const run = createRun({ projectId: project.id, dryRun: false, prompts: promptFiles() });
+  const run = createRun(createRunInput(project, promptFiles()));
   saveRun(transition(run, 'RUNNING_CLAUDE', 'ativo'));
 
   const runs = listRuns(project.id);

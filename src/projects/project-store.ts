@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ProjectConfig, Result } from '../types';
+import type { LoopGuardConfig, ProjectConfig, Result } from '../types';
 import { fail, ok } from '../utils/errors';
 import {
   directoryExists,
@@ -99,6 +99,36 @@ export function getProject(projectId: string): Result<ProjectConfig> {
   const raw = readJsonSync<unknown>(configPath);
   if (!raw.ok) return raw;
   return validateProjectConfig(migrateProjectShape(raw.value));
+}
+
+/**
+ * Campos de `execution.loopGuard` que o `project.json` REALMENTE declara.
+ *
+ * `getProject` normaliza na leitura e preenche todo campo ausente com o padrão
+ * do produto. Isso é bom para o resto do sistema e péssimo para compor
+ * camadas: depois da normalização é impossível distinguir "o projeto escolheu
+ * 5" de "o projeto não disse nada e 5 é o padrão" — e a camada global nunca
+ * conseguiria valer, porque o projeto sempre pareceria ter declarado tudo.
+ *
+ * Aqui o arquivo é lido cru, sem normalizar, só para saber quais chaves
+ * existem fisicamente.
+ */
+export function readDeclaredLoopGuard(projectId: string): Partial<LoopGuardConfig> {
+  const dir = resolveRegistrationDir(projectId);
+  if (!dir.ok) return {};
+
+  const configPath = path.join(dir.value, CONFIG_FILE_NAME);
+  if (!fileExists(configPath)) return {};
+
+  const raw = readJsonSync<Record<string, unknown>>(configPath);
+  if (!raw.ok) return {};
+
+  const execution = raw.value['execution'];
+  if (!execution || typeof execution !== 'object') return {};
+  const declared = (execution as Record<string, unknown>)['loopGuard'];
+  if (!declared || typeof declared !== 'object' || Array.isArray(declared)) return {};
+
+  return declared as Partial<LoopGuardConfig>;
 }
 
 /**

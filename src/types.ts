@@ -33,6 +33,11 @@ export type ErrorCode =
   | 'LOCK_HELD'
   | 'LOCK_FAILED'
   | 'STATE_CORRUPT'
+  | 'POLICY_SNAPSHOT_MISSING'
+  | 'WORKTREE_NOT_REGISTERED'
+  | 'WORKTREE_OWNERSHIP_MISMATCH'
+  | 'WORKTREE_OUTSIDE_ALLOWED_ROOT'
+  | 'GIT_OPERATION_IN_PROGRESS'
   | 'PROCESS_FAILED'
   | 'PROCESS_TIMEOUT'
   | 'PROCESS_INTERRUPTED'
@@ -112,6 +117,14 @@ export interface GlobalConfig {
     /** Raiz padrão para worktrees quando o projeto não define uma. */
     defaultWorktreeRoot: string | null;
   };
+  /**
+   * Camada global da política de looping. Ausente por padrão.
+   *
+   * Só os campos declarados sobrepõem os padrões do produto; o projeto e a
+   * rodada ainda sobrepõem esta camada. Serve para uma instalação inteira
+   * apertar um limite sem editar projeto por projeto.
+   */
+  loopGuard?: Partial<LoopGuardConfig>;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -214,6 +227,8 @@ export type LoopGuardTrigger =
   | 'REVIEW_OSCILLATION_DETECTED'
   | 'PROMPT_CHANGED_DURING_RUN'
   | 'PROJECT_CONTEXT_CHANGED'
+  | 'PROJECT_CONFIG_CHANGED'
+  | 'POLICY_SNAPSHOT_MISSING'
   | 'SCOPE_VIOLATION'
   | 'FORBIDDEN_AREA_CHANGED'
   | 'DIFF_BUDGET_EXCEEDED'
@@ -378,6 +393,118 @@ export interface ProjectConfig {
   editor?: string | null;
   createdAt?: string;
   updatedAt?: string;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Política efetiva congelada                                                 */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Política do Loop Guard já resolvida, com os tetos que moram fora de
+ * `loopGuard` no cadastro.
+ *
+ * `maxAttemptsPerPrompt` vive em `ProjectExecutionConfig`, não em
+ * `LoopGuardConfig`. Enquanto o guard precisar buscá-lo em outro lugar, sempre
+ * haverá um caminho que lê o cadastro vivo — foi exatamente assim que o
+ * denominador "3/5" apareceu no painel. Aqui os dois andam juntos.
+ */
+export interface EffectiveLoopGuardPolicy extends LoopGuardConfig {
+  maxAttemptsPerPrompt: number;
+  maxReviewerRetries: number;
+  continueAfterApproval: boolean;
+  stopOnBlocked: boolean;
+}
+
+/** Identidade do repositório, congelada: retomar não pode trocar de alvo. */
+export interface EffectiveRepositoryPolicy {
+  repositoryPath: string;
+  githubRepository: string;
+  remote: string;
+  baseBranch: string;
+  branchStrategy: BranchStrategy;
+}
+
+/**
+ * Fotografia imutável da política que rege UMA execução.
+ *
+ * Resolvida uma única vez, antes de `createRun()`, e nunca recalculada. Todo
+ * consumidor — guard, painel, override, retomada, relatórios, dry-run
+ * histórico, e os futuros orçamentos de CI e de auditoria — lê daqui. O
+ * cadastro do projeto continua servindo para identidade, permissão e
+ * existência; nunca para limites.
+ *
+ * O envelope é deliberadamente maior que o Loop Guard: congelar só os limites
+ * deixaria a retomada trocar a suíte de testes, o modelo do agente ou a branch
+ * base debaixo de uma execução já em curso.
+ */
+export interface EffectiveExecutionPolicySnapshot {
+  schemaVersion: 1;
+  capturedAt: string;
+
+  sources: {
+    globalConfigHash: string;
+    projectConfigHash: string;
+    /** `null` significa "esta fase não tem rodada", não "rodada vazia". */
+    roundConfigHash: string | null;
+  };
+
+  /**
+   * Identidade da política resolvida. Muda se, e só se, a política mudar.
+   *
+   * Duas execuções sob a mesma política têm o mesmo valor — não cobre o
+   * envelope (`capturedAt`, origens, procedência), que varia entre execuções
+   * idênticas. Para comparação e exibição.
+   */
+  effectiveHash: string;
+
+  /**
+   * Prova de não-adulteração do snapshot inteiro, `sourceMetadata` inclusive.
+   *
+   * Diferente de `effectiveHash`, cobre a procedência: sem isso, as marcas que
+   * declaram um snapshot materializado poderiam ser removidas no disco para que
+   * ele se passasse por congelamento histórico legítimo.
+   */
+  integrityHash: string;
+
+  loopGuard: EffectiveLoopGuardPolicy;
+  commands: ProjectCommandsConfig;
+  agents: ProjectAgentsConfig;
+  git: ProjectGitConfig;
+  pullRequest: ProjectPullRequestConfig;
+  merge: ProjectMergeConfig;
+  repository: EffectiveRepositoryPolicy;
+  worktree: ProjectWorktreeConfig;
+
+  sourceMetadata: {
+    projectId: string;
+    roundId: string | null;
+    projectUpdatedAt: string | null;
+    /**
+     * Verdadeiro quando o snapshot foi materializado depois do início da
+     * execução, para uma execução legada. Não é reconstrução histórica: é uma
+     * declaração explícita de que a política original se perdeu.
+     */
+    materializedFromLegacyRun?: boolean;
+    materializedAt?: string;
+    materializedBy?: string;
+  };
+}
+
+/**
+ * Hashes das fontes no instante do congelamento.
+ *
+ * Separados de `effectivePolicy.sources` de propósito: aquele grupo descreve
+ * de onde a política veio; este é o que a detecção de mutação compara contra o
+ * disco a cada volta do laço.
+ */
+export interface RunSourceSnapshots {
+  /** Hash do conteúdo de cada prompt, por `promptId`. */
+  promptHashes: Record<string, string>;
+  /** Hash do conjunto de prompts: pega inclusão e remoção, não só edição. */
+  promptSetHash: string;
+  projectContextHash: string | null;
+  projectConfigHash: string;
+  roundConfigHash: string | null;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -825,7 +952,26 @@ export interface RunRecord {
   lastLoopGuard: LoopGuardDecision | null;
   ciRepairCycles: number;
   mergeCorrectionCycles: number;
-  /** Hashes tirados no início da execução; divergência invalida a execução. */
+
+  /**
+   * Política congelada no início da execução. Fonte da verdade para todo
+   * limite, em toda retomada.
+   *
+   * `null` só ocorre em execuções criadas antes deste campo existir. É tratado
+   * fail-closed: a execução não é retomada em silêncio e o painel declara a
+   * política histórica indisponível em vez de inventar denominadores a partir
+   * do cadastro atual.
+   */
+  effectivePolicy: EffectiveExecutionPolicySnapshot | null;
+  /** Hashes das fontes no congelamento, comparados contra o disco a cada volta. */
+  sourceSnapshots: RunSourceSnapshots | null;
+
+  /**
+   * Mantidos por compatibilidade com execuções gravadas antes de
+   * `sourceSnapshots`. Escrita nova usa `sourceSnapshots`.
+   *
+   * @deprecated
+   */
   projectContextHash: string | null;
   projectConfigHash: string | null;
 }

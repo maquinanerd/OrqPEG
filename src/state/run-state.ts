@@ -1,11 +1,13 @@
 import * as crypto from 'node:crypto';
 import * as path from 'node:path';
 import type {
+  EffectiveExecutionPolicySnapshot,
   PromptFile,
   PromptProgress,
   Result,
   RunEvent,
   RunRecord,
+  RunSourceSnapshots,
   RunState,
 } from '../types';
 import { fail, ok } from '../utils/errors';
@@ -278,6 +280,15 @@ export interface CreateRunInput {
   projectId: string;
   dryRun: boolean;
   prompts: PromptFile[];
+  /**
+   * Política já resolvida pelo chamador.
+   *
+   * Obrigatória, e resolvida ANTES desta chamada de propósito: se `createRun`
+   * pudesse compor a política a partir do projeto, haveria dois lugares
+   * capazes de decidir limites, e o segundo acabaria divergindo do primeiro.
+   */
+  effectivePolicy: EffectiveExecutionPolicySnapshot;
+  sourceSnapshots: RunSourceSnapshots;
 }
 
 /** Monta um `RunRecord` completo, com todos os prompts em `PENDING`. */
@@ -350,8 +361,13 @@ export function createRun(input: CreateRunInput): RunRecord {
     lastLoopGuard: null,
     ciRepairCycles: 0,
     mergeCorrectionCycles: 0,
-    projectContextHash: null,
-    projectConfigHash: null,
+
+    effectivePolicy: input.effectivePolicy,
+    sourceSnapshots: input.sourceSnapshots,
+    /* Espelhados para que execuções gravadas agora continuem legíveis por uma
+       versão anterior do painel. A escrita nova é `sourceSnapshots`. */
+    projectContextHash: input.sourceSnapshots.projectContextHash,
+    projectConfigHash: input.sourceSnapshots.projectConfigHash,
 
     events: [initialEvent],
     lastError: null,
@@ -406,7 +422,10 @@ export function loadRun(projectId: string, runId: string): Result<RunRecord> {
 
   const read = readJsonSync<unknown>(filePath);
   if (!read.ok) return read;
-  return validateRunRecord(read.value, filePath);
+  return validateRunRecord(read.value, filePath, {
+    projectId: projectCheck.value,
+    runId: runCheck.value,
+  });
 }
 
 /**
@@ -425,7 +444,10 @@ export function listRuns(projectId: string): Result<RunRecord[]> {
     if (!fileName.toLowerCase().endsWith('.json')) continue;
     const read = readJsonSync<unknown>(path.join(dir, fileName));
     if (!read.ok) continue;
-    const validated = validateRunRecord(read.value, fileName);
+    const validated = validateRunRecord(read.value, fileName, {
+      projectId: projectCheck.value,
+      runId: fileName.replace(/\.json$/i, ''),
+    });
     if (!validated.ok) continue;
     records.push(validated.value);
   }
@@ -646,7 +668,11 @@ function appendEvent(run: RunRecord, event: RunEvent): RunRecord {
   return { ...run, events: trimmed, updatedAt: event.at };
 }
 
-function validateRunRecord(value: unknown, source: string): Result<RunRecord> {
+function validateRunRecord(
+  value: unknown,
+  source: string,
+  expected: { projectId: string; runId: string },
+): Result<RunRecord> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return fail('STATE_CORRUPT', `Registro de execução inválido em ${source}.`, { source });
   }
@@ -705,5 +731,34 @@ function validateRunRecord(value: unknown, source: string): Result<RunRecord> {
     });
   }
 
-  return ok(value as RunRecord);
+  /*
+   * Amarração de identidade.
+   *
+   * O caminho `.../<projectId>/state/<runId>.json` era a única prova de que o
+   * registro pertencia a quem o pediu. Um arquivo copiado entre projetos, ou
+   * com `runId` interno divergente do nome, produziria nomes de branch e
+   * caminhos de worktree derivados do projeto errado.
+   */
+  if (raw['projectId'] !== expected.projectId || raw['runId'] !== expected.runId) {
+    return fail(
+      'STATE_CORRUPT',
+      `O registro em ${source} identifica-se como ${String(raw['projectId'])}/${String(raw['runId'])}, ` +
+        `mas foi carregado como ${expected.projectId}/${expected.runId}.`,
+      { source, expected, found: { projectId: raw['projectId'], runId: raw['runId'] } },
+    );
+  }
+
+  /*
+   * Execuções gravadas antes do congelamento de política.
+   *
+   * A ausência é normalizada para `null` explícito e NÃO é preenchida a partir
+   * do cadastro atual: inventar o snapshot aqui seria exatamente a reescrita
+   * retroativa que este campo existe para impedir. Quem precisa de limites
+   * chama `requireEffectivePolicy` e recebe `POLICY_SNAPSHOT_MISSING`.
+   */
+  const record = value as RunRecord;
+  if (record.effectivePolicy === undefined) record.effectivePolicy = null;
+  if (record.sourceSnapshots === undefined) record.sourceSnapshots = null;
+
+  return ok(record);
 }

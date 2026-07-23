@@ -117,6 +117,52 @@ export function writeArtifactSync(filePath: string, contents: string): Result<vo
   }
 }
 
+/**
+ * Cria um diretório que ainda NÃO pode existir.
+ *
+ * `ensureDir` usa `recursive: true`, que por definição suprime `EEXIST`. Para
+ * evidência append-only isso é o comportamento errado: se o número da tentativa
+ * ou da parada repetir por qualquer motivo, o sistema de arquivos coopera em
+ * silêncio com a destruição do que já estava lá. Aqui a colisão é um erro
+ * nomeado, e a execução para em vez de sobrescrever.
+ */
+export function createExclusiveDirSync(dirPath: string): Result<string> {
+  try {
+    ensureDir(path.dirname(dirPath));
+    fs.mkdirSync(dirPath, { recursive: false });
+    return ok(dirPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return fail(
+        'STATE_CORRUPT',
+        `O diretório ${dirPath} já existe. A execução foi interrompida para preservar as evidências já gravadas.`,
+        { dirPath },
+        error,
+      );
+    }
+    return fail('IO_FAILED', `Falha ao criar ${dirPath}`, { dirPath }, error);
+  }
+}
+
+/** Grava um arquivo que ainda NÃO pode existir (`O_EXCL`). */
+export function writeExclusiveSync(filePath: string, contents: string): Result<void> {
+  try {
+    ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, contents, { encoding: 'utf8', flag: 'wx' });
+    return ok(undefined);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return fail(
+        'STATE_CORRUPT',
+        `O arquivo ${filePath} já existe. A execução foi interrompida para não sobrescrever evidência.`,
+        { filePath },
+        error,
+      );
+    }
+    return fail('IO_FAILED', `Falha ao gravar ${filePath}`, { filePath }, error);
+  }
+}
+
 export function fileExists(filePath: string): boolean {
   try {
     return fs.existsSync(filePath);

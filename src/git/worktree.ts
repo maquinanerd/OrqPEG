@@ -131,6 +131,169 @@ export function findWorktreeByPath(
 }
 
 /* ------------------------------------------------------------------------- */
+/* Prova de propriedade                                                       */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Operações do Git que deixam a árvore em estado intermediário.
+ *
+ * Um merge ou cherry-pick em conflito mantém o HEAD ANEXADO à branch. Isso
+ * significa que `currentBranch` devolve exatamente o nome esperado e uma
+ * verificação baseada só na branch aprova a adoção — e então o OrqPEG passa a
+ * commitar por cima de um merge que uma pessoa deixou pela metade.
+ */
+const IN_PROGRESS_MARKERS: ReadonlyArray<{ marker: string; label: string }> = [
+  { marker: 'MERGE_HEAD', label: 'merge' },
+  { marker: 'CHERRY_PICK_HEAD', label: 'cherry-pick' },
+  { marker: 'REVERT_HEAD', label: 'revert' },
+  { marker: 'REBASE_HEAD', label: 'rebase' },
+  { marker: 'rebase-merge', label: 'rebase interativo' },
+  { marker: 'rebase-apply', label: 'rebase/am' },
+  { marker: 'BISECT_LOG', label: 'bisect' },
+];
+
+/**
+ * Detecta operação do Git incompleta dentro de um worktree.
+ *
+ * O diretório Git real é resolvido com `git rev-parse --git-path`: num worktree
+ * secundário `.git` é um ARQUIVO apontando para
+ * `<repo>/.git/worktrees/<nome>`, então procurar `<worktree>/.git/MERGE_HEAD`
+ * no sistema de arquivos não encontraria nada e a checagem passaria sempre.
+ */
+export async function detectGitOperationInProgress(
+  worktreePath: string,
+  options: GitCommandOptions = {},
+): Promise<Result<string | null>> {
+  for (const { marker, label } of IN_PROGRESS_MARKERS) {
+    const resolved = await runGitChecked(
+      worktreePath,
+      ['rev-parse', '--git-path', marker],
+      options,
+    );
+    if (!resolved.ok) return resolved;
+
+    const raw = resolved.value.stdout.trim();
+    if (raw.length === 0) continue;
+    const absolute = path.isAbsolute(raw) ? raw : path.resolve(worktreePath, raw);
+    if (fs.existsSync(absolute)) return ok(label);
+  }
+  return ok(null);
+}
+
+export interface WorktreeOwnershipInput {
+  repoDir: string;
+  /** Caminho persistido no `RunRecord`. */
+  worktreePath: string;
+  /** Caminho canônico recalculado a partir do projeto e do `runId`. */
+  canonicalPath: string;
+  /** Branch persistida no `RunRecord`. */
+  branch: string;
+  /** Raiz sob a qual worktrees deste projeto podem existir. */
+  allowedRoot: string;
+}
+
+/**
+ * Prova POSITIVA de que o worktree pertence a esta execução.
+ *
+ * Adotar um worktree sujo na retomada é correto — a sujeira é o trabalho que o
+ * OrqPEG preservou de propósito ao parar. Mas a única evidência que existia era
+ * `git -C <caminho> rev-parse --abbrev-ref HEAD`, e `git -C` responde pelo
+ * repositório que CONTÉM o diretório: a resposta certa podia vir de um worktree
+ * que não é este, ou de um diretório que nem worktree é.
+ *
+ * A regra é: worktree sujo da MESMA execução, adota; de outra, recusa.
+ */
+export async function verifyWorktreeOwnership(
+  input: WorktreeOwnershipInput,
+  options: GitCommandOptions = {},
+): Promise<Result<WorktreeInfo>> {
+  const pathCheck = validateAbsolutePath(input.worktreePath, 'caminho do worktree');
+  if (!pathCheck.ok) return pathCheck;
+  const branchCheck = validateBranchName(input.branch);
+  if (!branchCheck.ok) return branchCheck;
+
+  /* 1. Caminho canônico. Divergência significa que o registro aponta para um
+        lugar que este projeto e este runId não produziriam. */
+  if (normalizeForCompare(input.worktreePath) !== normalizeForCompare(input.canonicalPath)) {
+    return fail(
+      'WORKTREE_OWNERSHIP_MISMATCH',
+      `O registro da execução aponta para ${input.worktreePath}, mas o caminho canônico deste projeto e execução é ${input.canonicalPath}. A divergência precisa de decisão humana.`,
+      { persisted: input.worktreePath, canonical: input.canonicalPath },
+    );
+  }
+
+  /* 2. Contenção na raiz autorizada. */
+  if (!isInside(input.allowedRoot, input.worktreePath)) {
+    return fail(
+      'WORKTREE_OUTSIDE_ALLOWED_ROOT',
+      `O worktree ${input.worktreePath} está fora da raiz autorizada ${input.allowedRoot}.`,
+      { worktreePath: input.worktreePath, allowedRoot: input.allowedRoot },
+    );
+  }
+
+  /* 3. Registro no Git do repositório DO PROJETO. É isto que amarra o worktree
+        ao repositório certo — a existência da pasta não amarra a nada. */
+  const listed = await listWorktrees(input.repoDir, options);
+  if (!listed.ok) return listed;
+
+  const registered = findWorktreeByPath(listed.value, input.worktreePath);
+  if (registered === null) {
+    return fail(
+      'WORKTREE_NOT_REGISTERED',
+      `O diretório ${input.worktreePath} existe, mas não está registrado como worktree de ${input.repoDir}. Um diretório solto não é prova de propriedade e não será adotado.`,
+      { worktreePath: input.worktreePath, repoDir: input.repoDir },
+    );
+  }
+  if (registered.isMain) {
+    return fail(
+      'WORKTREE_OWNERSHIP_MISMATCH',
+      `${input.worktreePath} é o worktree principal do repositório e nunca é adotado por uma execução.`,
+      { worktreePath: input.worktreePath },
+    );
+  }
+  if (registered.isLocked) {
+    return fail(
+      'WORKTREE_OWNERSHIP_MISMATCH',
+      `O worktree ${input.worktreePath} está travado (locked) e não pode ser adotado.`,
+      { worktreePath: input.worktreePath },
+    );
+  }
+
+  /* 4. Branch. HEAD destacado é recusa explícita, não efeito colateral. */
+  if (registered.isDetached || registered.branch === null) {
+    return fail(
+      'WORKTREE_OWNERSHIP_MISMATCH',
+      `O worktree ${input.worktreePath} está com HEAD destacado; esta execução espera a branch "${input.branch}".`,
+      { worktreePath: input.worktreePath, expectedBranch: input.branch },
+    );
+  }
+  if (registered.branch !== input.branch) {
+    return fail(
+      'WORKTREE_OWNERSHIP_MISMATCH',
+      `O worktree ${input.worktreePath} está na branch "${registered.branch}", mas esta execução é da branch "${input.branch}". Worktree sujo de OUTRA execução não é adotado.`,
+      {
+        worktreePath: input.worktreePath,
+        currentBranch: registered.branch,
+        expectedBranch: input.branch,
+      },
+    );
+  }
+
+  /* 5. Nenhuma operação do Git pela metade. */
+  const inProgress = await detectGitOperationInProgress(input.worktreePath, options);
+  if (!inProgress.ok) return inProgress;
+  if (inProgress.value !== null) {
+    return fail(
+      'GIT_OPERATION_IN_PROGRESS',
+      `Há um ${inProgress.value} em andamento no worktree ${input.worktreePath}. Conclua ou aborte a operação manualmente antes de retomar: o OrqPEG não commita por cima de um estado intermediário.`,
+      { worktreePath: input.worktreePath, operation: inProgress.value },
+    );
+  }
+
+  return ok(registered);
+}
+
+/* ------------------------------------------------------------------------- */
 /* Criação                                                                    */
 /* ------------------------------------------------------------------------- */
 
@@ -251,6 +414,19 @@ export async function reuseOrCreateWorktree(
         { worktreePath },
       );
     }
+    /* Operação incompleta é diagnosticada ANTES do HEAD destacado: durante um
+       rebase o HEAD fica destacado como consequência, e reportar "HEAD
+       destacado" mandava o usuário investigar o sintoma em vez da causa. */
+    const inProgress = await detectGitOperationInProgress(worktreePath, options);
+    if (!inProgress.ok) return inProgress;
+    if (inProgress.value !== null) {
+      return fail(
+        'GIT_OPERATION_IN_PROGRESS',
+        `Há um ${inProgress.value} em andamento no worktree ${worktreePath}. Conclua ou aborte a operação manualmente: o OrqPEG não reaproveita um worktree em estado intermediário.`,
+        { worktreePath, operation: inProgress.value },
+      );
+    }
+
     if (existing.isDetached || existing.branch === null) {
       return fail(
         'WORKTREE_FAILED',

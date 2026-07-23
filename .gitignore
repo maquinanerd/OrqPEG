@@ -25,6 +25,9 @@ config/global.json
 # Editors / OS
 .vscode/
 .idea/
+# Estado local do Claude Code (configuração da máquina e worktrees efêmeras)
+.claude/settings.local.json
+.claude/worktrees/
 Thumbs.db
 desktop.ini
 .DS_Store

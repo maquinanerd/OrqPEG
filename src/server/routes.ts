@@ -6,8 +6,10 @@ import type {
   PanelHomeData,
   PanelProjectSummary,
   ProjectConfig,
+  Result,
   RunRecord,
 } from '../types';
+import { ok } from '../utils/errors';
 import { sendJson } from './http-server';
 import type { EventHub } from './events';
 import { detectAllTools } from '../agents/agent-detect';
@@ -31,6 +33,13 @@ import { nowIso } from '../utils/time';
 import { startRunInBackground } from './run-manager';
 import { openTarget } from './open-target';
 import { describeOverrides, grantManualOverride } from '../execution/override';
+import type { GrantOverrideOutput } from '../execution/override';
+import {
+  executionRelevantProjectConfigHash,
+  materializeLegacyPolicySnapshot,
+  requireEffectivePolicy,
+} from '../execution/effective-policy';
+import { withLock } from '../state/locks';
 
 /**
  * Roteador da API do painel.
@@ -93,6 +102,11 @@ export function createApiRouter(deps: RouterDeps): {
       method: 'POST',
       pattern: /^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/override$/,
       handle: handleGrantOverride,
+    },
+    {
+      method: 'POST',
+      pattern: /^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/materialize-policy$/,
+      handle: handleMaterializePolicy,
     },
     {
       method: 'GET',
@@ -389,38 +403,70 @@ async function handleGetRun(ctx: RouteContext): Promise<void> {
   if (!run) return;
 
   /*
-   * Os limites do Loop Guard acompanham a execução.
+   * Os limites vêm da POLÍTICA CONGELADA da execução, nunca do cadastro atual.
    *
-   * O painel mostra "consumido / limite" e precisa do limite REAL do projeto:
-   * exibir o padrão do produto quando o projeto configurou outro valor daria
-   * um denominador errado, e um número errado na tela é pior que número
-   * nenhum. A situação de override vem junto pelo mesmo motivo.
+   * O painel mostra "consumido / limite". Os numeradores são históricos — saem
+   * de `run.budgets` — então um denominador lido do projeto de hoje produz
+   * pares incoerentes: uma execução que rodou com teto 3 aparecia como "3 / 5"
+   * depois de alguém editar o projeto. Número errado na tela é pior que número
+   * nenhum, e é por isso que a ausência de snapshot vira uma declaração
+   * explícita em vez de um denominador inventado.
    */
-  const project = getProject(projectId);
-  const loopGuard = project.ok ? project.value.execution.loopGuard : null;
+  const policy = requireEffectivePolicy(run);
   const budget = run.currentPromptId
     ? run.budgets.find((entry) => entry.promptId === run.currentPromptId)
     : undefined;
 
+  if (!policy.ok) {
+    sendJson(ctx.res, 200, {
+      run,
+      loopGuard: null,
+      override: null,
+      policyUnavailable: {
+        code: policy.error.code,
+        title: 'POLÍTICA HISTÓRICA NÃO DISPONÍVEL',
+        message: 'Execução criada antes do snapshot de política.',
+        detail: policy.error.message,
+      },
+    });
+    return;
+  }
+
+  /*
+   * Divergência entre o cadastro de hoje e o snapshot é informação para o
+   * operador, não motivo para trocar os limites exibidos. O painel avisa que a
+   * configuração mudou; os números continuam sendo os da execução.
+   */
+  const project = getProject(projectId);
+  const currentHash = project.ok
+    ? executionRelevantProjectConfigHash(project.value)
+    : null;
+  const drifted =
+    currentHash !== null && currentHash !== policy.value.sources.projectConfigHash;
+
   sendJson(ctx.res, 200, {
     run,
-    loopGuard: loopGuard
+    loopGuard: policy.value.loopGuard,
+    policy: {
+      capturedAt: policy.value.capturedAt,
+      effectiveHash: policy.value.effectiveHash,
+      sources: policy.value.sources,
+      materializedFromLegacyRun:
+        policy.value.sourceMetadata.materializedFromLegacyRun === true,
+    },
+    projectConfigDrift: drifted
       ? {
-          ...loopGuard,
-          maxAttemptsPerPrompt: project.ok
-            ? project.value.execution.maxAttemptsPerPrompt
-            : null,
+          changed: true,
+          message:
+            'O cadastro do projeto mudou desde o início desta execução. Os limites exibidos são os que a execução realmente usou; a configuração nova só vale para execuções novas.',
         }
-      : null,
-    override:
-      loopGuard && project.ok
-        ? describeOverrides(
-            run,
-            run.currentPromptId ?? run.budgets[0]?.promptId ?? '',
-            budget ?? run.budgets[0],
-            loopGuard,
-          )
-        : null,
+      : { changed: false },
+    override: describeOverrides(
+      run,
+      run.currentPromptId ?? run.budgets[0]?.promptId ?? '',
+      budget ?? run.budgets[0],
+      policy.value.loopGuard,
+    ),
   });
 }
 
@@ -489,6 +535,41 @@ async function handleTriggerAudit(ctx: RouteContext): Promise<void> {
 }
 
 /**
+ * Executa uma mutação de execução sob lock, entregando o registro JÁ RELIDO.
+ *
+ * A ordem correta é adquirir o lock, RECARREGAR do disco, revalidar e só então
+ * gravar. Como convenção isso é frágil: um `loadRun` colocado antes do lock
+ * continua compilando, continua parecendo certo na revisão, e a suíte não
+ * consegue flagrá-lo — com lock que falha rápido, o rival sempre segura o lock
+ * durante a tentativa, o handler nem entra no callback, e ler-antes e
+ * reler-depois se tornam indistinguíveis de fora.
+ *
+ * Por isso a garantia é estrutural em vez de convencional: o callback não
+ * captura registro nenhum, ele RECEBE o que foi lido dentro do lock. Reintroduzir
+ * uma leitura obsoleta exige adicionar um `loadRun` que o callback não usa — não
+ * acontece por descuido.
+ */
+async function withRunLocked<T>(
+  input: { projectId: string; runId: string; operation: string },
+  fn: (run: RunRecord) => Promise<Result<T>>,
+): Promise<Result<Result<T>>> {
+  return withLock(
+    {
+      scope: 'run',
+      key: input.runId,
+      projectId: input.projectId,
+      runId: input.runId,
+      operation: input.operation,
+    },
+    async (): Promise<Result<T>> => {
+      const current = loadRun(input.projectId, input.runId);
+      if (!current.ok) return current;
+      return fn(current.value);
+    },
+  );
+}
+
+/**
  * Autoriza uma única tentativa adicional após uma parada branda.
  *
  * A validação inteira vive no backend de propósito. A interface esconde o botão
@@ -517,53 +598,171 @@ async function handleGrantOverride(ctx: RouteContext): Promise<void> {
     return;
   }
 
+  /* O projeto é carregado para provar identidade e existência. Nenhum limite
+     sai daqui: os limites vêm da política congelada no `RunRecord`. */
   const project = getProject(projectId);
   if (!project.ok) {
     sendJson(ctx.res, 404, { error: project.error.message });
     return;
   }
 
-  const loaded = loadRun(projectId, runId);
-  if (!loaded.ok) {
-    sendJson(ctx.res, 404, { error: loaded.error.message });
+  /*
+   * Concessão sob lock persistente. O `RunRecord` chega como PARÂMETRO, lido
+   * por `withRunLocked` já dentro do lock.
+   *
+   * A serialização do event loop do Node já impedia duas concessões dentro de
+   * um mesmo processo, mas isso era acidente e não desenho: bastava um `await`
+   * novo neste handler para reabrir a janela, e entre processos distintos
+   * (painel e CLI) o resultado era last-write-wins — uma autorização que
+   * respondeu 201 desaparecia do arquivo.
+   */
+  const outcome = await withRunLocked(
+    { projectId, runId, operation: 'manual-override' },
+    async (current): Promise<Result<GrantOverrideOutput>> => {
+      const policy = requireEffectivePolicy(current);
+      if (!policy.ok) return policy;
+
+      const granted = grantManualOverride({
+        run: current,
+        promptId: promptId.value,
+        justification: body.value.justification ?? '',
+        authorizedBy: body.value.authorizedBy ?? '',
+        policy: policy.value.loopGuard,
+      });
+      if (!granted.ok) return granted;
+
+      const saved = saveRun(granted.value.run);
+      if (!saved.ok) return saved;
+      return ok(granted.value);
+    },
+  );
+
+  if (!outcome.ok) {
+    sendJson(ctx.res, outcome.error.code === 'LOCK_HELD' ? 423 : 500, {
+      error: outcome.error.message,
+      details: outcome.error.details ?? null,
+    });
+    return;
+  }
+  if (!outcome.value.ok) {
+    const error = outcome.value.error;
+    const status =
+      error.code === 'CONFIG_NOT_FOUND'
+        ? 404
+        : error.code === 'POLICY_SNAPSHOT_MISSING'
+          ? 409
+          : error.code === 'VALIDATION_FAILED'
+            ? 409
+            : 500;
+    sendJson(ctx.res, status, { error: error.message, details: error.details ?? null });
     return;
   }
 
-  const granted = grantManualOverride({
-    run: loaded.value,
-    promptId: promptId.value,
-    justification: body.value.justification ?? '',
-    authorizedBy: body.value.authorizedBy ?? '',
-    loopGuard: project.value.execution.loopGuard,
-  });
+  const result = outcome.value.value;
+  ctx.deps.logger.warn(
+    `Override manual autorizado para ${projectId}/${runId}/${promptId.value}: ` +
+      `gatilho ${result.override.trigger}, por ${result.override.authorizedBy}.`,
+  );
+  ctx.deps.events.publishRun(result.run, 'Tentativa adicional autorizada manualmente.');
 
-  if (!granted.ok) {
-    // 409: o pedido é sintaticamente válido, mas o estado não o permite.
-    sendJson(ctx.res, 409, {
-      error: granted.error.message,
-      details: granted.error.details ?? null,
+  sendJson(ctx.res, 201, {
+    granted: true,
+    override: result.override,
+    note:
+      'A autorização vale para UMA tentativa e será consumida ao ser usada. ' +
+      'Retome a execução para exercê-la.',
+  });
+}
+
+/**
+ * Materializa uma política para uma execução criada antes do congelamento.
+ *
+ * Não é reconstrução histórica, e a resposta diz isso explicitamente: a
+ * política original daquela execução se perdeu, e o que se congela aqui é o
+ * cadastro de hoje. Existe para que trabalho preservado não fique inacessível
+ * para sempre — exige confirmação escrita justamente porque o resultado é uma
+ * aproximação declarada, não um registro recuperado.
+ */
+async function handleMaterializePolicy(ctx: RouteContext): Promise<void> {
+  const projectId = requireId(ctx, 0);
+  if (projectId === null) return;
+  const runId = requireId(ctx, 1);
+  if (runId === null) return;
+
+  const body = await readJsonBody<{ confirm?: boolean; confirmedBy?: string }>(ctx.req);
+  if (!body.ok) {
+    sendJson(ctx.res, 400, { error: body.error.message });
+    return;
+  }
+  if (body.value.confirm !== true) {
+    sendJson(ctx.res, 400, {
+      error:
+        'É preciso confirmar explicitamente (confirm: true). O snapshot materializado é o cadastro de hoje, não a política sob a qual esta execução realmente rodou.',
     });
     return;
   }
 
-  const saved = saveRun(granted.value.run);
-  if (!saved.ok) {
-    sendJson(ctx.res, 500, { error: saved.error.message });
+  const project = getProject(projectId);
+  if (!project.ok) {
+    sendJson(ctx.res, 404, { error: project.error.message });
+    return;
+  }
+
+  const outcome = await withRunLocked(
+    { projectId, runId, operation: 'materialize-policy' },
+    async (current): Promise<Result<RunRecord>> => {
+      const materialized = materializeLegacyPolicySnapshot({
+        run: current,
+        globalConfig: ctx.deps.config,
+        projectConfig: project.value,
+        confirmedBy: body.value.confirmedBy ?? '',
+      });
+      if (!materialized.ok) return materialized;
+
+      const updated: RunRecord = {
+        ...current,
+        effectivePolicy: materialized.value,
+        sourceSnapshots: current.sourceSnapshots ?? {
+          promptHashes: {},
+          promptSetHash: '',
+          /* Herda os hashes antigos quando existirem; ausência vira string
+             vazia, que desliga a comparação em vez de inventar divergência. */
+          projectContextHash: current.projectContextHash ?? '',
+          projectConfigHash:
+            current.projectConfigHash ?? materialized.value.sources.projectConfigHash,
+          roundConfigHash: null,
+        },
+      };
+      const saved = saveRun(updated);
+      if (!saved.ok) return saved;
+      return ok(updated);
+    },
+  );
+
+  if (!outcome.ok) {
+    sendJson(ctx.res, outcome.error.code === 'LOCK_HELD' ? 423 : 500, {
+      error: outcome.error.message,
+    });
+    return;
+  }
+  if (!outcome.value.ok) {
+    sendJson(ctx.res, outcome.value.error.code === 'CONFIG_NOT_FOUND' ? 404 : 409, {
+      error: outcome.value.error.message,
+    });
     return;
   }
 
   ctx.deps.logger.warn(
-    `Override manual autorizado para ${projectId}/${runId}/${promptId.value}: ` +
-      `gatilho ${granted.value.override.trigger}, por ${granted.value.override.authorizedBy}.`,
+    `Política legada materializada para ${projectId}/${runId} por ` +
+      `${outcome.value.value.effectivePolicy?.sourceMetadata.materializedBy ?? 'operador local'}.`,
   );
-  ctx.deps.events.publishRun(granted.value.run, 'Tentativa adicional autorizada manualmente.');
+  ctx.deps.events.publishRun(outcome.value.value, 'Política legada materializada.');
 
-  sendJson(ctx.res, 201, {
-    granted: true,
-    override: granted.value.override,
-    note:
-      'A autorização vale para UMA tentativa e será consumida ao ser usada. ' +
-      'Retome a execução para exercê-la.',
+  sendJson(ctx.res, 200, {
+    materialized: true,
+    warning:
+      'Snapshot capturado APÓS o início da execução. Não representa necessariamente a política original desta execução.',
+    policy: outcome.value.value.effectivePolicy,
   });
 }
 

@@ -37,6 +37,8 @@ const HARD_STOP_TRIGGERS: ReadonlySet<LoopGuardTrigger> = new Set<LoopGuardTrigg
   'FORBIDDEN_AREA_CHANGED',
   'PROMPT_CHANGED_DURING_RUN',
   'PROJECT_CONTEXT_CHANGED',
+  'PROJECT_CONFIG_CHANGED',
+  'POLICY_SNAPSHOT_MISSING',
   'INCOMPLETE_REVIEW_EVIDENCE',
   'SCOPE_VIOLATION',
   'DIFF_BUDGET_EXCEEDED',
@@ -305,11 +307,19 @@ function firstMutationFinding(input: LoopGuardInput): Finding | null {
         },
       };
     }
+    /*
+     * Mutação de configuração tem gatilho próprio.
+     *
+     * Reaproveitar `PROJECT_CONTEXT_CHANGED` escondia a causa: quem lia o
+     * relatório procurava PROJECT-CONTEXT.md e encontrava um arquivo intacto.
+     * A política congelada continua valendo — este gatilho para a execução,
+     * nunca troca os limites que ela já vinha usando.
+     */
     if (input.configHashSnapshot !== '' && input.configHashNow !== input.configHashSnapshot) {
       return {
-        trigger: 'PROJECT_CONTEXT_CHANGED',
+        trigger: 'PROJECT_CONFIG_CHANGED',
         reason:
-          'A configuração do projeto mudou durante a execução (desconsiderados os campos de data).',
+          'O cadastro do projeto foi alterado durante a execução (desconsiderados os campos de data e os puramente visuais). A execução continua regida pela política congelada no início; para usar a configuração nova, inicie uma execução nova.',
         evidence: {
           configHashSnapshot: input.configHashSnapshot,
           configHashNow: input.configHashNow,

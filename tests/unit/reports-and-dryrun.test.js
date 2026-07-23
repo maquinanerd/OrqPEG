@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createRunInput } = require('../helpers/policy');
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'orqpeg-rep-'));
 process.env.ORQPEG_HOME = HOME;
@@ -40,13 +41,11 @@ function makeProject() {
 }
 
 function makeRun(project) {
-  let run = createRun({
-    projectId: project.id,
-    dryRun: false,
-    prompts: [
+  let run = createRun(
+    createRunInput(project, [
       { id: '010-a', name: 'Fundação', fileName: '010-a.md', absolutePath: 'x', order: 10, sizeBytes: 1 },
-    ],
-  });
+    ]),
+  );
   run = updatePromptProgress(run, '010-a', { status: 'APPROVED', commitSha: 'abc1234def56' });
   return {
     ...run,
