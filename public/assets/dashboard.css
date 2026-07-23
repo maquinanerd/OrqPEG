@@ -1318,6 +1318,27 @@ body {
   color: var(--fig-text-muted);
 }
 
+/* Estado da execução: pausada, aguardando aprovação, concluída, falha,
+   desconectada. Cada um usa o acento que já significa aquilo no sistema. */
+.run-status {
+  display: flex;
+  align-items: center;
+  gap: var(--fig-space-3);
+  margin: 0 0 var(--fig-space-8);
+  padding: var(--fig-space-5) var(--fig-space-8);
+  border-radius: var(--fig-radius-lg);
+  background: var(--fig-surface);
+  box-shadow: inset var(--fig-space-1) 0 0 0 var(--fig-text-muted);
+  font-size: var(--fig-size-md);
+  font-weight: var(--fig-weight-medium);
+}
+
+.run-status[data-kind='paused'] { box-shadow: inset var(--fig-space-1) 0 0 0 var(--fig-cyan); }
+.run-status[data-kind='waiting'] { box-shadow: inset var(--fig-space-1) 0 0 0 var(--fig-lavender); }
+.run-status[data-kind='completed'] { box-shadow: inset var(--fig-space-1) 0 0 0 var(--fig-lime); }
+.run-status[data-kind='failed'] { box-shadow: inset var(--fig-space-1) 0 0 0 var(--fig-coral); }
+.run-status[data-kind='disconnected'] { box-shadow: inset var(--fig-space-1) 0 0 0 var(--fig-coral); }
+
 .sidebar .state-note { color: var(--fig-text-muted); }
 .state-note--error { color: var(--fig-coral); }
 .state-note--onaccent { color: var(--fig-ink); opacity: 0.72; }

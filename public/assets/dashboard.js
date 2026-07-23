@@ -929,7 +929,92 @@
       });
   }
 
+  /* ----------------------------------------------------------------------
+     15b. Estados explícitos da execução
+
+     O Figma desenhava um único estado feliz. O domínio tem oito que o operador
+     precisa distinguir, e cada um muda o que ele pode fazer.
+     ---------------------------------------------------------------------- */
+
+  var RUN_STATUS = {
+    paused: {
+      kind: 'paused',
+      text: 'Execução pausada. O estado está preservado; use "Retomar" para continuar.',
+    },
+    waiting: {
+      kind: 'waiting',
+      text: 'Aguardando decisão humana. A execução parou de propósito e não avança sozinha.',
+    },
+    completed: {
+      kind: 'completed',
+      text: 'Execução concluída.',
+    },
+    failed: {
+      kind: 'failed',
+      text: 'Execução encerrada com falha. O erro está registrado na linha do tempo.',
+    },
+    running: null,
+    idle: null,
+  };
+
+  function runStatusOf(run) {
+    if (!run) return 'idle';
+    if (run.pauseRequested || run.state === 'INTERRUPTED') return 'paused';
+    if (AWAITING_HUMAN[run.state]) return 'waiting';
+    if (run.state === 'COMPLETED' || run.state === 'MERGED') return 'completed';
+    if (run.state === 'FAILED' || run.state === 'CANCELLED') return 'failed';
+    return 'running';
+  }
+
+  function renderRunStatus(run) {
+    var box = $('run-status');
+
+    /* Desconexão vence qualquer estado da execução: com o transporte fora, o
+       que está na tela pode já estar velho, e isso precisa ser dito. */
+    if (state.transport === 'down') {
+      box.dataset.kind = 'disconnected';
+      box.textContent =
+        'Sem conexão com o servidor. Os dados exibidos podem estar desatualizados.';
+      show(box, true);
+      return;
+    }
+
+    var status = RUN_STATUS[runStatusOf(run)];
+    if (!status) {
+      show(box, false);
+      return;
+    }
+
+    box.dataset.kind = status.kind;
+    box.textContent = status.text;
+    show(box, true);
+  }
+
+  /** Esqueletos de carregamento — marcam o espaço antes do primeiro dado. */
+  function renderLoading() {
+    var list = $('project-list');
+    clear(list);
+    for (var i = 0; i < 3; i += 1) {
+      var item = document.createElement('li');
+      item.appendChild(el('div', 'skeleton skeleton--card'));
+      item.setAttribute('aria-hidden', 'true');
+      list.appendChild(item);
+    }
+
+    var timeline = $('timeline');
+    clear(timeline);
+    for (var j = 0; j < 3; j += 1) {
+      var event = document.createElement('li');
+      event.appendChild(el('div', 'skeleton skeleton--event'));
+      event.setAttribute('aria-hidden', 'true');
+      timeline.appendChild(event);
+    }
+
+    announce('Carregando dados do painel.');
+  }
+
   function renderRun(run) {
+    renderRunStatus(run);
     renderTimeline(run);
     renderConsole(run);
     renderGovernance(run);
@@ -977,9 +1062,24 @@
       loadHome();
     });
 
-    document.querySelectorAll('.tab').forEach(function (tab) {
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+    tabs.forEach(function (tab, index) {
       tab.addEventListener('click', function () {
         activateTab(tab.dataset.view);
+      });
+
+      /* Padrão WAI-ARIA de abas: setas navegam, Home/End vão às pontas, e só a
+         aba selecionada fica na ordem de tabulação (tabindex móvel). */
+      tab.addEventListener('keydown', function (event) {
+        var target = null;
+        if (event.key === 'ArrowRight') target = tabs[(index + 1) % tabs.length];
+        else if (event.key === 'ArrowLeft') target = tabs[(index - 1 + tabs.length) % tabs.length];
+        else if (event.key === 'Home') target = tabs[0];
+        else if (event.key === 'End') target = tabs[tabs.length - 1];
+        if (!target) return;
+        event.preventDefault();
+        activateTab(target.dataset.view);
+        target.focus();
       });
     });
 
@@ -1267,7 +1367,35 @@
     });
 
     document.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape' && !$('confirm-dialog').hidden) closeDialog();
+      var dialog = $('confirm-dialog');
+      if (dialog.hidden) return;
+
+      if (event.key === 'Escape') {
+        closeDialog();
+        return;
+      }
+
+      /* Aprisiona o foco: um diálogo modal que deixa tabular para trás da
+         cortina é modal só visualmente. */
+      if (event.key !== 'Tab') return;
+
+      var focusable = Array.prototype.slice
+        .call(dialog.querySelectorAll('button, input, a[href], select, textarea'))
+        .filter(function (node) {
+          return !node.disabled && node.offsetParent !== null;
+        });
+      if (focusable.length === 0) return;
+
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     });
   }
 
@@ -1304,6 +1432,9 @@
     $('console-dot').dataset.live = CONSOLE_LIVE[status] || 'false';
     $('console-status').textContent = TRANSPORT_TEXT[status] || status;
 
+    /* Queda do transporte muda o que a tela significa, não só o indicador. */
+    renderRunStatus(state.run);
+
     announce('Transporte: ' + (TRANSPORT_TEXT[status] || status) + '.');
   }
 
@@ -1335,6 +1466,7 @@
     wireEvents();
     wireDialog();
     activateTab('resumo');
+    renderLoading();
     loadHome();
 
     if (window.OrqEventStream) {
